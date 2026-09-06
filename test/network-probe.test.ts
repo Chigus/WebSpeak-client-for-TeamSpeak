@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collectTeamSpeakPings, pingTeamSpeakSession, summarizeTeamSpeakPings } from "../src/server/network-probe.js";
+import { collectTeamSpeakPings, pingTeamSpeakHost, pingTeamSpeakSession, summarizeTeamSpeakPings } from "../src/server/network-probe.js";
 
 test("TeamSpeak latency probe uses the protocol command channel", async () => {
   let command = "";
@@ -48,4 +48,28 @@ test("TeamSpeak ping summary reports complete loss without fake latency", () => 
     samples: [],
     errorCode: "UNREACHABLE",
   });
+});
+
+test("admin host ping measures the route without opening a TeamSpeak client", async () => {
+  const calls: Array<[string, number]> = [];
+  let attempt = 0;
+  const result = await pingTeamSpeakHost("203.0.113.10", {
+    attempts: 4,
+    timeoutMs: 900,
+    execute: async (host, timeoutMs) => {
+      calls.push([host, timeoutMs]);
+      attempt += 1;
+      if (attempt === 3) throw new Error("ping timeout");
+      return attempt * 2;
+    },
+  });
+  assert.deepEqual(calls, [
+    ["203.0.113.10", 900],
+    ["203.0.113.10", 900],
+    ["203.0.113.10", 900],
+    ["203.0.113.10", 900],
+  ]);
+  assert.equal(result.ok, true);
+  assert.equal(result.packetLossPercent, 25);
+  assert.equal(result.latencyMs, 4);
 });
