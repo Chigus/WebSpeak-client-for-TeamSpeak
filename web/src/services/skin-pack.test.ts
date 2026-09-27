@@ -123,7 +123,7 @@ test("the ILLUSIA visual-only example imports without replacing WebSpeak's base 
   const skin = await importSkinPack(new File([bytes], "illusia-voice.wskin", { type: "application/octet-stream" }));
   assert.equal(skin.id, "community.illusia-voice");
   assert.equal(skin.name, "ILLUSIA风");
-  assert.equal(skin.version, "1.0.25");
+  assert.equal(skin.version, "1.0.26");
   assert.equal(skin.contentData, undefined);
   assert.equal(skin.previewBlob?.type, "image/webp");
   assert.ok(skin.assets["assets/background-composite.webp"]);
