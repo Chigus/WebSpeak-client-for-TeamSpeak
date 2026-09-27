@@ -369,8 +369,8 @@
 
 [data-ws-part="voice.activity.artwork"] {
   background-image: url("assets/banner-character-main.webp");
-  background-position: right 34% center;
-  background-size: auto 320px;
+  background-position: right 16px bottom 8px;
+  background-size: auto 150px;
   filter: drop-shadow(0 18px 22px rgba(30, 113, 134, .2));
 }
 
@@ -810,8 +810,8 @@
   }
 
   [data-ws-part="voice.activity.artwork"] {
-    background-position: right 28% center;
-    background-size: auto 280px;
+    background-position: right 12px bottom 6px;
+    background-size: auto 118px;
   }
 
   [data-ws-part="voice.chat.empty"][data-ws-state="messages-empty"] {

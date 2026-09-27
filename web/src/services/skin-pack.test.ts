@@ -123,7 +123,7 @@ test("the ILLUSIA visual-only example imports without replacing WebSpeak's base 
   const skin = await importSkinPack(new File([bytes], "illusia-voice.wskin", { type: "application/octet-stream" }));
   assert.equal(skin.id, "community.illusia-voice");
   assert.equal(skin.name, "ILLUSIA风");
-  assert.equal(skin.version, "1.0.26");
+  assert.equal(skin.version, "1.0.27");
   assert.equal(skin.contentData, undefined);
   assert.equal(skin.previewBlob?.type, "image/webp");
   assert.ok(skin.assets["assets/background-composite.webp"]);
@@ -154,7 +154,8 @@ test("the ILLUSIA visual-only example imports without replacing WebSpeak's base 
   assert.match(skin.css, /voice\.activity[\s\S]*?wskin-asset:assets%2Fbanner-character-main\.webp/);
   assert.match(skin.css, /voice\.activity\.artwork[\s\S]*?wskin-asset:assets%2Fbanner-character-main\.webp/);
   assert.match(skin.css, /data-ws-part="voice\.activity"\]\s*\{[^}]*border-color:\s*rgba\(113, 211, 222, \.62\);[^}]*border-radius:\s*24px;[^}]*background-image:[\s\S]*?bg-room-main\.webp[^}]*backdrop-filter:\s*blur\(10px\)/);
-  assert.match(skin.css, /voice\.activity\.artwork[^{}]*\{[^}]*background-position:\s*right 34% center;[^}]*background-size:\s*auto 320px;[^}]*filter:\s*drop-shadow\(0 18px 22px/);
+  assert.match(skin.css, /voice\.activity\.artwork[^{}]*\{[^}]*background-position:\s*right 16px bottom 8px;[^}]*background-size:\s*auto 150px;[^}]*filter:\s*drop-shadow\(0 18px 22px/);
+  assert.match(skin.css, /@media \(max-width: 1100px\)[\s\S]*?voice\.activity\.artwork[^{}]*\{[^}]*background-position:\s*right 12px bottom 6px;[^}]*background-size:\s*auto 118px/);
   assert.doesNotMatch(skin.css, /voice\.chat\.empty[^{}]*data-ws-state="messages-empty"\]\s*> :first-child/);
   assert.match(skin.css, /data-ws-part="voice\.channel-group"\]\s*\{[^}]*border-color:\s*rgba\(8, 126, 134, \.32\)/);
   assert.match(skin.css, /data-ws-part="voice\.channel-group"\]\[data-ws-state="current"\]\s*\{[^}]*border-color:\s*rgba\(8, 126, 134, \.48\)/);
