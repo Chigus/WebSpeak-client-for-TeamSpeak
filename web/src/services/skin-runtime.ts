@@ -29,7 +29,7 @@ export async function activateStoredSkin(): Promise<InstalledSkin | null> {
   return activateSkin(selectedId);
 }
 
-export async function activateSkin(id: string, expectedVersion?: string, appVersion = "0.2.5-preview"): Promise<InstalledSkin | null> {
+export async function activateSkin(id: string, expectedVersion?: string, appVersion = "0.2.5"): Promise<InstalledSkin | null> {
   if (id === BUILTIN_LIGHT_SKIN || id === BUILTIN_DARK_SKIN) {
     clearCustomSkinStyle();
     applyTheme(id === BUILTIN_DARK_SKIN ? "dark" : "light");

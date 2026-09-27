@@ -40,7 +40,7 @@ assets/brand.woff2            # 可选：自带字体
   "description": "A visual-only art skin using the WebSpeak interface translations.",
   "entry": "skin.css",
   "preview": "assets/background-composite.webp",
-  "minAppVersion": "0.2.5-preview"
+  "minAppVersion": "0.2.5"
 }
 ```
 
