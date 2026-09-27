@@ -86,15 +86,11 @@
 [data-ws-part="skin.option"][data-ws-skin-id="community.illusia-voice"][role="option"] {
   color: #075e68;
   border-color: rgba(82, 195, 204, .46);
-  background-color: rgba(232, 252, 253, .94);
-  background-image:
-    url("assets/visitor-avatar.webp"),
-    linear-gradient(105deg, rgba(245, 255, 255, .96), rgba(196, 244, 246, .82));
-  background-position: right 2px center, center;
-  background-repeat: no-repeat;
-  background-size: 42px 42px, 100% 100%;
+  background-image: linear-gradient(112deg, rgba(255, 255, 255, .96), rgba(225, 250, 249, .96), rgba(188, 241, 237, .94), rgba(255, 255, 255, .96));
+  background-position: 0% 50%;
+  background-size: 240% 100%;
   box-shadow: 0 4px 14px rgba(30, 170, 184, .17), inset 0 0 0 1px rgba(255, 255, 255, .86);
-  animation: illusia-option-shimmer 5s ease-in-out infinite alternate;
+  animation: illusia-option-gradient 8s ease-in-out infinite alternate;
 }
 
 [data-ws-part="skin.option"][data-ws-skin-id="community.illusia-voice"][role="option"] > :first-child {
@@ -107,15 +103,14 @@
 [data-ws-part="skin.option"][data-ws-skin-id="community.illusia-voice"][role="option"][aria-selected="true"] {
   color: #056e76;
   border-color: rgba(44, 186, 197, .7);
-  background-image:
-    url("assets/visitor-avatar.webp"),
-    linear-gradient(105deg, rgba(250, 255, 255, .98), rgba(170, 236, 241, .9));
+  background-image: linear-gradient(112deg, #faffff 0%, #c8f5f1 36%, #82e2dc 70%, #d9fbf8 100%);
+  background-position: 100% 50%;
   box-shadow: 0 5px 18px rgba(30, 170, 184, .23), inset 0 0 0 1px rgba(255, 255, 255, .94);
 }
 
-@keyframes illusia-option-shimmer {
-  from { background-position: right 2px center, center; }
-  to { background-position: right 7px center, center; }
+@keyframes illusia-option-gradient {
+  from { background-position: 0% 50%; }
+  to { background-position: 100% 50%; }
 }
 
 [data-ws-part="language.trigger"][aria-haspopup="listbox"] {

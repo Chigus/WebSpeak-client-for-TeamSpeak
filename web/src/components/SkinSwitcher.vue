@@ -142,24 +142,46 @@ onUnmounted(() => document.removeEventListener("pointerdown", onDocumentPointerD
   min-height: 36px;
   padding: 0 9px;
   color: #123849;
-  background: rgba(255, 255, 255, .62);
-  border: 1px solid rgba(255, 255, 255, .5);
+  background: linear-gradient(112deg, rgba(255, 255, 255, .96), rgba(225, 250, 249, .96), rgba(188, 241, 237, .94), rgba(255, 255, 255, .96));
+  background-size: 240% 100%;
+  border: 1px solid rgba(139, 218, 216, .46);
   border-radius: 7px;
   font: inherit;
   font-size: 11px;
   text-align: left;
   cursor: pointer;
+  animation: skin-option-gradient 8s ease-in-out infinite alternate;
+  transition: color .18s, border-color .18s, box-shadow .18s, background-position .4s ease;
 }
 
 .skin-option > .ui-icon:first-child { color: #64858a; }
 .skin-option > .ui-icon:last-child { margin-left: auto; color: #087e86; }
 .skin-option:hover,
-.skin-option:focus-visible,
-.skin-option.selected {
+.skin-option:focus-visible {
   color: #087e86;
-  background: rgba(211, 245, 248, .92);
-  border-color: rgba(71, 201, 212, .42);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .82);
+  border-color: rgba(57, 195, 193, .74);
+  background-position: 100% 50%;
+  box-shadow: 0 4px 13px rgba(43, 179, 181, .16), inset 0 0 0 1px rgba(255, 255, 255, .84);
+}
+
+.skin-option.selected {
+  color: #056f73;
+  border-color: rgba(44, 183, 181, .78);
+  background-image: linear-gradient(112deg, #faffff 0%, #c8f5f1 36%, #82e2dc 70%, #d9fbf8 100%);
+  background-position: 100% 50%;
+  box-shadow: 0 5px 16px rgba(37, 170, 171, .22), inset 0 0 0 1px rgba(255, 255, 255, .94), inset 0 -1px 0 rgba(31, 164, 163, .12);
+}
+
+.skin-option.selected > .ui-icon:first-child,
+.skin-option.selected > .ui-icon:last-child { color: #087e86; }
+
+@keyframes skin-option-gradient {
+  from { background-position: 0% 50%; }
+  to { background-position: 100% 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skin-option { animation: none; }
 }
 
 @media (max-width: 520px) {

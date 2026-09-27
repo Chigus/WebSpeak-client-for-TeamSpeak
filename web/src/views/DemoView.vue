@@ -37,12 +37,13 @@ import Icon from "../components/Icon.vue";
 import LanguageSwitcher from "../components/LanguageSwitcher.vue";
 import SkinSwitcher, { type SkinOption } from "../components/SkinSwitcher.vue";
 import { listInstalledSkins, loadLocalPreferences, saveLocalPreferences } from "../services/local-persistence.js";
-import { getPublicDefaultSkinId, isPublicSkinEnabled, listPublicSkins, type SkinCatalogEntry } from "../services/skin-catalog.js";
+import { BUILTIN_ILLUSIA_SKIN_ID, getPublicDefaultSkinId, isPublicSkinEnabled, listPublicSkins, type SkinCatalogEntry } from "../services/skin-catalog.js";
 import { activateSkin, BUILTIN_DARK_SKIN, BUILTIN_LIGHT_SKIN, getStoredSkinId } from "../services/skin-runtime.js";
 import type { InstalledSkin } from "../services/skin-pack.js";
 import { getStoredTheme, isDarkTheme } from "../services/theme.js";
 
 type Language = "zh" | "en" | "de" | "ru" | "ja";
+const illusiaSkinLabels: Record<Language, string> = { zh: "ILLUSIA 风", en: "ILLUSIA style", de: "ILLUSIA-Stil", ru: "Стиль ILLUSIA", ja: "ILLUSIA スタイル" };
 interface DemoMessage { id: number; author: string; time: string; text: string; zhText?: string; enText?: string; ruText?: string; jaText?: string; mine: boolean }
 type Tab = "channel" | "server";
 const storedLanguage = localStorage.getItem("webspeak:language");
@@ -57,7 +58,7 @@ const catalogSkins = ref<SkinCatalogEntry[]>([]);
 const skinOptions = computed<SkinOption[]>(() => [
   ...catalogSkins.value.map((skin) => ({
     value: skin.id,
-    label: skin.id === BUILTIN_LIGHT_SKIN ? copy.value.skinDay : skin.id === BUILTIN_DARK_SKIN ? copy.value.skinNight : skin.name,
+    label: skin.id === BUILTIN_LIGHT_SKIN ? copy.value.skinDay : skin.id === BUILTIN_DARK_SKIN ? copy.value.skinNight : skin.id === BUILTIN_ILLUSIA_SKIN_ID ? illusiaSkinLabels[language.value] : skin.name,
     icon: skin.id === BUILTIN_LIGHT_SKIN ? "sun" : skin.id === BUILTIN_DARK_SKIN ? "moon" : "compass",
   })),
   ...installedSkins.value.filter((skin) => !catalogSkins.value.some((item) => item.id === skin.id) && isPublicSkinEnabled(skin.id)).map((skin) => ({ value: skin.id, label: skin.name, icon: "compass" })),
