@@ -154,6 +154,7 @@ interface WebClientEntry {
   audio: AudioFlowStats;
   webrtc: WebRtcAudioSession | null;
   lastLatencyProbeAt: number;
+  lastAudioStatsProbeAt: number;
   connectionFailureCode?: string;
   screenPeerId: string;
 }
@@ -296,6 +297,7 @@ export class VoiceBridge {
         audio: createAudioFlowStats(),
         webrtc: null,
         lastLatencyProbeAt: 0,
+        lastAudioStatsProbeAt: 0,
         screenPeerId: entryId,
       };
       this.entries.set(entryId, entry!);
@@ -1730,6 +1732,8 @@ async function handleCommand(
   sendJson: (message: Record<string, unknown>) => void,
 ): Promise<void> {
   if (command.type === "latencyProbe") {
+    // Keep the control-path probe for already-open older browser clients. The
+    // current voice status panel exclusively requests actual audio counters.
     const sequence = command.payload.sequence as string;
     const now = Date.now();
     if (now - entry.lastLatencyProbeAt < 150) return;
@@ -1743,6 +1747,19 @@ async function handleCommand(
       teamSpeakLatencyMs: result.latencyMs,
       teamSpeakReachable: result.ok,
       teamSpeakErrorCode: result.errorCode ?? null,
+    });
+    return;
+  }
+
+  if (command.type === "audioStatsProbe") {
+    const sequence = command.payload.sequence as string;
+    const now = Date.now();
+    if (now - entry.lastAudioStatsProbeAt < 750) return;
+    entry.lastAudioStatsProbeAt = now;
+    sendJson({
+      type: "audioStats",
+      sequence,
+      stats: snapshotAudioStatus(entry),
     });
     return;
   }
@@ -2040,6 +2057,33 @@ function snapshotAudioStats(entry: WebClientEntry): AudioFlowStats {
   const webRtcStats: WebRtcAudioStats | undefined = entry.webrtc?.getStats();
   if (webRtcStats) Object.assign(stats, webRtcStats);
   return stats;
+}
+
+function snapshotAudioStatus(entry: WebClientEntry): Record<string, number | string | null> {
+  const stats = snapshotAudioStats(entry);
+  return {
+    transport: entry.webrtc ? "webrtc" : "websocket",
+    ingressFrames: stats.ingressFrames,
+    ingressDroppedFrames: stats.ingressDroppedFrames,
+    ingressMaxGapMs: stats.ingressMaxGapMs,
+    tsSendFrames: stats.tsSendFrames,
+    tsSendErrors: stats.tsSendErrors,
+    tsSendMaxGapMs: stats.tsSendMaxGapMs,
+    tsReceiveFrames: stats.tsReceiveFrames,
+    tsReceiveMaxGapMs: stats.tsReceiveMaxGapMs,
+    egressFrames: stats.egressFrames,
+    egressDroppedFrames: stats.egressDroppedFrames,
+    egressMaxGapMs: stats.egressMaxGapMs,
+    webrtcIngressRtpFrames: stats.webrtcIngressRtpFrames,
+    webrtcIngressRtpMaxGapMs: stats.webrtcIngressRtpMaxGapMs,
+    webrtcEgressRtpFrames: stats.webrtcEgressRtpFrames,
+    webrtcEgressRtpMaxGapMs: stats.webrtcEgressRtpMaxGapMs,
+    webrtcQueueDroppedFrames: stats.webrtcQueueDroppedFrames,
+    webrtcQueueUnderrunTicks: stats.webrtcQueueUnderrunTicks,
+    webrtcPacerLateTicks: stats.webrtcPacerLateTicks,
+    webrtcIngressDecodeErrors: stats.webrtcIngressDecodeErrors,
+    webrtcDownlinkDecodeErrors: stats.webrtcDownlinkDecodeErrors,
+  };
 }
 
 function mapChannelTree(snapshot: TSDirectorySnapshot, avatarCache = new Map<string, string | null>()): unknown[] {

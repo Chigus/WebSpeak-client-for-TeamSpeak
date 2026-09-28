@@ -201,11 +201,55 @@ export interface ServerEvent {
   timestamp: number;
 }
 
-export interface LatencyProbeResult {
-  browserRttMs: number;
-  teamSpeakLatencyMs: number | null;
-  teamSpeakReachable: boolean;
-  teamSpeakErrorCode?: string;
+export interface VoiceAudioBridgeStats {
+  transport: "webrtc" | "websocket";
+  ingressFrames: number;
+  ingressDroppedFrames: number;
+  ingressMaxGapMs: number;
+  tsSendFrames: number;
+  tsSendErrors: number;
+  tsSendMaxGapMs: number;
+  tsReceiveFrames: number;
+  tsReceiveMaxGapMs: number;
+  egressFrames: number;
+  egressDroppedFrames: number;
+  egressMaxGapMs: number;
+  webrtcIngressRtpFrames: number;
+  webrtcIngressRtpMaxGapMs: number;
+  webrtcEgressRtpFrames: number;
+  webrtcEgressRtpMaxGapMs: number;
+  webrtcQueueDroppedFrames: number;
+  webrtcQueueUnderrunTicks: number;
+  webrtcPacerLateTicks: number;
+  webrtcIngressDecodeErrors: number;
+  webrtcDownlinkDecodeErrors: number;
+}
+
+export interface BrowserVoiceAudioStats {
+  outboundBytes: number | null;
+  outboundPackets: number | null;
+  outboundPacketsLost: number | null;
+  outboundLossPercent: number | null;
+  outboundRttMs: number | null;
+  inboundBytes: number | null;
+  inboundPackets: number | null;
+  inboundPacketsLost: number | null;
+  inboundLossPercent: number | null;
+  inboundJitterMs: number | null;
+  concealedSamples: number | null;
+}
+
+export interface VoiceAudioStatusSample {
+  sampledAt: number;
+  transport: "webrtc" | "websocket" | "negotiating" | "disconnected";
+  connectionState: string | null;
+  microphoneMuted: boolean;
+  microphoneReady: boolean;
+  microphonePermission: AudioPermission;
+  playbackState: "playing" | "paused" | "unavailable" | null;
+  bridge: VoiceAudioBridgeStats;
+  browser: BrowserVoiceAudioStats | null;
+  fallbackPlayback: { framesReceived: number; framesDropped: number; decodeErrors: number };
 }
 
 const MAX_VISIBLE_ERROR_CODE_LENGTH = 64;
@@ -226,6 +270,38 @@ function safeClientErrorCode(value: unknown): string {
     .replace(/[^A-Z0-9_-]+/g, "_")
     .replace(/^_+|_+$/g, "");
   return normalized.slice(0, MAX_VISIBLE_ERROR_CODE_LENGTH);
+}
+
+function parseVoiceAudioBridgeStats(value: unknown): VoiceAudioBridgeStats | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const readCount = (key: string): number => {
+    const candidate = record[key];
+    return typeof candidate === "number" && Number.isFinite(candidate) && candidate >= 0 ? candidate : 0;
+  };
+  return {
+    transport: record.transport === "webrtc" ? "webrtc" : "websocket",
+    ingressFrames: readCount("ingressFrames"),
+    ingressDroppedFrames: readCount("ingressDroppedFrames"),
+    ingressMaxGapMs: readCount("ingressMaxGapMs"),
+    tsSendFrames: readCount("tsSendFrames"),
+    tsSendErrors: readCount("tsSendErrors"),
+    tsSendMaxGapMs: readCount("tsSendMaxGapMs"),
+    tsReceiveFrames: readCount("tsReceiveFrames"),
+    tsReceiveMaxGapMs: readCount("tsReceiveMaxGapMs"),
+    egressFrames: readCount("egressFrames"),
+    egressDroppedFrames: readCount("egressDroppedFrames"),
+    egressMaxGapMs: readCount("egressMaxGapMs"),
+    webrtcIngressRtpFrames: readCount("webrtcIngressRtpFrames"),
+    webrtcIngressRtpMaxGapMs: readCount("webrtcIngressRtpMaxGapMs"),
+    webrtcEgressRtpFrames: readCount("webrtcEgressRtpFrames"),
+    webrtcEgressRtpMaxGapMs: readCount("webrtcEgressRtpMaxGapMs"),
+    webrtcQueueDroppedFrames: readCount("webrtcQueueDroppedFrames"),
+    webrtcQueueUnderrunTicks: readCount("webrtcQueueUnderrunTicks"),
+    webrtcPacerLateTicks: readCount("webrtcPacerLateTicks"),
+    webrtcIngressDecodeErrors: readCount("webrtcIngressDecodeErrors"),
+    webrtcDownlinkDecodeErrors: readCount("webrtcDownlinkDecodeErrors"),
+  };
 }
 
 function normalizedClientErrorCode(value: unknown, fallback = "CONNECTION_FAILED"): string {
@@ -343,11 +419,14 @@ export function useVoiceWebSocket() {
   const pokeNotifications = reactive<{ id: string; invokerId: number; invokerUid: string; invokerName: string; message: string; timestamp: number }[]>([]);
   let connectionSequence = 0;
   let lastConnection: { target: string; channel: string; nickname: string; serverPassword: string; identity?: string; rememberIdentity: boolean; accelerated: boolean; accelerationRelayId: string } | null = null;
-  let latencyProbeSequence = 0;
-  const pendingLatencyProbes = new Map<string, { startedAt: number; resolve: (result: LatencyProbeResult | null) => void; timer: ReturnType<typeof setTimeout> }>();
+  let audioStatusProbeSequence = 0;
+  const pendingAudioStatusProbes = new Map<string, { resolve: (stats: VoiceAudioBridgeStats | null) => void; timer: ReturnType<typeof setTimeout> }>();
   let commandSequence = 0;
   const pendingCommands = new Map<string, { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   let webrtcPeer: RTCPeerConnection | null = null;
+  let fallbackAudioFramesReceived = 0;
+  let fallbackAudioFramesDropped = 0;
+  let fallbackAudioDecodeErrors = 0;
   let webrtcOutputElement: SinkAudioElement | null = null;
   let webrtcPlaybackStream: MediaStream | null = null;
   let webrtcPlaybackRetryCleanup: (() => void) | null = null;
@@ -1405,7 +1484,10 @@ export function useVoiceWebSocket() {
   }
 
   function playAudioFrame(clientId: number, opusData: Uint8Array): void {
-    if (opusData.length < 3) return;
+    if (opusData.length < 3) {
+      fallbackAudioFramesDropped++;
+      return;
+    }
     let decoder = remoteDecoders.get(clientId);
     const ctx = getAudioCtx();
     const now = ctx.currentTime;
@@ -1472,6 +1554,7 @@ export function useVoiceWebSocket() {
         },
         error: () => {
           if (remoteDecoderGenerations.get(clientId) === generation) {
+            fallbackAudioDecodeErrors++;
             remoteDecoderGenerations.delete(clientId);
             remoteDecoders.delete(clientId);
           }
@@ -1488,6 +1571,7 @@ export function useVoiceWebSocket() {
       decoder.decode(new EncodedAudioChunk({ type: "key", timestamp, duration: 20_000, data: opusData }));
       remoteDecodeTimestamps.set(clientId, timestamp + 20_000);
     } catch {
+      fallbackAudioDecodeErrors++;
       // Ignore malformed frames; the next valid frame can still be decoded.
     }
   }
@@ -1584,7 +1668,7 @@ export function useVoiceWebSocket() {
     };
     socket.onclose = (event) => {
       if (sequence !== connectionSequence) return;
-      clearLatencyProbes();
+      clearAudioStatusProbes();
       rejectPendingCommands(new Error("语音连接已关闭"));
       state.connected = false;
       state.connecting = false;
@@ -1673,7 +1757,7 @@ export function useVoiceWebSocket() {
 
   function disconnect(preserveConnection = false): void {
     connectionSequence++;
-    clearLatencyProbes();
+    clearAudioStatusProbes();
     rejectPendingCommands(new Error("语音连接已关闭"));
     const keepRememberedIdentity = lastConnection?.rememberIdentity === true;
     if (!preserveConnection) lastConnection = null;
@@ -1709,10 +1793,10 @@ export function useVoiceWebSocket() {
     for (const key of Object.keys(volumes)) delete volumes[Number(key)];
   }
 
-  function clearLatencyProbes(): void {
-    for (const [sequence, pending] of pendingLatencyProbes) {
+  function clearAudioStatusProbes(): void {
+    for (const [sequence, pending] of pendingAudioStatusProbes) {
       clearTimeout(pending.timer);
-      pendingLatencyProbes.delete(sequence);
+      pendingAudioStatusProbes.delete(sequence);
       pending.resolve(null);
     }
   }
@@ -2523,18 +2607,13 @@ export function useVoiceWebSocket() {
         state.error = "";
         state.errorCode = "";
         break;
-      case "latencyPong": {
+      case "audioStats": {
         const sequence = typeof msg.sequence === "string" ? msg.sequence : "";
-        const pending = pendingLatencyProbes.get(sequence);
+        const pending = pendingAudioStatusProbes.get(sequence);
         if (!pending) break;
-        pendingLatencyProbes.delete(sequence);
+        pendingAudioStatusProbes.delete(sequence);
         clearTimeout(pending.timer);
-        pending.resolve({
-          browserRttMs: Math.max(0, Math.round(performance.now() - pending.startedAt)),
-          teamSpeakLatencyMs: typeof msg.teamSpeakLatencyMs === "number" ? msg.teamSpeakLatencyMs : null,
-          teamSpeakReachable: msg.teamSpeakReachable === true,
-          ...(typeof msg.teamSpeakErrorCode === "string" ? { teamSpeakErrorCode: msg.teamSpeakErrorCode } : {}),
-        });
+        pending.resolve(parseVoiceAudioBridgeStats(msg.stats));
         break;
       }
       case "disconnected":
@@ -2645,9 +2724,13 @@ export function useVoiceWebSocket() {
     // in-flight fallback WebSocket packets so a transport switch cannot
     // produce duplicate or delayed playback.
     if (webrtcActive.value) return;
-    if (data.length < 4) return;
+    if (data.length < 4) {
+      fallbackAudioFramesDropped++;
+      return;
+    }
     const clientId = (data[1] << 8) | data[2];
     if (clientId === state.tsClientId) return;
+    fallbackAudioFramesReceived++;
     markSpeaking(clientId);
     playAudioFrame(clientId, data.slice(3));
   }
@@ -2680,17 +2763,114 @@ export function useVoiceWebSocket() {
     return sendCommandAndWait("moveClient", { clientId, channelId, ...(password ? { password } : {}) });
   }
 
-  function measureLatency(timeoutMs = 2_200): Promise<LatencyProbeResult | null> {
+  async function collectBrowserVoiceAudioStats(): Promise<BrowserVoiceAudioStats | null> {
+    const peer = webrtcPeer;
+    if (!peer) return null;
+    try {
+      const report = await peer.getStats();
+      let outbound: Record<string, unknown> | undefined;
+      let remoteInbound: Record<string, unknown> | undefined;
+      let inbound: Record<string, unknown> | undefined;
+      let candidatePair: Record<string, unknown> | undefined;
+      report.forEach((raw) => {
+        const stats = raw as unknown as Record<string, unknown>;
+        const type = typeof stats.type === "string" ? stats.type : "";
+        const kind = typeof stats.kind === "string" ? stats.kind : typeof stats.mediaType === "string" ? stats.mediaType : "";
+        if (kind === "audio") {
+          if (type === "outbound-rtp") outbound = stats;
+          else if (type === "remote-inbound-rtp") remoteInbound = stats;
+          else if (type === "inbound-rtp") inbound = stats;
+        }
+        if (type === "candidate-pair" && (stats.selected === true || stats.nominated === true) && stats.state === "succeeded") candidatePair = stats;
+      });
+      const readNumber = (stats: Record<string, unknown> | undefined, key: string): number | null => {
+        const value = stats?.[key];
+        return typeof value === "number" && Number.isFinite(value) ? value : null;
+      };
+      const outboundLost = readNumber(remoteInbound, "packetsLost");
+      const outboundPackets = readNumber(outbound, "packetsSent");
+      const fractionLost = readNumber(remoteInbound, "fractionLost");
+      const outboundLossPercent = fractionLost !== null
+        ? Math.min(100, Math.max(0, fractionLost * 100))
+        : outboundLost !== null && outboundPackets !== null && outboundPackets + Math.max(0, outboundLost) > 0
+          ? (Math.max(0, outboundLost) / (outboundPackets + Math.max(0, outboundLost))) * 100
+          : null;
+      const inboundPackets = readNumber(inbound, "packetsReceived");
+      const inboundPacketsLost = readNumber(inbound, "packetsLost");
+      const inboundLossTotal = inboundPackets !== null && inboundPacketsLost !== null
+        ? inboundPackets + Math.max(0, inboundPacketsLost)
+        : null;
+      const outboundRttSeconds = readNumber(remoteInbound, "roundTripTime") ?? readNumber(candidatePair, "currentRoundTripTime");
+      const inboundJitterSeconds = readNumber(inbound, "jitter");
+      return {
+        outboundBytes: readNumber(outbound, "bytesSent"),
+        outboundPackets,
+        outboundPacketsLost: outboundLost,
+        outboundLossPercent,
+        outboundRttMs: outboundRttSeconds === null ? null : outboundRttSeconds * 1_000,
+        inboundBytes: readNumber(inbound, "bytesReceived"),
+        inboundPackets,
+        inboundPacketsLost,
+        inboundLossPercent: inboundLossTotal && inboundLossTotal > 0 && inboundPacketsLost !== null
+          ? (Math.max(0, inboundPacketsLost) / inboundLossTotal) * 100
+          : null,
+        inboundJitterMs: inboundJitterSeconds === null ? null : inboundJitterSeconds * 1_000,
+        concealedSamples: readNumber(inbound, "concealedSamples"),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function measureVoiceAudioStatus(timeoutMs = 1_800): Promise<VoiceAudioStatusSample | null> {
     const socket = ws.value;
     if (!socket || socket.readyState !== WebSocket.OPEN) return Promise.resolve(null);
-    const sequence = `latency-${Date.now().toString(36)}-${(latencyProbeSequence++).toString(36)}`;
-    return new Promise((resolve) => {
+    const sequence = `audio-${Date.now().toString(36)}-${(audioStatusProbeSequence++).toString(36)}`;
+    const browserStatsPromise = collectBrowserVoiceAudioStats();
+    return new Promise<VoiceAudioStatusSample | null>((resolve) => {
       const timer = setTimeout(() => {
-        pendingLatencyProbes.delete(sequence);
+        pendingAudioStatusProbes.delete(sequence);
         resolve(null);
       }, timeoutMs);
-      pendingLatencyProbes.set(sequence, { startedAt: performance.now(), resolve, timer });
-      sendCmd("latencyProbe", { sequence });
+      pendingAudioStatusProbes.set(sequence, {
+        resolve: (bridge) => {
+          if (!bridge) {
+            resolve(null);
+            return;
+          }
+          void browserStatsPromise.then((browser) => {
+            const peer = webrtcPeer;
+            const transport = !state.connected
+              ? "disconnected"
+              : webrtcActive.value
+                ? "webrtc"
+                : peer && !webrtcFallbackStarted
+                  ? "negotiating"
+                  : "websocket";
+            const playbackState = peer
+              ? webrtcOutputElement ? webrtcOutputElement.paused ? "paused" : "playing" : "unavailable"
+              : audioCtx ? audioCtx.state === "running" ? "playing" : "paused" : null;
+            resolve({
+              sampledAt: performance.now(),
+              transport,
+              connectionState: peer?.connectionState ?? null,
+              microphoneMuted: microphoneMuted.value,
+              microphoneReady: Boolean(micStream?.getAudioTracks().some((track) => track.readyState === "live")),
+              microphonePermission: audioPermission.value,
+              playbackState,
+              bridge,
+              browser,
+              fallbackPlayback: {
+                framesReceived: fallbackAudioFramesReceived,
+                framesDropped: fallbackAudioFramesDropped,
+                decodeErrors: fallbackAudioDecodeErrors,
+              },
+            });
+          });
+        },
+        timer,
+      });
+      sendCmd("audioStatsProbe", { sequence });
     });
   }
 
@@ -2964,6 +3144,6 @@ export function useVoiceWebSocket() {
     leaveScreenShare,
     checkSupport,
     clearError,
-    measureLatency,
+    measureVoiceAudioStatus,
   };
 }

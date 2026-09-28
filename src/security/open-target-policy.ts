@@ -27,6 +27,26 @@ export async function resolveSafeOpenTarget(target: TeamSpeakTarget): Promise<Te
   return { host: addresses[0]!.address, port: target.port };
 }
 
+/** A bounded, non-authoritative check used only to avoid pre-filling a target that open mode will reject. */
+export async function isSafeOpenTargetForPrefill(
+  target: TeamSpeakTarget,
+  options: { timeoutMs?: number; resolveTarget?: (target: TeamSpeakTarget) => Promise<TeamSpeakTarget> } = {},
+): Promise<boolean> {
+  const timeoutMs = options.timeoutMs ?? 1_000;
+  const resolveTarget = options.resolveTarget ?? resolveSafeOpenTarget;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => resolveTarget(target)).then(() => true, () => false),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export function isRestrictedAddress(address: string): boolean {
   const version = isIP(address);
   if (version === 4) return isRestrictedIpv4(address);

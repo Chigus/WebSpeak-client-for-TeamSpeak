@@ -1,45 +1,153 @@
 import { computed, onUnmounted, ref, watch, type Ref } from "vue";
-import type { LatencyProbeResult } from "./useVoiceWebSocket.js";
+import type { VoiceAudioStatusSample } from "./useVoiceWebSocket.js";
 
-const SAMPLE_INTERVAL_MS = 3_000;
-const SAMPLE_WINDOW_SIZE = 20;
+const SAMPLE_INTERVAL_MS = 2_000;
+
+export type VoiceAudioHealth = "disconnected" | "sampling" | "connecting" | "warning" | "active" | "quiet";
+
+function counterDelta(current: number, previous: number | undefined): number | null {
+  if (previous === undefined || current < previous) return null;
+  return current - previous;
+}
+
+function ratePerSecond(current: number, previous: number | undefined, elapsedMs: number): number | null {
+  const delta = counterDelta(current, previous);
+  if (delta === null || elapsedMs < 250) return null;
+  return Math.round((delta * 1_000) / elapsedMs);
+}
+
+function bitrateKbps(current: number | null, previous: number | null | undefined, elapsedMs: number): number | null {
+  if (current === null || previous == null || current < previous || elapsedMs < 250) return null;
+  return Math.round(((current - previous) * 8) / elapsedMs);
+}
+
+function intervalLossPercent(
+  currentReceived: number | null | undefined,
+  previousReceived: number | null | undefined,
+  currentLost: number | null | undefined,
+  previousLost: number | null | undefined,
+  fallback: number | null,
+): number | null {
+  if (currentReceived == null || previousReceived == null || currentLost == null || previousLost == null) return fallback;
+  const receivedDelta = counterDelta(currentReceived, previousReceived);
+  const lostDelta = counterDelta(Math.max(0, currentLost), Math.max(0, previousLost));
+  if (receivedDelta === null || lostDelta === null) return fallback;
+  const total = receivedDelta + lostDelta;
+  return total > 0 ? (lostDelta / total) * 100 : fallback;
+}
 
 export function useWebClientPerformance(
   connected: Readonly<Ref<boolean>>,
-  measureLatency: () => Promise<LatencyProbeResult | null>,
+  measureAudioStatus: () => Promise<VoiceAudioStatusSample | null>,
 ) {
   const panelOpen = ref(false);
   const running = ref(false);
-  const samples = ref<LatencyProbeResult[]>([]);
-  const probeResults = ref<Array<LatencyProbeResult | null>>([]);
-  const attempts = ref(0);
+  const latestSample = ref<VoiceAudioStatusSample | null>(null);
+  const previousSample = ref<VoiceAudioStatusSample | null>(null);
   let timer: number | null = null;
   let generation = 0;
 
-  const median = (values: number[]) => {
-    const sorted = [...values].sort((left, right) => left - right);
-    return sorted.length ? sorted[Math.floor(sorted.length / 2)] : null;
-  };
-
   const stats = computed(() => {
-    const gatewaySamples = samples.value.map((sample) => sample.browserRttMs);
-    const teamSpeakSamples = samples.value
-      .filter((sample) => sample.teamSpeakReachable && sample.teamSpeakLatencyMs != null)
-      .map((sample) => sample.teamSpeakLatencyMs as number);
+    const current = latestSample.value;
+    const previous = previousSample.value;
+    const elapsedMs = current && previous ? current.sampledAt - previous.sampledAt : 0;
+    const bridge = current?.bridge;
+    const previousBridge = previous?.bridge;
+    const browser = current?.browser;
+    const previousBrowser = previous?.browser;
+    const uplinkFramesPerSecond = bridge
+      ? ratePerSecond(bridge.tsSendFrames, previousBridge?.tsSendFrames, elapsedMs)
+      : null;
+    const downlinkCounter = current
+      ? current.transport === "websocket"
+        ? current.fallbackPlayback.framesReceived
+        : current.transport === "webrtc" && browser?.inboundPackets !== null && browser?.inboundPackets !== undefined
+          ? browser.inboundPackets
+          : bridge?.egressFrames ?? null
+      : null;
+    const previousDownlinkCounter = previous
+      ? previous.transport === "websocket"
+        ? previous.fallbackPlayback.framesReceived
+        : previous.transport === "webrtc" && previousBrowser?.inboundPackets !== null && previousBrowser?.inboundPackets !== undefined
+          ? previousBrowser.inboundPackets
+          : previousBridge?.egressFrames ?? null
+      : null;
+    const downlinkFramesPerSecond = downlinkCounter === null
+      ? null
+      : ratePerSecond(downlinkCounter, previousDownlinkCounter ?? undefined, elapsedMs);
+    const uplinkLossPercent = browser
+      ? intervalLossPercent(browser.outboundPackets, previousBrowser?.outboundPackets, browser.outboundPacketsLost, previousBrowser?.outboundPacketsLost, browser.outboundLossPercent)
+      : null;
+    const downlinkLossPercent = browser
+      ? intervalLossPercent(browser.inboundPackets, previousBrowser?.inboundPackets, browser.inboundPacketsLost, previousBrowser?.inboundPacketsLost, browser.inboundLossPercent)
+      : null;
+    const recentErrors = bridge && previousBridge
+      ? (counterDelta(bridge.tsSendErrors, previousBridge.tsSendErrors) ?? 0)
+        + (counterDelta(bridge.ingressDroppedFrames, previousBridge.ingressDroppedFrames) ?? 0)
+        + (counterDelta(bridge.egressDroppedFrames, previousBridge.egressDroppedFrames) ?? 0)
+        + (counterDelta(bridge.webrtcIngressDecodeErrors, previousBridge.webrtcIngressDecodeErrors) ?? 0)
+        + (counterDelta(bridge.webrtcDownlinkDecodeErrors, previousBridge.webrtcDownlinkDecodeErrors) ?? 0)
+        + (counterDelta(bridge.webrtcQueueDroppedFrames, previousBridge.webrtcQueueDroppedFrames) ?? 0)
+        + (counterDelta(current?.fallbackPlayback.decodeErrors ?? 0, previous?.fallbackPlayback.decodeErrors ?? 0) ?? 0)
+      : 0;
+    const uplinkBitrateKbps = browser ? bitrateKbps(browser.outboundBytes, previousBrowser?.outboundBytes, elapsedMs) : null;
+    const downlinkBitrateKbps = browser ? bitrateKbps(browser.inboundBytes, previousBrowser?.inboundBytes, elapsedMs) : null;
+    const mediaIsActive = (uplinkFramesPerSecond ?? 0) > 0
+      || (downlinkFramesPerSecond ?? 0) > 0
+      || (uplinkBitrateKbps ?? 0) > 0
+      || (downlinkBitrateKbps ?? 0) > 0;
+    const playbackBlocked = (downlinkFramesPerSecond ?? 0) > 0
+      && (current?.playbackState === "paused" || current?.playbackState === "unavailable");
+    let health: VoiceAudioHealth = "sampling";
+    if (!connected.value) health = "disconnected";
+    else if (current) {
+      if (current.connectionState === "failed" || recentErrors > 0 || playbackBlocked || (!current.microphoneMuted && (current.microphonePermission === "denied" || (current.microphonePermission === "granted" && !current.microphoneReady)))) health = "warning";
+      else if (current.transport === "negotiating" || (current.transport === "webrtc" && current.connectionState && current.connectionState !== "connected")) health = "connecting";
+      else health = mediaIsActive ? "active" : "quiet";
+    }
 
     return {
-      gatewayLatencyMs: median(gatewaySamples),
-      gatewayLossPercent: attempts.value > 0 ? Math.round(((attempts.value - samples.value.length) / attempts.value) * 100) : null,
-      teamSpeakLatencyMs: median(teamSpeakSamples),
-      teamSpeakLossPercent: attempts.value > 0 ? Math.round(((attempts.value - teamSpeakSamples.length) / attempts.value) * 100) : null,
-      ready: attempts.value > 0,
+      ready: current !== null,
+      health,
+      transport: current?.transport ?? "disconnected",
+      connectionState: current?.connectionState ?? null,
+      microphoneMuted: current?.microphoneMuted ?? false,
+      microphoneReady: current?.microphoneReady ?? false,
+      microphonePermission: current?.microphonePermission ?? "unknown",
+      playbackState: current?.playbackState ?? null,
+      uplinkFramesPerSecond,
+      downlinkFramesPerSecond,
+      uplinkBitrateKbps,
+      downlinkBitrateKbps,
+      uplinkLossPercent,
+      uplinkRttMs: browser?.outboundRttMs ?? null,
+      downlinkLossPercent,
+      downlinkJitterMs: browser?.inboundJitterMs ?? null,
+      concealedSamples: browser?.concealedSamples ?? null,
+      sendErrors: bridge && previousBridge ? counterDelta(bridge.tsSendErrors, previousBridge.tsSendErrors) : null,
+      droppedFrames: bridge && previousBridge
+        ? (counterDelta(bridge.ingressDroppedFrames, previousBridge.ingressDroppedFrames) ?? 0)
+          + (counterDelta(bridge.egressDroppedFrames, previousBridge.egressDroppedFrames) ?? 0)
+          + (counterDelta(bridge.webrtcQueueDroppedFrames, previousBridge.webrtcQueueDroppedFrames) ?? 0)
+          + (counterDelta(current?.fallbackPlayback.framesDropped ?? 0, previous?.fallbackPlayback.framesDropped ?? 0) ?? 0)
+        : null,
+      queueUnderruns: bridge && previousBridge ? counterDelta(bridge.webrtcQueueUnderrunTicks, previousBridge.webrtcQueueUnderrunTicks) : null,
+      ingressMaxGapMs: bridge?.ingressMaxGapMs ?? null,
+      egressMaxGapMs: bridge?.egressMaxGapMs ?? null,
     };
   });
 
-  function resetSamples(): void {
-    probeResults.value = [];
-    samples.value = [];
-    attempts.value = 0;
+  async function runProbe(expectedGeneration = generation): Promise<void> {
+    if (running.value || !connected.value) return;
+    running.value = true;
+    try {
+      const sample = await measureAudioStatus();
+      if (expectedGeneration !== generation || !connected.value || !sample) return;
+      previousSample.value = latestSample.value;
+      latestSample.value = sample;
+    } finally {
+      if (expectedGeneration === generation) running.value = false;
+    }
   }
 
   function stop(): void {
@@ -49,31 +157,15 @@ export function useWebClientPerformance(
     }
     generation += 1;
     running.value = false;
-  }
-
-  async function runProbe(expectedGeneration = generation): Promise<void> {
-    if (running.value || !connected.value || !panelOpen.value) return;
-    running.value = true;
-    try {
-      const sample = await measureLatency();
-      if (expectedGeneration !== generation || !panelOpen.value) return;
-      probeResults.value.push(sample);
-      if (probeResults.value.length > SAMPLE_WINDOW_SIZE) probeResults.value.shift();
-      attempts.value = probeResults.value.length;
-      samples.value = probeResults.value.filter((result): result is LatencyProbeResult => result !== null);
-    } finally {
-      if (expectedGeneration === generation) running.value = false;
-    }
+    latestSample.value = null;
+    previousSample.value = null;
   }
 
   function start(): void {
     if (timer !== null || !connected.value) return;
-    resetSamples();
     const activeGeneration = ++generation;
     void runProbe(activeGeneration);
-    timer = window.setInterval(() => {
-      void runProbe(activeGeneration);
-    }, SAMPLE_INTERVAL_MS);
+    timer = window.setInterval(() => { void runProbe(activeGeneration); }, SAMPLE_INTERVAL_MS);
   }
 
   function refresh(): void {
@@ -84,18 +176,12 @@ export function useWebClientPerformance(
     panelOpen.value = !panelOpen.value;
   }
 
-  watch([connected, panelOpen], ([isConnected, isOpen]) => {
-    if (isConnected && isOpen) start();
+  watch(connected, (isConnected) => {
+    if (isConnected) start();
     else stop();
   }, { immediate: true });
 
   onUnmounted(stop);
 
-  return {
-    panelOpen,
-    running,
-    stats,
-    togglePanel,
-    refresh,
-  };
+  return { panelOpen, running, stats, togglePanel, refresh };
 }

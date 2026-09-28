@@ -1,5 +1,5 @@
 import { computed, reactive, ref, type Ref } from "vue";
-import { splitTeamSpeakTarget } from "../services/teamspeak-target.js";
+import { DEFAULT_TEAM_SPEAK_PORT, splitTeamSpeakTarget } from "../services/teamspeak-target.js";
 import type { Language } from "../i18n/web-client.js";
 
 interface RelayOption {
@@ -31,6 +31,7 @@ export function useWebClientPublicConfig({
   const visitorNumber = ref<number | null>(null);
   const visitorTotal = ref<number | null>(null);
   const accelerationRelays = ref<RelayOption[]>([]);
+  const openTargetPrefillBlocked = ref(false);
   const serverConfigLoading = ref(true);
   const welcomeTexts = reactive<Record<Language, string>>({ zh: "", en: "", de: "", ru: "", ja: "" });
   const accelerationAvailable = computed(() => accelerationRelays.value.length > 0);
@@ -50,6 +51,7 @@ export function useWebClientPublicConfig({
         welcomeTexts?: unknown;
         accessMode?: unknown;
         target?: unknown;
+        targetPrefillBlocked?: unknown;
         visitorNumber?: unknown;
         visitorTotal?: unknown;
         accelerationRelays?: unknown;
@@ -80,7 +82,11 @@ export function useWebClientPublicConfig({
         : [];
       if (!accelerationAvailable.value || !accelerationRelays.value.some((relay) => relay.id === accelerationRelayId.value)) accelerationRelayId.value = "";
       const hasInviteTarget = query.has("server") || query.has("target") || query.has("tsHost") || query.has("tsPort");
-      if (!hasInviteTarget && typeof config.target === "string" && config.target.trim()) {
+      openTargetPrefillBlocked.value = !hasInviteTarget && accessMode.value === "open" && config.targetPrefillBlocked === true;
+      if (openTargetPrefillBlocked.value) {
+        serverHost.value = "";
+        serverPort.value = DEFAULT_TEAM_SPEAK_PORT;
+      } else if (!hasInviteTarget && typeof config.target === "string" && config.target.trim()) {
         const target = splitTeamSpeakTarget(config.target);
         serverHost.value = target.address;
         serverPort.value = target.port;
@@ -100,6 +106,7 @@ export function useWebClientPublicConfig({
     visitorNumber,
     visitorTotal,
     accelerationRelays,
+    openTargetPrefillBlocked,
     accelerationAvailable,
     serverConfigLoading,
     localizedWelcomeText,

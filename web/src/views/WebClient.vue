@@ -49,6 +49,7 @@
               <label class="field-label" data-ws-part="home.field-label" for="server-address"><span>{{ t('serverAddress') }}</span><div class="field-wrap" data-ws-part="home.field"><Icon name="server" :size="17" /><input id="server-address" v-model="serverHost" autocomplete="url" :placeholder="t('serverAddressPlaceholder')" /></div></label>
               <label class="field-label" data-ws-part="home.field-label" for="server-port"><span>{{ t('serverPort') }}</span><div class="field-wrap" data-ws-part="home.field"><Icon name="hash" :size="17" /><input id="server-port" v-model="serverPort" inputmode="numeric" type="text" maxlength="5" :placeholder="t('serverPortPlaceholder')" /></div></label>
             </div>
+            <div v-if="openTargetPrefillBlocked" class="notice warning-notice" data-ws-part="home.notice" data-ws-state="target-prefill-blocked"><span class="notice-symbol">i</span><span>{{ t('openTargetDefaultNotPrefilled') }}</span></div>
             <div v-if="accelerationAvailable" class="acceleration-choice" data-ws-part="home.relay-choice"><div class="acceleration-copy" data-ws-part="home.relay-choice.copy"><strong>{{ t('relayAcceleration') }}</strong><small>{{ t('relayAccelerationHint') }}</small></div><select v-model="accelerationRelayId" :aria-label="t('relayAcceleration')"><option value="">{{ t('directConnection') }}</option><option v-for="relay in accelerationRelays" :key="relay.id" :value="relay.id">{{ relay.name }}</option></select></div>
             <div v-if="accessMode === 'open' && (favoriteServers.length || recentServers.length)" class="local-servers" data-ws-part="home.server-history">
               <div v-if="favoriteServers.length" class="local-server-group" data-ws-part="home.server-history.group" data-ws-state="favorite"><span>{{ t('favoriteServers') }}</span><button v-for="favorite in favoriteServers" :key="favorite.id" type="button" @click="selectLocalServer(favorite.address, favorite.nickname)">{{ favorite.label }}</button></div>
@@ -109,12 +110,16 @@
           <div class="breadcrumbs" data-ws-part="voice.breadcrumbs"><span class="mobile-brand">TeamSpeak <em>Web</em></span><span class="crumb-muted">{{ t('serverBreadcrumb') }}</span><Icon name="chevron-right" :size="14" /><strong>{{ currentChannelName }}</strong></div>
           <div class="workspace-actions" data-ws-part="voice.header-actions">
             <div class="network-performance" data-ws-part="voice.performance">
-              <button type="button" class="performance-trigger" :title="t('networkPerformance')" :aria-label="t('networkPerformance')" :aria-expanded="performancePanelOpen" @click.stop="togglePerformancePanel"><Icon name="activity" :size="16" /><span class="performance-trigger-label">{{ t('networkPerformance') }}</span><small v-if="performanceStats.ready && performanceStats.gatewayLatencyMs != null">{{ performanceStats.gatewayLatencyMs }} ms</small><Icon name="chevron-down" :size="13" /></button>
-              <section v-if="performancePanelOpen" class="performance-panel" data-ws-part="voice.performance.panel" role="dialog" :aria-label="t('networkPerformance')" @click.stop>
-                <header><div><strong>{{ t('networkPerformance') }}</strong><small>{{ t('networkPerformanceHint') }}</small></div><button type="button" class="performance-refresh" :title="t('measureNow')" :disabled="performanceRunning" @click="refreshPerformanceProbe"><Icon name="refresh" :size="15" /></button></header>
-                <div class="performance-route" data-ws-part="voice.performance.route"><span>{{ t('browser') }}</span><i></i><span>{{ t('webSpeakGateway') }}</span><i></i><span>{{ t('teamSpeakServer') }}</span></div>
-                <div class="performance-metrics" data-ws-part="voice.performance.metrics"><article><small>{{ t('browserToGateway') }}</small><strong>{{ performanceStats.gatewayLatencyMs == null ? '—' : `${performanceStats.gatewayLatencyMs} ms` }}</strong><span>{{ t('packetLoss') }} {{ performanceStats.gatewayLossPercent == null ? '—' : `${performanceStats.gatewayLossPercent}%` }}</span></article><article><small>{{ t('gatewayToTeamSpeak') }}</small><strong>{{ performanceStats.teamSpeakLatencyMs == null ? '—' : `${performanceStats.teamSpeakLatencyMs} ms` }}</strong><span>{{ t('packetLoss') }} {{ performanceStats.teamSpeakLossPercent == null ? '—' : `${performanceStats.teamSpeakLossPercent}%` }}</span></article></div>
-                <p class="performance-status" data-ws-part="voice.performance.status">{{ performanceRunning ? t('measuring') : performanceStats.ready ? t('measureComplete') : t('measureUnavailable') }}</p>
+              <button type="button" class="performance-trigger" :title="t('voiceStatus')" :aria-label="t('voiceStatus')" :aria-expanded="performancePanelOpen" @click.stop="togglePerformancePanel"><Icon name="activity" :size="16" /><span class="performance-trigger-label">{{ t('voiceStatus') }}</span><small v-if="performanceStats.ready">{{ voiceTransportLabel }}</small><Icon name="chevron-down" :size="13" /></button>
+              <section v-if="performancePanelOpen" class="performance-panel" data-ws-part="voice.performance.panel" role="dialog" :aria-label="t('voiceStatus')" @click.stop>
+                <header><div><strong>{{ t('voiceStatus') }}</strong><small>{{ t('voiceStatusHint') }}</small></div><button type="button" class="performance-refresh" :title="t('measureNow')" :disabled="performanceRunning" @click="refreshPerformanceProbe"><Icon name="refresh" :size="15" /></button></header>
+                <div class="voice-status-summary" :data-health="performanceStats.health" data-ws-part="voice.performance.route"><i></i><div><strong>{{ voiceHealthLabel }}</strong><small>{{ voiceTransportLabel }}<template v-if="performanceStats.connectionState"> · {{ performanceStats.connectionState }}</template></small></div></div>
+                <div class="performance-metrics voice-audio-metrics" data-ws-part="voice.performance.metrics">
+                  <article><small>{{ t('voiceUplink') }}</small><strong>{{ performanceStats.uplinkFramesPerSecond == null ? '—' : `${performanceStats.uplinkFramesPerSecond} ${t('audioFramesPerSecondUnit')}` }}</strong><span>{{ t('audioBitrate') }} {{ performanceStats.uplinkBitrateKbps == null ? '—' : `${performanceStats.uplinkBitrateKbps} kbps` }}</span><span v-if="performanceStats.transport === 'webrtc'">{{ t('voicePacketLoss') }} {{ performanceStats.uplinkLossPercent == null ? '—' : `${performanceStats.uplinkLossPercent.toFixed(2)}%` }} · {{ t('voiceRtt') }} {{ performanceStats.uplinkRttMs == null ? '—' : `${Math.round(performanceStats.uplinkRttMs)} ms` }}</span><span v-else>{{ t('voiceFallbackMetricHint') }}</span></article>
+                  <article><small>{{ t('voiceDownlink') }}</small><strong>{{ performanceStats.downlinkFramesPerSecond == null ? '—' : `${performanceStats.downlinkFramesPerSecond} ${t('audioFramesPerSecondUnit')}` }}</strong><span>{{ t('audioBitrate') }} {{ performanceStats.downlinkBitrateKbps == null ? '—' : `${performanceStats.downlinkBitrateKbps} kbps` }}</span><span v-if="performanceStats.transport === 'webrtc'">{{ t('voicePacketLoss') }} {{ performanceStats.downlinkLossPercent == null ? '—' : `${performanceStats.downlinkLossPercent.toFixed(2)}%` }} · {{ t('voiceJitter') }} {{ performanceStats.downlinkJitterMs == null ? '—' : `${Math.round(performanceStats.downlinkJitterMs)} ms` }}</span><span v-else>{{ t('voiceFallbackMetricHint') }}</span></article>
+                </div>
+                <div class="voice-audio-details"><span>{{ t('microphone') }} · {{ voiceMicrophoneLabel }}</span><span>{{ t('voicePlayback') }} · {{ voicePlaybackLabel }}</span><span>{{ t('voiceSendErrors') }} {{ performanceStats.sendErrors == null ? '—' : performanceStats.sendErrors }} · {{ t('voiceDroppedFrames') }} {{ performanceStats.droppedFrames == null ? '—' : performanceStats.droppedFrames }}</span><span v-if="performanceStats.transport === 'webrtc'">{{ t('voiceQueueUnderruns') }} {{ performanceStats.queueUnderruns == null ? '—' : performanceStats.queueUnderruns }}</span></div>
+                <p class="performance-status" data-ws-part="voice.performance.status">{{ performanceRunning ? t('voiceStatusSampling') : performanceStats.ready ? t('voiceStatusLiveHint') : t('voiceStatusWaiting') }}</p>
                 <section v-if="screenShareWebRtcStats.peers.length" class="webrtc-stats" data-ws-part="voice.performance.webrtc-stats" aria-live="polite">
                   <header><div><strong>{{ t('webrtcStats') }}</strong><small>{{ t('webrtcStatsHint') }}</small></div></header>
                   <div v-if="screenShareWebRtcStats.capture" class="webrtc-stats-capture"><span>{{ t('screenShareCapture') }}</span><strong>{{ screenShareWebRtcStats.capture.width ?? '—' }} × {{ screenShareWebRtcStats.capture.height ?? '—' }}</strong><small>{{ screenShareWebRtcStats.capture.frameRate == null ? '—' : `${screenShareWebRtcStats.capture.frameRate.toFixed(1)} FPS` }}</small></div>
@@ -472,7 +477,7 @@ const {
   leaveScreenShare,
   checkSupport,
   clearError,
-  measureLatency,
+  measureVoiceAudioStatus,
 } = useVoiceWebSocket();
 const {
   panelOpen: performancePanelOpen,
@@ -480,7 +485,17 @@ const {
   stats: performanceStats,
   togglePanel: togglePerformancePanel,
   refresh: refreshPerformanceProbe,
-} = useWebClientPerformance(computed(() => voiceState.connected), measureLatency);
+} = useWebClientPerformance(computed(() => voiceState.connected), measureVoiceAudioStatus);
+const voiceHealthLabel = computed(() => t(({ disconnected: "voiceHealthDisconnected", sampling: "voiceHealthSampling", connecting: "voiceHealthConnecting", warning: "voiceHealthWarning", active: "voiceHealthActive", quiet: "voiceHealthQuiet" } as const)[performanceStats.value.health]));
+const voiceTransportLabel = computed(() => t(({ webrtc: "voiceTransportWebRTC", websocket: "voiceTransportWebSocket", negotiating: "voiceTransportNegotiating", disconnected: "voiceTransportDisconnected" } as const)[performanceStats.value.transport]));
+const voicePlaybackLabel = computed(() => t(({ playing: "voicePlaybackReady", paused: "voicePlaybackPaused", unavailable: "voicePlaybackUnavailable" } as const)[performanceStats.value.playbackState ?? "unavailable"]));
+const voiceMicrophoneLabel = computed(() => performanceStats.value.microphoneMuted
+  ? t("voiceMicMuted")
+  : performanceStats.value.microphoneReady
+    ? t("voiceMicOpen")
+    : performanceStats.value.microphonePermission === "denied" || performanceStats.value.microphonePermission === "granted"
+      ? t("voiceMicUnavailable")
+      : t("voiceMicWaiting"));
 
 const query = new URLSearchParams(location.search);
 const initialChannel = query.get("channel") ?? "";
@@ -537,6 +552,7 @@ const {
   visitorNumber,
   visitorTotal,
   accelerationRelays,
+  openTargetPrefillBlocked,
   accelerationAvailable,
   serverConfigLoading,
   localizedWelcomeText,

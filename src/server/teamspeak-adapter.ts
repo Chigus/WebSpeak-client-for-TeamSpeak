@@ -4,6 +4,7 @@ import {
   type ClientOptions,
   type Identity,
 } from "@echosixhiya/teamspeak-client";
+import { WebSpeakTeamSpeakResolver } from "./teamspeak-resolver.js";
 import type { Logger } from "../logger.js";
 import { normalizeTeamSpeakError } from "../errors.js";
 import { formatTeamSpeakTarget, teamSpeakTargetKey, type TeamSpeakTarget } from "../domain/teamspeak-target.js";
@@ -85,6 +86,7 @@ export class TeamSpeakAdapter {
   ) {
     this.identity = options.identity ?? generateIdentity(8);
     const clientOptions: ClientOptions = {
+      resolver: new WebSpeakTeamSpeakResolver(),
       serverPassword: options.serverPassword,
       defaultChannel: options.defaultChannel,
       defaultChannelPassword: options.channelPassword,

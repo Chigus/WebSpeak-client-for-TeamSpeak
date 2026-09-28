@@ -9,7 +9,7 @@ import { parseTeamSpeakTarget, teamSpeakTargetKey } from "../domain/teamspeak-ta
 import { createAdminRouter } from "../admin/admin-router.js";
 import type { AdminService } from "../admin/admin-service.js";
 import { AdminSessionStore } from "../admin/admin-session.js";
-import { resolveSafeOpenTarget } from "../security/open-target-policy.js";
+import { isSafeOpenTargetForPrefill, resolveSafeOpenTarget } from "../security/open-target-policy.js";
 import { identityFromString } from "@echosixhiya/teamspeak-client";
 import { JoinRateLimiter } from "./join-rate-limit.js";
 import type { ConfiguredAccelerationRelay } from "./acceleration-relay.js";
@@ -65,7 +65,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
   app.get("/health", healthHandler);
   app.get("/api/health", healthHandler);
 
-  app.get("/api/public-config", (request, response) => {
+  app.get("/api/public-config", async (request, response) => {
     response.setHeader("Cache-Control", "no-store");
     const acceleration = resolveAccelerationOptions(options.voiceBridgeOptions.acceleration);
     let visitorNumber = readVisitorNumberCookie(request.header("cookie"));
@@ -90,8 +90,21 @@ export function createWebServer(options: WebServerOptions): WebServer {
     } else if (visitorNumber !== null) {
       visitorTotal = visitorNumber;
     }
+    const publicConfig = options.adminService.getPublicConfig();
+    let target = typeof publicConfig.target === "string" ? publicConfig.target : "";
+    let targetPrefillBlocked = false;
+    if (publicConfig.accessMode === "open" && target.trim()) {
+      try {
+        targetPrefillBlocked = !await isSafeOpenTargetForPrefill(parseTeamSpeakTarget(target));
+      } catch {
+        targetPrefillBlocked = true;
+      }
+      if (targetPrefillBlocked) target = "";
+    }
     response.json({
-      ...options.adminService.getPublicConfig(),
+      ...publicConfig,
+      target,
+      targetPrefillBlocked,
       ...(visitorNumber === null ? {} : { visitorNumber }),
       ...(visitorTotal === null ? {} : { visitorTotal }),
       accelerationAvailable: acceleration.length > 0,
