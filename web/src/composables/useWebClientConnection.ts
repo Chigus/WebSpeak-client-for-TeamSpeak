@@ -22,6 +22,7 @@ interface UseWebClientConnectionOptions {
   accessMode: Readonly<Ref<string>>;
   isConnecting: Readonly<Ref<boolean>>;
   errorCode: Readonly<Ref<string>>;
+  errorMessage: Readonly<Ref<string>>;
   channelSwitchedChannelId: Readonly<Ref<string>>;
   nickname: Ref<string>;
   channelName: Ref<string>;
@@ -52,6 +53,7 @@ export function useWebClientConnection({
   accessMode,
   isConnecting,
   errorCode,
+  errorMessage,
   channelSwitchedChannelId,
   nickname,
   channelName,
@@ -140,7 +142,7 @@ export function useWebClientConnection({
   }
 
   function submitChannelPassword(): void {
-    if (!channelPasswordDialog.open || !channelPasswordDialog.channelId || !channelPasswordDialog.password) return;
+    if (!channelPasswordDialog.open || channelPasswordDialog.submitting || !channelPasswordDialog.channelId || !channelPasswordDialog.password) return;
     channelPasswordDialog.error = "";
     channelPasswordDialog.submitting = true;
     switchChannel(channelPasswordDialog.channelId, channelPasswordDialog.password);
@@ -163,6 +165,12 @@ export function useWebClientConnection({
   }
 
   watch(errorCode, (code) => {
+    if (code && code !== "CHANNEL_PASSWORD_REQUIRED" && channelPasswordDialog.open && channelPasswordDialog.submitting) {
+      channelPasswordDialog.error = errorMessage.value;
+      channelPasswordDialog.submitting = false;
+      clearError();
+      return;
+    }
     if (code !== "CHANNEL_PASSWORD_REQUIRED" || !selectedChannelId.value) return;
     channelPasswordDialog.open = true;
     channelPasswordDialog.channelId = selectedChannelId.value;

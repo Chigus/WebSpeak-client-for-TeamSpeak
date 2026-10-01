@@ -259,47 +259,19 @@
       :range-style="rangeStyle" :t="t" @private-chat="openPrivateChat" @volume-input="onVolInput" />
 
     <!-- Protected channel password modal -->
-    <div v-if="channelPasswordDialog.open" class="modal-backdrop channel-password-backdrop" @click.self="cancelChannelPassword">
-      <section class="channel-password-modal" role="dialog" aria-modal="true" :aria-labelledby="'channel-password-title'" @click.stop>
-        <button type="button" class="qq-modal-close" :aria-label="t('close')" :title="t('close')" @click="cancelChannelPassword"><Icon name="close" :size="19" /></button>
-        <div class="channel-password-icon"><Icon name="lock" :size="22" /></div>
-        <span class="card-kicker">{{ t('channelPasswordPrompt') }}</span>
-        <h2 id="channel-password-title">{{ t('channelPasswordTitle') }}</h2>
-        <p>{{ t('channelPasswordLead') }}</p>
-        <form class="channel-password-form" @submit.prevent="submitChannelPassword">
-          <label class="field-label" for="channel-password-input">{{ t('channelPasswordPrompt') }}</label>
-          <div class="field-wrap"><Icon name="lock" :size="17" /><input id="channel-password-input" v-model="channelPasswordDialog.password" type="password" autocomplete="current-password" :placeholder="t('channelPasswordPlaceholder')" :disabled="channelPasswordDialog.submitting" autofocus /></div>
-          <div v-if="channelPasswordDialog.error" class="notice error-notice channel-password-error"><span class="notice-symbol">!</span><span>{{ channelPasswordDialog.error }}</span></div>
-          <div class="channel-password-actions"><button type="button" class="text-button" :disabled="channelPasswordDialog.submitting" @click="cancelChannelPassword">{{ t('channelPasswordCancel') }}</button><button type="submit" class="primary-button channel-password-submit" :disabled="channelPasswordDialog.submitting || !channelPasswordDialog.password"><span v-if="channelPasswordDialog.submitting" class="button-spinner"></span><span>{{ t('channelPasswordSubmit') }}</span><Icon v-if="!channelPasswordDialog.submitting" name="chevron-right" :size="17" /></button></div>
-        </form>
-      </section>
-    </div>
+    <ChannelPasswordDialog v-if="channelPasswordDialog.open" v-model="channelPasswordDialog.password"
+      :busy="channelPasswordDialog.submitting" :error="channelPasswordDialog.error" :t="t"
+      @cancel="cancelChannelPassword" @submit="submitChannelPassword" />
 
     <!-- TeamSpeak server password modal -->
-    <div v-if="serverPasswordDialog.open" class="modal-backdrop channel-password-backdrop" @click.self="cancelServerPassword">
-      <section class="channel-password-modal server-password-modal" role="dialog" aria-modal="true" :aria-labelledby="'server-password-title'" @click.stop>
-        <button type="button" class="qq-modal-close" :aria-label="t('close')" :title="t('close')" @click="cancelServerPassword"><Icon name="close" :size="19" /></button>
-        <div class="channel-password-icon"><Icon name="lock" :size="22" /></div>
-        <span class="card-kicker">{{ t('serverPasswordPrompt') }}</span>
-        <h2 id="server-password-title">{{ t('serverPasswordTitle') }}</h2>
-        <p>{{ serverPasswordDialog.errorCode === 'INVALID_SERVER_PASSWORD' ? t('serverPasswordInvalidLead') : t('serverPasswordRequiredLead') }}</p>
-        <form class="channel-password-form" @submit.prevent="submitServerPassword">
-          <label class="field-label" for="retry-server-password-input">{{ t('serverPasswordPrompt') }}</label>
-          <div class="field-wrap"><Icon name="lock" :size="17" /><input id="retry-server-password-input" v-model="serverPasswordDialog.password" type="password" autocomplete="current-password" :placeholder="t('serverPasswordRetryPlaceholder')" autofocus /></div>
-          <div class="channel-password-actions"><button type="button" class="text-button" @click="cancelServerPassword">{{ t('channelPasswordCancel') }}</button><button type="submit" class="primary-button channel-password-submit" :disabled="!serverPasswordDialog.password"><span>{{ t('serverPasswordRetry') }}</span><Icon name="chevron-right" :size="17" /></button></div>
-        </form>
-      </section>
-    </div>
+    <ServerPasswordDialog v-if="serverPasswordDialog.open" v-model="serverPasswordDialog.password"
+      :error-code="serverPasswordDialog.errorCode" :t="t"
+      @cancel="cancelServerPassword" @submit="submitServerPassword" />
 
     <!-- Audio settings modal -->
-    <div v-if="settingsOpen" class="modal-backdrop" @click.self="settingsOpen = false">
-      <section class="settings-modal" data-ws-part="voice.audio-settings" role="dialog" aria-modal="true" :aria-labelledby="'settings-title'">
-        <div class="settings-main"><header class="settings-header"><h2 id="settings-title">{{ t('audioConfiguration') }}</h2><button class="round-icon" :title="t('close')" @click="settingsOpen = false"><Icon name="close" :size="19" /></button></header><div class="settings-content">
-          <section class="settings-section"><h3><Icon name="mic" :size="20" /> {{ t('inputDevice') }}</h3><label class="settings-label" for="input-device">{{ t('microphone') }}</label><select id="input-device" class="settings-select" :value="selectedInputDeviceId" :disabled="!inputDevices.length" @change="onInputDeviceChange"><option value="">{{ t('defaultMicrophone') }}</option><option v-for="(device, index) in inputDevices" :key="device.deviceId || `microphone-${index}`" :value="device.deviceId">{{ device.label || t('microphoneNumber', { index: index + 1 }) }}</option></select><p v-if="audioSettingsError" class="settings-error">{{ localizedMessage(audioSettingsError) }}</p><p class="audio-diagnostic"><span>{{ t('permission') }}</span><strong :class="`permission-${audioPermission}`">{{ audioPermission === 'granted' ? t('permissionGranted') : audioPermission === 'denied' ? t('permissionDenied') : t('permissionUnknown') }}</strong></p><div class="microphone-control"><div><label class="settings-label">{{ t('microphoneState') }}</label><p class="settings-hint">{{ microphoneMuted ? t('microphoneMutedHint') : t('microphoneActiveHint') }}</p></div><button type="button" class="microphone-toggle" :class="{ muted: microphoneMuted }" :aria-pressed="!microphoneMuted" @click="toggleMicrophone"><Icon :name="microphoneMuted ? 'mic-off' : 'mic'" :size="16" /> {{ microphoneMuted ? t('unmuteMic') : t('muteMic') }}</button></div><label v-if="isMobileViewport" class="mobile-noise-toggle"><span><strong>{{ t('noiseSuppression') }}</strong><small>{{ t('noiseSuppressionHint') }}</small></span><input type="checkbox" :checked="noiseSuppressionEnabled" :aria-label="t('noiseSuppression')" @change="onNoiseSuppressionToggle" /></label><template v-if="isMobileViewport"><div class="settings-range-row"><label class="settings-label">{{ t('inputVolume') }}</label><strong>{{ Math.round(inputVolume * 100) }}%</strong></div><input class="settings-range" type="range" min="0" max="100" :value="inputVolume * 100" :style="rangeStyle(inputVolume, 1)" :aria-label="t('inputVolume')" @input="onInputVolume" /></template><div class="settings-range-row"><label class="settings-label">{{ t('voxThreshold') }}</label><strong>{{ (voxThreshold * 100).toFixed(1) }}%</strong></div><input class="settings-range" type="range" min="1" max="80" :value="voxThreshold * 1000" :style="rangeStyle(voxThreshold, 0.08)" :aria-label="t('voxThreshold')" @input="onVoxThreshold" /><div class="audio-level-row"><span>{{ t('micLevel') }}</span><strong>{{ Math.round(micLevel * 100) }}%</strong></div><div class="audio-level-track"><i :style="{ width: `${Math.round(micLevel * 100)}%` }"></i></div><div class="mic-test"><div class="mic-test-header"><strong>{{ t('microphoneTest') }}</strong><button type="button" @click="toggleMicTest">{{ microphoneTestActive ? t('stopTest') : t('startTest') }}</button></div><div class="meter"><i v-for="index in 24" :key="index" :class="{ active: microphoneTestActive && index <= micMeterBars }" :style="{ height: `${meterBarHeight(index) }px` }"></i></div><div class="meter-labels"><span>{{ t('silence') }}</span><span>{{ t('optimal') }}</span><span>{{ t('loud') }}</span></div><p class="settings-hint">{{ t('localMicTestHint') }}</p><audio v-if="testAudioUrl" class="test-audio" :src="testAudioUrl" controls :aria-label="t('microphoneTest')"></audio></div></section>
-          <div class="settings-separator"></div><section class="settings-section"><h3><Icon name="volume" :size="20" /> {{ t('outputVolume') }}</h3><label v-if="outputDeviceSupported" class="settings-label" for="output-device">{{ t('outputDevice') }}</label><select v-if="outputDeviceSupported" id="output-device" class="settings-select" :value="selectedOutputDeviceId" :disabled="!outputDevices.length" @change="onOutputDeviceChange"><option value="">{{ t('defaultOutput') }}</option><option v-for="(device, index) in outputDevices" :key="device.deviceId || `speaker-${index}`" :value="device.deviceId">{{ device.label || t('speakerNumber', { index: index + 1 }) }}</option></select><p v-else class="mode-note"><Icon name="info" :size="16" /><span>{{ t('outputDeviceUnsupported') }}</span></p><template v-if="isMobileViewport"><div class="settings-range-row"><label class="settings-label">{{ t('speakers') }}</label><strong>{{ Math.round(outputVolume * 100) }}%</strong></div><input class="settings-range" type="range" min="0" max="100" :value="outputVolume * 100" :style="rangeStyle(outputVolume, 1)" :aria-label="t('outputVolume')" @input="onOutputVolume" /></template><div class="settings-range-row"><label class="settings-label">{{ t('notificationVolume') }}</label><strong>{{ Math.round(notificationVolume * 100) }}%</strong></div><input class="settings-range" type="range" min="0" max="100" :value="notificationVolume * 100" :style="rangeStyle(notificationVolume, 1)" :aria-label="t('notificationVolume')" @input="onNotificationVolume" /><div class="audio-diagnostic"><span>{{ t('audioStatus') }}</span><strong>{{ audioContextState === 'running' ? (voiceState.microphoneError ? t('audioUnavailable') : t('audioReady')) : audioContextState === 'suspended' ? t('audioSuspended') : t('audioUnknown') }}</strong></div><p v-if="voiceState.microphoneError" class="settings-error">{{ localizedMessage(voiceState.microphoneError) }}</p><div class="mode-note"><Icon name="shield" :size="16" /><span>{{ t('audioPrivacy') }}</span></div></section>
-        </div><footer class="settings-footer"><button class="primary-button save-button" @click="settingsOpen = false">{{ t('done') }}</button></footer></div>
-      </section>
-    </div>
+    <AudioSettingsDialog v-if="settingsOpen" :model="audioSettingsState" :controls="audioControls"
+      :microphone-error="voiceState.microphoneError" :is-mobile-viewport="isMobileViewport"
+      :t="t" :localized-message="localizedMessage" :range-style="rangeStyle" @close="settingsOpen = false" />
 
     <div v-if="toast" class="toast" data-ws-part="app.toast" role="status"><Icon name="check" :size="16" /> {{ toast }}</div>
   </div>
@@ -308,6 +280,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from "vue";
 import Icon from "../components/Icon.vue";
+import AudioSettingsDialog from "../components/web-client/AudioSettingsDialog.vue";
+import ChannelPasswordDialog from "../components/web-client/ChannelPasswordDialog.vue";
+import ServerPasswordDialog from "../components/web-client/ServerPasswordDialog.vue";
 import ChannelMemberPanel from "../components/web-client/ChannelMemberPanel.vue";
 import MemberActionsMenu from "../components/web-client/MemberActionsMenu.vue";
 import JoinForm from "../components/web-client/JoinForm.vue";
@@ -545,25 +520,7 @@ const skinHomeFeatures = computed(() => {
   });
   return features;
 });
-const {
-  settingsError: audioSettingsError,
-  whisperPttActive,
-  onInputVolume,
-  onNoiseSuppressionToggle,
-  onOutputVolume,
-  onVoxThreshold,
-  onNotificationVolume,
-  onInputDeviceChange,
-  onOutputDeviceChange,
-  toggleMicTest,
-  micMeterBars,
-  meterBarHeight,
-  toggleMicrophone,
-  toggleAccompaniment,
-  onWhisperPttDown,
-  onWhisperPttUp,
-  stopWhisperTalk,
-} = useWebClientAudioControls({
+const audioControls = useWebClientAudioControls({
   settingsOpen,
   microphoneMuted,
   inputVolume,
@@ -592,6 +549,26 @@ const {
   showToast,
   t,
 });
+const { whisperPttActive, onInputVolume, onNoiseSuppressionToggle, onOutputVolume,
+  toggleMicrophone, toggleAccompaniment, onWhisperPttDown, onWhisperPttUp, stopWhisperTalk } = audioControls;
+const audioSettingsState = {
+  inputDevices,
+  outputDevices,
+  selectedInputDeviceId,
+  selectedOutputDeviceId,
+  outputDeviceSupported,
+  audioPermission,
+  audioContextState,
+  microphoneMuted,
+  noiseSuppressionEnabled,
+  inputVolume,
+  outputVolume,
+  voxThreshold,
+  notificationVolume,
+  micLevel,
+  microphoneTestActive,
+  testAudioUrl,
+};
 
 
 function initialServerTarget() {
@@ -713,6 +690,7 @@ const {
   accessMode,
   isConnecting: computed(() => voiceState.connecting),
   errorCode: computed(() => voiceState.errorCode),
+  errorMessage: computed(() => localizedMessage(voiceState.error)),
   channelSwitchedChannelId: computed(() => voiceState.channelSwitchedChannelId),
   nickname,
   channelName: channel,

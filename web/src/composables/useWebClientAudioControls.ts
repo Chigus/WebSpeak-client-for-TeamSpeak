@@ -1,4 +1,4 @@
-import { computed, ref, watch, type Ref } from "vue";
+import { computed, onScopeDispose, ref, watch, type Ref } from "vue";
 
 interface UseWebClientAudioControlsOptions {
   settingsOpen: Ref<boolean>;
@@ -62,6 +62,15 @@ export function useWebClientAudioControls({
   const settingsError = ref("");
   const whisperPttActive = ref(false);
   const micMeterBars = computed(() => Math.round(micLevel.value * 24));
+  let settingsGeneration = 0;
+  let settingsRequest = 0;
+
+  function beginSettingsRequest(): () => boolean {
+    settingsError.value = "";
+    const generation = settingsGeneration;
+    const request = ++settingsRequest;
+    return () => settingsOpen.value && generation === settingsGeneration && request === settingsRequest;
+  }
 
   function microphoneErrorMessage(error: unknown, fallback = "请检查浏览器权限"): string {
     const name = error instanceof DOMException ? error.name : "";
@@ -96,30 +105,30 @@ export function useWebClientAudioControls({
   }
 
   async function onInputDeviceChange(event: Event): Promise<void> {
-    settingsError.value = "";
+    const isCurrent = beginSettingsRequest();
     try {
       await setInputDevice((event.target as HTMLSelectElement).value);
     } catch (error: unknown) {
-      settingsError.value = microphoneErrorMessage(error, "无法切换麦克风");
+      if (isCurrent()) settingsError.value = microphoneErrorMessage(error, "无法切换麦克风");
     }
   }
 
   async function onOutputDeviceChange(event: Event): Promise<void> {
-    settingsError.value = "";
+    const isCurrent = beginSettingsRequest();
     try {
       await setOutputDevice((event.target as HTMLSelectElement).value);
     } catch (error: unknown) {
-      settingsError.value = localizedMessage(error instanceof Error ? error.message : "无法切换扬声器");
+      if (isCurrent()) settingsError.value = localizedMessage(error instanceof Error ? error.message : "无法切换扬声器");
     }
   }
 
   async function toggleMicTest(): Promise<void> {
-    settingsError.value = "";
+    const isCurrent = beginSettingsRequest();
     try {
       if (microphoneTestActive.value) stopMicrophoneTest();
       else await startMicrophoneTest();
     } catch (error: unknown) {
-      settingsError.value = microphoneErrorMessage(error);
+      if (isCurrent()) settingsError.value = microphoneErrorMessage(error);
     }
   }
 
@@ -178,14 +187,19 @@ export function useWebClientAudioControls({
   }
 
   watch(settingsOpen, (open) => {
+    settingsGeneration++;
     if (open) {
-      settingsError.value = "";
+      const isCurrent = beginSettingsRequest();
       prepareInputDevices().catch((error: unknown) => {
-        settingsError.value = microphoneErrorMessage(error);
+        if (isCurrent()) settingsError.value = microphoneErrorMessage(error);
       });
     } else {
       stopMicrophoneTest();
     }
+  }, { flush: "sync" });
+  onScopeDispose(() => {
+    settingsGeneration++;
+    stopMicrophoneTest();
   });
 
   return {
