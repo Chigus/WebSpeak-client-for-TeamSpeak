@@ -255,7 +255,12 @@
 .admin-root{min-height:0;overflow:hidden}
 .admin-shell{display:grid;min-height:0;grid-template-columns:236px minmax(0,1fr);overflow:hidden}
 .admin-main{display:flex;min-width:0;min-height:0;flex-direction:column;overflow:hidden}
-.admin-topbar{flex:0 0 auto}
+.admin-topbar{flex:0 0 auto;gap:16px;padding-block:12px}
+.admin-page-title{min-width:0;overflow-wrap:anywhere}
+.admin-tools{flex-shrink:0}
+.gateway-status{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;font-size:11px}
+.gateway-status .running-dot{flex:0 0 7px}
+.admin-topbar .theme-toggle{white-space:nowrap}
 .admin-main>.page-alert{flex:0 0 auto;margin:12px clamp(18px,2.4vw,44px) 0}
 .page-content{display:block;flex:1 1 auto;width:100%;max-width:none;min-width:0;min-height:0;margin:0;padding:clamp(18px,2vw,32px) clamp(18px,2.4vw,44px) 34px;overflow-x:hidden;overflow-y:auto}
 .login-page{height:100dvh;min-height:0;overflow:hidden}
@@ -340,6 +345,10 @@
 @media(max-width:560px){
   .admin-topbar{gap:8px}
   .admin-topbar>div:last-child{gap:5px}
+  .gateway-status{margin-inline:5px}
+  .gateway-status-label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  .admin-topbar .theme-toggle{width:36px;height:36px;justify-content:center;padding:0}
+  .admin-topbar .theme-toggle>span{display:none}
   .overview-page .hero-status{padding:18px}
   .overview-page .hero-status h2{font-size:24px}
   .overview-page .metric-grid article{padding:14px}

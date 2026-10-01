@@ -28,7 +28,14 @@
       </aside>
 
       <main class="admin-main" :inert="loggingOut || undefined" :aria-busy="loggingOut">
-        <header class="admin-topbar"><div><small>{{ tr('adminConsole') }}</small><h1>{{ currentPageTitle }}</h1></div><div><span class="running-dot"></span>{{ tr('gatewayRunning') }}<button type="button" class="theme-toggle" :title="themeLabel" :aria-label="themeLabel" @click="cycleTheme"><Icon :name="themeIcon" :size="17" /><span>{{ themeLabel }}</span></button><LanguageSwitcher v-model="language" :menu-label="tr('languageMenu')" @change="persistLanguage" /></div></header>
+        <header class="admin-topbar">
+          <div class="admin-page-title"><small>{{ tr('adminConsole') }}</small><h1>{{ currentPageTitle }}</h1></div>
+          <div class="admin-tools">
+            <span class="gateway-status" role="status" :title="tr('gatewayRunning')"><span class="running-dot" aria-hidden="true"></span><span class="gateway-status-label">{{ tr('gatewayRunning') }}</span></span>
+            <button type="button" class="theme-toggle" :title="themeLabel" :aria-label="themeLabel" @click="cycleTheme"><Icon :name="themeIcon" :size="17" /><span>{{ themeLabel }}</span></button>
+            <LanguageSwitcher v-model="language" :menu-label="tr('languageMenu')" @change="persistLanguage" />
+          </div>
+        </header>
 
         <div v-if="errorMessage" class="alert error page-alert">{{ errorMessage }}</div>
         <section v-if="route.path === '/admin/server'" class="page-content server-page">
@@ -134,8 +141,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { createAdminApi, isAdminRequestCancelled, type AdminApiError as ApiError } from "../services/admin-api.js";
-import type { ManagedInvite, AdminConnectionRecord } from "../../../src/shared/admin-responses.js";
-import { copy, germanCopy, russianCopy, japaneseCopy } from "../i18n/admin.js";
+import type { AdminConnectionRecord } from "../../../src/shared/admin-responses.js";
+import type { AdminTranslationKey } from "../i18n/admin.js";
+import { useAdminI18n } from "../composables/useAdminI18n.js";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import Icon from "../components/Icon.vue";
 import LanguageSwitcher from "../components/LanguageSwitcher.vue";
@@ -147,7 +155,6 @@ import { DEFAULT_WELCOME_TEXTS, type SiteLanguage } from "../../../src/site-copy
 import type { SkinCatalogEntry } from "../services/skin-catalog.js";
 import { applyTheme, getStoredTheme, isDarkTheme, nextTheme, saveTheme, type ThemeMode } from "../services/theme.js";
 
-type Language = "zh" | "en" | "de" | "ru" | "ja";
 type Screen = "login" | "change-password" | "admin";
 type WelcomeLanguage = SiteLanguage;
 type WelcomeTextField = "welcomeText" | "welcomeTextEn" | "welcomeTextDe" | "welcomeTextRu" | "welcomeTextJa";
@@ -155,7 +162,8 @@ type WelcomeTextField = "welcomeText" | "welcomeTextEn" | "welcomeTextDe" | "wel
 const route = useRoute();
 const router = useRouter();
 const storedLanguage = localStorage.getItem("webspeak:language");
-const language = ref<Language>(storedLanguage === "en" || storedLanguage === "de" || storedLanguage === "ru" || storedLanguage === "ja" ? storedLanguage : typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("ru") ? "ru" : typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("ja") ? "ja" : "zh");
+const language = ref<SiteLanguage>(storedLanguage === "en" || storedLanguage === "de" || storedLanguage === "ru" || storedLanguage === "ja" ? storedLanguage : typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("ru") ? "ru" : typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("ja") ? "ja" : "zh");
+const { tr, formatDate, formatUptime, formatAge, sessionStateLabel, connectionStatusLabel, inviteStatusLabel, eventName, errorText, connectionFailureText } = useAdminI18n(language);
 const themeMode = ref<ThemeMode>(getStoredTheme());
 const themeIcon = computed(() => isDarkTheme(themeMode.value) ? "sun" : "moon");
 const themeLabel = computed(() => isDarkTheme(themeMode.value) ? tr("switchToLightTheme") : tr("switchToDarkTheme"));
@@ -216,14 +224,13 @@ const selectedWelcomeText = computed<string>({
 const selectedWelcomeLanguageLabel = computed(() => welcomeLanguageOptions.find((option) => option.value === welcomeLanguage.value)?.label ?? "");
 const selectedWelcomeDefault = computed(() => serverForm.welcomeDefaults[welcomeLanguage.value] || DEFAULT_WELCOME_TEXTS[welcomeLanguage.value]);
 
-function tr(key: keyof typeof copy.zh, vars: Record<string, string | number> = {}): string { let value: string = language.value === "zh" ? copy.zh[key] : language.value === "de" ? germanCopy[key] ?? copy.en[key] ?? copy.zh[key] : language.value === "ru" ? russianCopy[key] ?? copy.en[key] ?? copy.zh[key] : language.value === "ja" ? japaneseCopy[key] ?? copy.en[key] ?? copy.zh[key] : copy.en[key] ?? copy.zh[key]; for (const [name, replacement] of Object.entries(vars)) value = value.replaceAll(`{{${name}}}`, String(replacement)); return value; }
 const passwordStrength = computed(() => Math.min(100, Math.max(8, newPassword.value.length * 5 + (/[\s\W]/.test(newPassword.value) ? 15 : 0))));
 const currentPageTitle = computed(() => route.path === "/admin/server" ? tr('server') : route.path === "/admin/operations" ? tr('operations') : route.path === "/admin/skins" ? tr('skinLibrary') : tr('overview'));
 const testResultTitle = computed(() => {
   const result = testResult.value;
   if (!result) return "";
   if (result.ok) return result.checkType === "network" ? tr("networkReachable") : tr("connectionReady");
-  const names: Record<string, keyof typeof copy.zh> = {
+  const names: Record<string, AdminTranslationKey> = {
     INVALID_TARGET: "serverAddress",
     INVALID_NICKNAME: "invalidNicknameError",
     HOST_NOT_FOUND: "hostNotFoundError",
@@ -381,80 +388,13 @@ async function dismissLegacyNotice() {
 }
 function persistLanguage() { localStorage.setItem("webspeak:language", language.value); }
 function cycleTheme() { themeMode.value = nextTheme(themeMode.value); saveTheme(themeMode.value); }
-function formatDate(value: string | null) { return value ? new Intl.DateTimeFormat(language.value === "zh" ? "zh-CN" : language.value === "de" ? "de-DE" : language.value === "ru" ? "ru-RU" : language.value === "ja" ? "ja-JP" : "en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "—"; }
-function formatUptime(seconds: number) { const hours = Math.floor(seconds / 3600); const minutes = Math.floor((seconds % 3600) / 60); if (language.value === "zh") return `已运行 ${hours} 小时 ${minutes} 分钟`; if (language.value === "de") return `${hours} Std. ${minutes} Min. aktiv`; if (language.value === "ru") return `Работает ${hours} ч ${minutes} мин`; if (language.value === "ja") return `${hours}時間 ${minutes}分 稼働`; return `Up ${hours}h ${minutes}m`; }
-function formatAge(seconds: number | null) { if (seconds == null) return "—"; if (seconds < 60) { if (language.value === "zh") return `${seconds} 秒`; if (language.value === "de") return `${seconds} Sek.`; if (language.value === "ru") return `${seconds} с`; if (language.value === "ja") return `${seconds}秒`; return `${seconds}s`; } const minutes = Math.floor(seconds / 60); if (minutes < 60) { if (language.value === "zh") return `${minutes} 分钟`; if (language.value === "de") return `${minutes} Min.`; if (language.value === "ru") return `${minutes} мин`; if (language.value === "ja") return `${minutes}分`; return `${minutes}m`; } const hours = Math.floor(minutes / 60); const rest = minutes % 60; if (language.value === "zh") return `${hours} 小时 ${rest} 分钟`; if (language.value === "de") return `${hours} Std. ${rest} Min.`; if (language.value === "ru") return `${hours} ч ${rest} мин`; if (language.value === "ja") return `${hours}時間 ${rest}分`; return `${hours}h ${rest}m`; }
-function connectionStatusLabel(status: AdminConnectionRecord["status"]) { const names: Record<AdminConnectionRecord["status"], keyof typeof copy.zh> = { active: "connectionActive", connecting: "connectionConnecting", disconnected: "connectionDisconnected", failed: "connectionFailed" }; return tr(names[status]); }
 function connectionRoute(record: AdminConnectionRecord) {
   const route = tr("connectionFromTo", { ip: record.clientIp || "—", target: record.target || "—" });
   if (!record.relayName && !record.relayTarget) return route;
   const relay = [record.relayName, record.relayTarget].filter(Boolean).join(" · ") || "—";
   return `${route} · ${tr("connectionViaRelay", { relay })}`;
 }
-function sessionStateLabel(state: string) { const names: Record<string, { zh: string; en: string; de: string }> = { connecting: { zh: "连接中", en: "Connecting", de: "Verbindung wird hergestellt" }, authenticating: { zh: "认证中", en: "Authenticating", de: "Authentifizierung" }, syncing: { zh: "同步中", en: "Syncing", de: "Synchronisierung" }, connected: { zh: "已连接", en: "Connected", de: "Verbunden" }, interrupted: { zh: "已中断", en: "Interrupted", de: "Unterbrochen" }, reconnecting: { zh: "重连中", en: "Reconnecting", de: "Wiederverbindung" }, disconnecting: { zh: "断开中", en: "Disconnecting", de: "Wird getrennt" }, failed: { zh: "失败", en: "Failed", de: "Fehlgeschlagen" }, idle: { zh: "空闲", en: "Idle", de: "Inaktiv" } }; const locale = language.value === "zh" ? "zh" : language.value === "de" ? "de" : "en"; return names[state]?.[locale] ?? state; }
-function inviteStatusLabel(status: ManagedInvite["status"]) { const names: Record<ManagedInvite["status"], keyof typeof copy.zh> = { active: "active", expired: "expired", exhausted: "exhausted", revoked: "revoked" }; return tr(names[status]); }
 function formatContext(context: Record<string, string | number | boolean>) { return Object.entries(context).map(([key, value]) => `${key}=${value}`).join(" · "); }
-function eventName(event: string) { if (event === "ADMIN_LOGIN_FAILED") return language.value === "zh" ? "管理员登录失败" : language.value === "ru" ? "Ошибка входа администратора" : language.value === "ja" ? "管理者ログイン失敗" : language.value === "de" ? "Administrator-Anmeldung fehlgeschlagen" : "Administrator login failed"; if (event === "CONNECTION_TEST_SUCCEEDED") return language.value === "zh" ? "连接测试成功" : language.value === "ru" ? "Проверка подключения успешна" : language.value === "ja" ? "接続テスト成功" : language.value === "de" ? "Verbindungstest erfolgreich" : "Connection test succeeded"; if (event === "CONNECTION_TEST_FAILED") return language.value === "zh" ? "连接测试失败" : language.value === "ru" ? "Проверка подключения не удалась" : language.value === "ja" ? "接続テスト失敗" : language.value === "de" ? "Verbindungstest fehlgeschlagen" : "Connection test failed"; const names: Record<string, keyof typeof copy.zh> = { ADMIN_LOGIN_SUCCEEDED: "loginEvent", ADMIN_LOGOUT: "logoutEvent", SETTINGS_CHANGED: "settingsEvent", ADMIN_INITIALIZED: "initializedEvent", LEGACY_CONFIG_IMPORTED: "importedEvent", CONNECTION_TEST: "testEvent" }; return names[event] ? tr(names[event]) : language.value === "zh" ? "系统事件" : event.replaceAll("_", " "); }
-function errorText(code?: string) {
-  if (code === "INVALID_PASSWORD") return tr('invalidPassword');
-  if (code === "INVALID_ADMIN_PASSWORD") return tr('setupPasswordShort');
-  if (code === "PASSWORD_CHANGE_REQUIRED") return tr('changePasswordLead');
-  if (code === "RATE_LIMITED") return tr('rateLimited');
-  if (code === "INVALID_WEBRTC_PORT_RANGE") {
-    if (language.value === "zh") return "WebRTC UDP 端口范围无效，请填写 1024–65535 且起始端口不能大于结束端口。";
-    if (language.value === "de") return "Der WebRTC-UDP-Portbereich ist ungültig. Verwende 1024–65535; der Startport darf nicht größer als der Endport sein.";
-    if (language.value === "ru") return "Диапазон UDP-портов WebRTC некорректен. Используйте 1024–65535; начальный порт не может быть больше конечного.";
-    if (language.value === "ja") return "WebRTC UDP ポート範囲が正しくありません。1024–65535 の範囲で、開始ポートを終了ポート以下にしてください。";
-    return "The WebRTC UDP port range is invalid. Use 1024–65535 with the start no greater than the end.";
-  }
-  if (code === "WEBRTC_PORT_LOCKED") {
-    if (language.value === "zh") return "WebRTC 已开启，请先关闭并保存后再修改端口范围。";
-    if (language.value === "de") return "WebRTC ist aktiviert. Deaktiviere es und speichere zuerst, bevor du den Portbereich änderst.";
-    if (language.value === "ru") return "WebRTC включён. Сначала отключите его и сохраните настройки, затем изменяйте диапазон портов.";
-    if (language.value === "ja") return "WebRTC が有効です。ポート範囲を変更する前に無効にして保存してください。";
-    return "WebRTC is enabled. Turn it off and save before changing the port range.";
-  }
-  const locale = language.value === "zh" ? "zh" : language.value === "de" ? "de" : "en";
-  const relayErrors: Record<string, { zh: string; en: string; de: string }> = {
-    INVALID_RELAY_NAME: { zh: "中继名称无效或为空。", en: "The relay name is invalid or empty.", de: "Der Relay-Name ist ungültig oder leer." },
-    INVALID_RELAY_TARGET: { zh: "中继服务器地址无效。", en: "The relay server address is invalid.", de: "Die Relay-Serveradresse ist ungültig." },
-    INVALID_RELAY_TOKEN: { zh: "启用中继时必须填写令牌。", en: "A relay token is required when the relay is enabled.", de: "Beim Aktivieren des Relays ist ein Token erforderlich." },
-  };
-  if (relayErrors[code || ""]) return relayErrors[code || ""][locale];
-  const probe: Record<string, { zh: string; en: string; de: string }> = {
-    INVALID_TARGET: { zh: "TeamSpeak 服务器地址格式无效。", en: "The TeamSpeak server address is invalid.", de: "Die TeamSpeak-Serveradresse ist ungültig." },
-    PING_UNAVAILABLE: { zh: "当前运行环境没有可用的 ICMP Ping 工具。", en: "The runtime does not provide an ICMP ping tool.", de: "In der Laufzeitumgebung ist kein ICMP-Ping-Tool verfügbar." },
-    HOST_NOT_FOUND: { zh: "找不到服务器主机名。", en: "The server hostname could not be resolved.", de: "Der Servername konnte nicht aufgelöst werden." },
-    UNREACHABLE: { zh: "无法连接 TeamSpeak 服务器。", en: "The TeamSpeak server is unreachable.", de: "Der TeamSpeak-Server ist nicht erreichbar." },
-    TIMEOUT: { zh: "连接 TeamSpeak 超时。", en: "The TeamSpeak connection timed out.", de: "Die Verbindung zu TeamSpeak ist abgelaufen." },
-    PROTOCOL_NEGOTIATION_FAILED: { zh: "无法识别 TeamSpeak 协议。", en: "TeamSpeak protocol negotiation failed.", de: "Die Aushandlung des TeamSpeak-Protokolls ist fehlgeschlagen." },
-    SERVER_REJECTED: { zh: "TeamSpeak 服务器拒绝了连接。", en: "The TeamSpeak server rejected the connection.", de: "Der TeamSpeak-Server hat die Verbindung abgelehnt." },
-    TARGET_NOT_ALLOWED: { zh: "此地址不允许在开放模式中使用。", en: "This target is not allowed in open mode.", de: "Dieses Ziel ist im offenen Modus nicht erlaubt." },
-  };
-  return probe[code || ""]?.[locale] ?? tr('requestFailed');
-}
-
-function connectionFailureText(code?: string) {
-  const names: Record<string, keyof typeof copy.zh> = {
-    PASSWORD_REQUIRED: "serverPasswordRequiredError",
-    SERVER_PASSWORD_REQUIRED: "serverPasswordRequiredError",
-  INVALID_PASSWORD: "invalidServerPasswordError",
-  INVALID_SERVER_PASSWORD: "invalidServerPasswordError",
-    INVALID_TARGET: "serverAddress",
-    INVALID_NICKNAME: "invalidNicknameError",
-  HOST_NOT_FOUND: "hostNotFoundError",
-  UNREACHABLE: "networkUnreachableError",
-  CONNECTION_REFUSED: "connectionRefusedError",
-  CONNECTION_RESET: "connectionResetError",
-  TIMEOUT: "networkTimeoutError",
-    PROTOCOL_NEGOTIATION_FAILED: "protocolFailureError",
-    SERVER_REJECTED: "serverRejectedError",
-  PING_UNAVAILABLE: "pingUnavailableError",
-  CONNECTION_FAILED: "connectionFailed",
-  };
-  return names[code || ""] ? tr(names[code || ""]) : errorText(code);
-}
-
 </script>
 
 <style scoped src="../styles/admin.css"></style>
