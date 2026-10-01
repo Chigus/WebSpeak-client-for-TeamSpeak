@@ -31,7 +31,6 @@
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
   background: var(--surface-0);
   color: var(--text-primary);
 }
@@ -64,11 +63,6 @@
 
 .join-header {
   width: min(1680px, calc(100% - 32px));
-}
-
-.join-footer {
-  width: 100%;
-  padding-inline: max(20px, calc((100% - 1240px) / 2));
 }
 
 .join-header {
@@ -133,7 +127,6 @@
   max-width: 100%;
   flex: 1 1 640px;
   flex-wrap: wrap;
-  align-items: center;
   justify-content: flex-end;
   gap: clamp(6px, 1vw, 14px);
   row-gap: 6px;
@@ -539,7 +532,6 @@
   height: 16px;
   flex: 0 0 auto;
   border-radius: 50%;
-  color: #fff;
   background: currentColor;
   color: #fff;
   font-size: 10px;
@@ -721,7 +713,6 @@
 .app-shell {
   display: grid;
   grid-template-columns: 76px 292px minmax(0, 1fr) 246px;
-  height: 100dvh;
   overflow: hidden;
   background: #fff;
 }
@@ -1209,106 +1200,6 @@
 
 .workspace {
   display: flex;
-  min-width: 0;
-  flex-direction: column;
-  background: #fff;
-}
-
-.workspace-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 73px;
-  padding: 0 29px;
-  border-bottom: 1px solid #eef2f0;
-}
-
-.breadcrumbs {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-  color: #52605b;
-  font-size: 12px;
-}
-
-.breadcrumbs strong {
-  overflow: hidden;
-  color: #26332f;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.crumb-muted {
-  color: #98a39f;
-}
-
-.mobile-brand {
-  display: none;
-  color: #006a64;
-  font-size: 17px;
-  font-weight: 800;
-  letter-spacing: -.06em;
-}
-
-.mobile-brand em {
-  color: #293632;
-  font-style: normal;
-  font-weight: 500;
-}
-
-.workspace-actions,
-.dock-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.header-action,
-.dock-icon {
-  display: grid;
-  place-items: center;
-  color: #75847f;
-  background: transparent;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: .16s;
-}
-
-.header-action {
-  width: 32px;
-  height: 32px;
-}
-
-.header-action:hover,
-.dock-icon:hover {
-  color: #006a64;
-  background: #edf5f2;
-}
-
-.disconnect-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 33px;
-  margin-left: 8px;
-  padding: 0 13px;
-  color: #a94d48;
-  background: #fff2f1;
-  border-radius: 8px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.disconnect-button:hover {
-  color: #fff;
-  background: #c95a54;
-}
-
-.workspace {
-  display: flex;
-  min-width: 0;
   flex-direction: column;
   background: #fff;
 }
@@ -2165,7 +2056,6 @@
 }
 
 :deep(.member-volume) {
-  display: flex;
   align-items: center;
   gap: 5px;
   color: #a1afaa;
@@ -2489,7 +2379,6 @@
 
 :deep(.settings-footer) {
   display: flex;
-  justify-content: flex-end;
   gap: 16px;
   min-height: 67px;
   padding: 15px 28px;
@@ -2932,7 +2821,6 @@
   .join-content {
     display: flex;
     flex-direction: column;
-    align-items: stretch;
     justify-content: center;
     gap: 35px;
     padding: 36px 0 48px;
@@ -2971,12 +2859,10 @@
     margin-left: auto;
   }
   :deep(.field-grid) {
-    grid-template-columns: minmax(0, 1fr) 112px;
     gap: 8px;
   }
   .app-shell {
     display: block;
-    height: 100dvh;
   }
   .nav-rail,
   .channel-sidebar,
@@ -2990,16 +2876,10 @@
     min-height: 61px;
     padding: 0 15px;
   }
-  .mobile-brand {
-    display: inline;
-  }
   .crumb-muted,
   .breadcrumbs > .ui-icon,
   .breadcrumbs > strong {
     display: none;
-  }
-  .workspace-actions {
-    gap: 3px;
   }
   .disconnect-button {
     margin-left: 2px;
@@ -3027,14 +2907,10 @@
     right: -15px;
     bottom: 4px;
     transform: scale(.75);
-    transform-origin: right bottom;
   }
   .voice-section,
   .chat-panel {
     margin-top: 25px;
-  }
-  :deep(.voice-grid) {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   :deep(.voice-card) {
     min-height: 143px;
@@ -3126,13 +3002,6 @@
   .room-stats span:last-child,
   .stat-divider {
     display: none;
-  }
-}
-
-@media (max-width: 740px) {
-  .join-footer {
-    width: 100%;
-    padding-inline: 16px;
   }
 }
 
@@ -3983,18 +3852,12 @@
 @media (max-width: 980px) {
   .app-shell {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) minmax(210px, 35dvh);
   }
   .workspace {
-    height: auto;
     min-height: 0;
   }
   :deep(.member-panel) {
-    display: flex;
-    border-top: 1px solid #eef2f0;
     border-left: 0;
-    padding: 16px 18px;
   }
   :deep(.member-tree) {
     margin-top: 10px;
@@ -4004,7 +3867,6 @@
 @media (max-width: 740px) {
   .app-shell {
     display: grid;
-    grid-template-rows: minmax(0, 1fr) 220px;
   }
   .app-shell .room-hero h1 {
     font-size: 27.5px;
@@ -4033,15 +3895,6 @@
 /* Keep the connected workspace sized to the browser viewport and let the
    workspace and member tree own their scroll areas when the window shrinks. */
 
-:global(html[data-ws-route="webclient"]),
-:global(html[data-ws-route="webclient"] body),
-:global(html[data-ws-route="webclient"] #app) {
-  width: 100%;
-  height: 100dvh;
-  min-height: 0;
-  max-height: 100dvh;
-}
-
 :global(html[data-ws-route="webclient"] body) {
   overflow-x: hidden;
   overflow-y: auto;
@@ -4058,8 +3911,6 @@
 }
 
 .join-page {
-  height: 100dvh;
-  min-height: 0;
   overflow-y: auto;
 }
 
@@ -4135,7 +3986,6 @@
     min-width: 0;
     flex: 0 1 auto;
     flex-wrap: nowrap;
-    gap: 7px;
   }
   .app-shell {
     grid-template-rows: minmax(0, 1fr) 220px;
@@ -4301,13 +4151,6 @@
   }
   :deep(.github-button) {
     width: 34px;
-    justify-content: center;
-    padding: 0;
-  }
-  :deep(.qq-button) {
-    width: 32px;
-    min-width: 32px;
-    min-height: 32px;
     justify-content: center;
     padding: 0;
   }
@@ -4820,15 +4663,10 @@
   :deep(.message-composer) {
     margin-bottom: 8px;
   }
-}
-
-@media (max-width: 740px) {
   :deep(.member-context-menu) {
     left: 12px !important;
     right: 12px;
-    top: auto !important;
     bottom: env(safe-area-inset-bottom, 0px);
-    min-width: 0;
     border-radius: 16px 16px 0 0;
     padding: 14px;
   }
@@ -4840,12 +4678,6 @@
     padding: 4px 8px 11px;
     font-size: 14px;
   }
-  :deep(.menu-volume) {
-    font-size: 12px;
-  }
-}
-
-@media (max-width: 740px) {
   :deep(.member-submenu-panel) {
     position: static;
     min-width: 0;
@@ -4942,22 +4774,16 @@
     display: flex;
     flex-direction: column;
     height: auto;
-    min-height: 100dvh;
     max-height: none;
     padding-bottom: calc(68px + env(safe-area-inset-bottom, 0px));
     overflow: visible;
   }
   .app-shell .workspace {
     display: flex;
-    flex: 1 1 auto;
     height: calc(100dvh - 61px);
-    min-height: 0;
   }
   .app-shell .workspace-scroll {
     flex: 1;
-    height: 100%;
-    min-height: 0;
-    overflow-y: auto;
   }
   :deep(.app-shell .mobile-section-hidden) {
     display: none;
@@ -4975,12 +4801,6 @@
     border-top: 1px solid var(--border);
     border-right: 0;
     overflow: hidden;
-  }
-  :deep(.app-shell .member-panel.mobile-section-visible) {
-    display: flex !important;
-  }
-  :deep(.app-shell .member-panel .member-tree) {
-    max-height: none;
   }
   .mobile-more-panel {
     display: grid;
@@ -5157,34 +4977,19 @@
 }
 
 @media (max-width: 740px) {
-  .join-content {
-    overflow-y: auto;
-  }
   .app-shell {
-    height: 100dvh;
     min-height: 0;
-    max-height: 100dvh;
-    padding-bottom: calc(74px + env(safe-area-inset-bottom, 0px));
-    overflow: hidden;
   }
   .app-shell .workspace {
     height: auto;
-    min-height: 0;
     flex: 1 1 auto;
   }
   .app-shell.mobile-view-channels .workspace {
     display: none;
   }
-  :deep(.app-shell .member-panel.mobile-section-visible) {
-    flex: 1 1 auto;
-    min-height: 0;
-    max-height: none;
-  }
   .mobile-more-panel {
     min-height: 0;
-    max-height: none;
     margin-bottom: 0;
-    overflow-y: auto;
   }
 }
 
