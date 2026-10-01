@@ -206,29 +206,11 @@
 
       </main>
 
-      <aside :class="['member-panel', { 'mobile-section-visible': mobileSection === 'channels' }]" data-ws-part="voice.member-panel">
-        <div class="member-panel-heading" data-ws-part="voice.member-panel.heading"><div><h2>{{ t('people') }}</h2></div><button type="button" class="status-button" :class="{ active: away }" @click="toggleAway"><span class="status-dot"></span>{{ away ? t('away') : t('available') }}</button></div>
-        <div class="member-search" data-ws-part="voice.member-panel.search"><Icon name="search" :size="15" /><input v-model="memberQuery" :placeholder="t('searchMembers')" :aria-label="t('searchMembers')" /></div>
-        <div class="member-tree" data-ws-part="voice.member-panel.channels">
-          <section v-for="channelItem in filteredMemberChannels" :key="channelItem.id" :class="['member-channel-group', { current: currentChannel?.id === channelItem.id, 'drag-over': dragOverChannelId === channelItem.id }]" data-ws-part="voice.channel-group" :data-ws-state="currentChannel?.id === channelItem.id ? 'current' : dragOverChannelId === channelItem.id ? 'drag-over' : 'idle'" :data-member-channel-id="channelItem.id" :style="{ marginLeft: `${channelItem.depth * 10}px` }" @dragover="onChannelDragOver(channelItem, $event)" @dragleave="onChannelDragLeave(channelItem, $event)" @drop="onChannelDrop(channelItem, $event)" @pointermove="onMemberPointerMove($event)" @pointerup="onMemberPointerUp($event)" @pointercancel="onMemberPointerCancel($event)">
-            <button class="member-channel-heading" data-ws-part="voice.channel-group.heading" :data-ws-state="channelItem.id === currentChannel?.id ? 'current' : 'idle'" :title="t('switchChannel')" @click="selectChannel(channelItem)">
-              <Icon name="volume" :size="16" />
-              <span>{{ channelItem.name }}</span>
-              <small>{{ channelItem.members.length }}</small>
-            </button>
-            <div v-if="channelItem.members.length" class="member-list" data-ws-part="voice.channel-group.members">
-              <div v-for="member in channelItem.members" :key="`${channelItem.id}-${member.id}`" :class="['member-row', { dragging: draggedMember?.id === member.id }]" data-ws-part="voice.member-row" :data-ws-state="draggedMember?.id === member.id ? 'dragging' : isSpeaking(member) ? 'speaking' : 'connected'" :draggable="!member.isSelf" @dragstart="onMemberDragStart(member, $event)" @dragend="onMemberDragEnd" @pointerdown="onMemberPointerDown(member, $event)" @pointermove="onMemberPointerMove($event)" @pointerup="onMemberPointerUp($event)" @pointercancel="onMemberPointerCancel($event)" @contextmenu.prevent="openMemberMenu(member, $event)">
-                <div :class="['member-avatar', { speaking: isSpeaking(member) }]" data-ws-part="voice.member-row.avatar" :style="avatarStyle(member.nickname, member.isSelf, member.avatar)">{{ member.avatar ? '' : avatarInitial(member.nickname) }}<span class="member-presence"></span></div>
-                <div class="member-copy" data-ws-part="voice.member-row.copy"><strong>{{ memberDisplayName(member) }}</strong><span>{{ member.away ? t('away') : isSpeaking(member) ? t('speaking') : member.isSelf ? t('yourDevice') : t('memberOnline') }}</span></div>
-                <div class="member-flags" data-ws-part="voice.member-row.flags" :aria-label="t('memberStates')"><span v-if="member.away" :title="t('away')" :aria-label="t('away')"><Icon name="clock" :size="13" /></span><span v-if="member.inputMuted" :title="t('inputMuted')" :aria-label="t('inputMuted')"><Icon name="mic-off" :size="13" /></span><span v-if="member.outputMuted" :title="t('outputMuted')" :aria-label="t('outputMuted')"><Icon name="volume-off" :size="13" /></span><span v-if="member.channelCommander" :title="t('channelCommander')" :aria-label="t('channelCommander')"><Icon name="shield" :size="13" /></span></div>
-                <div class="member-volume" data-ws-part="voice.member-row.volume"><Icon :name="(volumes[member.id] ?? 1) === 0 ? 'volume-off' : 'volume'" :size="14" /><input type="range" min="0" max="400" :value="(volumes[member.id] ?? 1) * 100" :style="rangeStyle((volumes[member.id] ?? 1) / 4, 1)" :aria-label="t('memberVolume')" @input="onVolInput(member.id, $event)" /></div>
-                <button v-if="isMobileViewport && !member.isSelf" type="button" class="member-action-button" :aria-label="t('moreMemberOptions')" @click.stop="openMemberActions(member)"><Icon name="more" :size="18" /></button>
-              </div>
-            </div>
-            <div v-else class="channel-no-members">{{ t('noMembersInChannel') }}</div>
-          </section>
-        </div>
-        <div v-if="!filteredMemberChannels.length" class="member-empty">{{ t('noMatchingMembers') }}</div>
+      <ChannelMemberPanel v-model:query="memberQuery" :model="memberControls"
+        :filtered-member-channels="filteredMemberChannels" :current-channel-id="currentChannel?.id"
+        :mobile-visible="mobileSection === 'channels'" :is-mobile-viewport="isMobileViewport"
+        :volumes="volumes" :avatar-style="avatarStyle" :avatar-initial="avatarInitial"
+        :range-style="rangeStyle" :t="t" @select-channel="selectChannel" @volume-input="onVolInput">
         <div v-if="!isMobileViewport" class="desktop-audio-dock" data-ws-part="voice.audio-dock" role="toolbar" :aria-label="t('desktopAudioControls')">
           <div class="desktop-audio-dock-copy"><strong>{{ t('desktopAudioControls') }}</strong><span>{{ accompanimentActive ? t('accompanimentActive') : t('desktopAudioHint') }}</span></div>
           <div class="desktop-audio-dock-actions">
@@ -252,7 +234,7 @@
             <button type="button" class="dock-audio-button accompaniment-toggle" :class="{ active: accompanimentActive }" :title="accompanimentActive ? t('stopAccompaniment') : t('startAccompaniment')" :aria-label="accompanimentActive ? t('stopAccompaniment') : t('startAccompaniment')" :aria-pressed="accompanimentActive" @click="toggleAccompaniment"><Icon name="music" :size="18" /></button>
           </div>
         </div>
-      </aside>
+      </ChannelMemberPanel>
 
       <section v-if="mobileSection === 'more'" class="mobile-more-panel" data-ws-part="voice.mobile-more">
         <span class="section-kicker">{{ t('mobileMore') }}</span>
@@ -272,23 +254,9 @@
       </nav>
     </div>
 
-    <div v-if="memberMenu && isMobileViewport" class="member-menu-backdrop" data-ws-part="voice.context-menu-backdrop" @click="memberMenu = null"></div>
-    <div v-if="memberMenu" class="member-context-menu" data-ws-part="voice.context-menu" :style="memberMenuStyle" @click.stop>
-      <div class="member-menu-header" data-ws-part="voice.context-menu.header"><strong>{{ memberMenu.member.nickname }}</strong><button type="button" class="member-menu-close" :aria-label="t('close')" @click="memberMenu = null"><Icon name="close" :size="17" /></button></div>
-      <label class="menu-volume"><span>{{ t('memberVolume') }}</span><input type="range" min="0" max="400" :value="(volumes[memberMenu.member.id] ?? 1) * 100" :style="rangeStyle((volumes[memberMenu.member.id] ?? 1) / 4, 1)" :aria-label="t('memberVolume')" @input="onVolInput(memberMenu.member.id, $event)" /></label>
-      <button type="button" @click="openPrivateChat(memberMenu.member.id); memberMenu = null"><Icon name="message" :size="15" /> {{ t('privateMessage') }}</button>
-      <button type="button" @click="pokeMember(memberMenu.member); memberMenu = null"><Icon name="bell" :size="15" /> {{ t('poke') }}</button>
-      <button type="button" @click="toggleWhisperTarget(memberMenu.member); memberMenu = null"><Icon name="mic" :size="15" /> {{ whisperTargetIds.has(memberMenu.member.id) ? t('removeWhisperTarget') : t('setWhisperTarget') }}</button>
-      <button type="button" @click="copyMemberName(memberMenu.member); memberMenu = null"><Icon name="copy" :size="15" /> {{ t('copyNickname') }}</button>
-      <div class="member-menu-submenu" @mouseenter="memberMoveMenuOpen = true">
-        <button type="button" class="member-menu-submenu-trigger" :aria-expanded="memberMoveMenuOpen" @click="toggleMemberMoveMenu"><Icon name="chevron-right" :size="15" /> <span>{{ t('moveMemberMenu') }}</span><Icon name="chevron-right" :size="13" class="member-menu-submenu-arrow" /></button>
-        <div v-if="memberMoveMenuOpen" class="member-submenu-panel" data-ws-part="voice.context-menu.move-submenu" @click.stop>
-          <button v-if="memberMoveMenuCurrentChannel" type="button" :disabled="memberMoveMenuCurrentSameChannel" @click="moveMemberDirect(memberMenu.member, memberMoveMenuCurrentChannel.id)"><Icon name="users" :size="15" /><span>{{ t('moveMemberMyChannel') }}</span><small>{{ memberMoveMenuCurrentChannel.name }}</small></button>
-          <button v-for="targetChannel in memberMoveMenuOtherChannels" :key="targetChannel.id" type="button" @click="moveMemberDirect(memberMenu.member, targetChannel.id)"><Icon name="volume" :size="15" /><span>{{ targetChannel.name }}</span></button>
-          <span v-if="!memberMoveMenuCurrentChannel && !memberMoveMenuOtherChannels.length" class="member-submenu-empty">{{ t('moveMemberNoChannels') }}</span>
-        </div>
-      </div>
-    </div>
+    <MemberActionsMenu :model="memberControls" :is-mobile-viewport="isMobileViewport"
+      :volumes="volumes" :whisper-target-ids="whisperTargetIds"
+      :range-style="rangeStyle" :t="t" @private-chat="openPrivateChat" @volume-input="onVolInput" />
 
     <!-- Protected channel password modal -->
     <div v-if="channelPasswordDialog.open" class="modal-backdrop channel-password-backdrop" @click.self="cancelChannelPassword">
@@ -340,6 +308,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from "vue";
 import Icon from "../components/Icon.vue";
+import ChannelMemberPanel from "../components/web-client/ChannelMemberPanel.vue";
+import MemberActionsMenu from "../components/web-client/MemberActionsMenu.vue";
 import JoinForm from "../components/web-client/JoinForm.vue";
 import ChatPanel from "../components/web-client/ChatPanel.vue";
 import WebClientHeader from "../components/web-client/WebClientHeader.vue";
@@ -691,36 +661,7 @@ const {
   whisperTargetIds,
   t,
 });
-const {
-  away,
-  memberMenu,
-  memberMoveMenuOpen,
-  draggedMember,
-  dragOverChannelId,
-  memberMoveMenuCurrentChannel,
-  memberMoveMenuCurrentSameChannel,
-  memberMoveMenuOtherChannels,
-  openMemberMenu,
-  openMemberActions,
-  toggleMemberMoveMenu,
-  moveMemberDirect,
-  onMemberDragStart,
-  onMemberDragEnd,
-  onMemberPointerDown,
-  onMemberPointerMove,
-  onMemberPointerUp,
-  onMemberPointerCancel,
-  onChannelDragOver,
-  onChannelDragLeave,
-  onChannelDrop,
-  toggleWhisperTarget,
-  clearWhisperTargets,
-  pokeMember,
-  copyMemberName,
-  toggleAway,
-  isSpeaking,
-  memberDisplayName,
-} = useWebClientMembers({
+const memberControls = useWebClientMembers({
   channels: memberChannels,
   currentChannel,
   members,
@@ -735,6 +676,7 @@ const {
   showToast,
   t,
 });
+const { away, memberMenu, clearWhisperTargets, isSpeaking, openMemberActions } = memberControls;
 const chat = useWebClientChat({
   messages: chatMessages,
   members,
@@ -799,15 +741,7 @@ const {
   t,
 });
 const visiblePokes = computed(() => pokeNotifications.slice(-3));
-const memberMenuStyle = computed(() => {
-  if (!memberMenu.value) return {};
-  // #app applies zoom:var(--ui-scale) which also scales fixed-element
-  // coordinates against the viewport; divide the pointer position back to CSS
-  // pixels so the context menu opens exactly where the user clicked on large
-  // displays.
-  const scale = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--ui-scale")) || 1;
-  return { left: `${memberMenu.value.x / scale}px`, top: `${memberMenu.value.y / scale}px` };
-});
+
 watch(() => pokeNotifications.length, (length, previousLength) => {
   const latest = pokeNotifications[length - 1];
   if (!latest || length <= previousLength) return;

@@ -183,6 +183,8 @@ The identity dialog retains page-owned CSS with narrowly targeted `:deep` select
 
 The public join form uses explicit named field models and emits page actions. The chat panel receives a presentation subset of the single page-owned chat controller; keep its list ref bound to the rendered scroller so tab changes and new messages retain automatic scrolling. Form grid columns must allow shrinking, and narrow identity/relay controls must wrap without clipping translated text.
 
+The member panel and actions menu also share one page-owned member controller. The panel exposes an audio-dock slot; menu placement uses measured viewport bounds, converts through the page CSS zoom, and releases its resize observer/listener on unmount. Only desktop may open the move submenu on hover: mobile bottom-anchored menus change position when expanded and must open on click to avoid moving a member accidentally. Constrain short-window menus and allow scrolling.
+
 Admin presentation components receive stable feature controllers; do not instantiate duplicate controllers in children. The welcome-language model remains page-owned and the skin file input belongs to its presentation component. Feature CSS crosses these boundaries with `:deep`, while shell and language-control selectors retain their existing scope. On narrow screens the brand and logout occupy the first row and all four navigation links share a separate row with at least 44 px high targets.
 
 Keep each repair batch tied to its current plan item. Combine related fixes before running the full verification command; use focused checks during diagnosis and repeat the full suite only when subsequent changes or failures warrant it.
