@@ -8,7 +8,7 @@ import pino from "pino";
 import { VoiceBridge } from "./voice-bridge.js";
 import { JoinTicketStore } from "./join-ticket.js";
 import { OpusEncoder } from "./opus-codec.js";
-import type { TSClient } from "./ts-client.js";
+import type { TSClient, TSClientAvatar, TSDirectorySnapshot } from "./ts-client.js";
 import type { AudioFlowStats } from "./audio-stats.js";
 import type { WebRtcAudioSession } from "./webrtc-audio.js";
 
@@ -17,7 +17,9 @@ import type { WebRtcAudioSession } from "./webrtc-audio.js";
 class TeamSpeakStub extends EventEmitter {
   disconnected = false;
   sent: Buffer[] = [];
-  async connect() { this.emit("directorySnapshot", { channels: [], clients: [] }); }
+  directory: TSDirectorySnapshot = { channels: [], clients: [] };
+  avatarRequest: (id: number, uid: string) => Promise<TSClientAvatar | null> = async () => null;
+  async connect() { this.disconnected = false; this.emit("directorySnapshot", this.directory); }
   async disconnect() { this.disconnected = true; }
   getClientId() { return 1; }
   getChannelId() { return 1n; }
@@ -25,13 +27,16 @@ class TeamSpeakStub extends EventEmitter {
   async sendProtocolCommand() {}
   sendVoice(data: Buffer) { this.sent.push(data); this.emit("sent", data); }
   sendWhisper(data: Buffer) { this.sent.push(data); }
+  getClientAvatar(id: number, uid: string) { return this.avatarRequest(id, uid); }
 }
 
 async function fixture(t: TestContext, overrides: {
   createTeamSpeakClient?: () => TSClient;
   createEncoder?: () => Pick<OpusEncoder, "encode" | "dispose">;
+  configureSdk?: (sdk: TeamSpeakStub) => void;
 } = {}) {
   const sdk = new TeamSpeakStub();
+  overrides.configureSdk?.(sdk);
   const tickets = new JoinTicketStore();
   const bridge = new VoiceBridge({ joinTickets: tickets }, pino({ enabled: false }), undefined, {
     createTeamSpeakClient: overrides.createTeamSpeakClient ?? (() => sdk as unknown as TSClient),
@@ -59,7 +64,10 @@ async function fixture(t: TestContext, overrides: {
     await new Promise<void>(resolve => server.close(() => resolve()));
   });
   await first;
-  const entries = (bridge as unknown as { entries: Map<string, { id: string; ws: WebSocket; audio: AudioFlowStats; webrtc: WebRtcAudioSession | null }> }).entries;
+  const entries = (bridge as unknown as { entries: Map<string, {
+    id: string; ws: WebSocket; audio: AudioFlowStats; webrtc: WebRtcAudioSession | null;
+    isAlive: boolean; avatarCache: Map<string, string | null>;
+  }> }).entries;
   return { bridge, sdk, socket, messages, entries, wss };
 }
 
@@ -139,4 +147,47 @@ test("failed final peer statistics do not interrupt session cleanup", { timeout:
   assert.equal(f.sdk.disconnected, true);
   assert.notEqual(entry.ws.readyState, WebSocket.OPEN);
   assert.equal(f.bridge.getActiveCount(), 0);
+});
+
+async function avatarFixture(t: TestContext) {
+  const calls: number[] = [];
+  const avatar = { cacheKey: "sample", data: Buffer.from("GIF89a") };
+  let release!: (value: TSClientAvatar) => void;
+  let started!: () => void;
+  const pending = new Promise<TSClientAvatar>(resolve => { release = resolve; });
+  const firstStarted = new Promise<void>(resolve => { started = resolve; });
+  t.after(() => release(avatar));
+  const f = await fixture(t, { configureSdk(sdk) {
+    sdk.directory.clients = [2, 3].map(id => ({ id, uid: `user-${id}`, nickname: `User ${id}`, channelID: 1n, type: 1, serverGroups: [] }));
+    sdk.avatarRequest = async id => { calls.push(id); if (calls.length === 1) { started(); return pending; } return avatar; };
+  } });
+  await firstStarted;
+  return { ...f, calls, release: () => release(avatar), entry: [...f.entries.values()][0]! };
+}
+
+test("avatar completion after teardown cannot refill the cache or start another SDK request", { timeout: 5_000 }, async t => {
+  const f = await avatarFixture(t);
+  await f.bridge.terminateSession(f.entry.id);
+  f.release();
+  await nextTurn();
+  assert.equal(f.entry.avatarCache.size, 0);
+  assert.deepEqual(f.calls, [2]);
+});
+
+test("pending heartbeat acknowledgement does not cancel a live avatar refresh", { timeout: 5_000 }, async t => {
+  const f = await avatarFixture(t);
+  f.entry.isAlive = false;
+  f.release();
+  await nextTurn();
+  assert.deepEqual(f.calls, [2, 3]);
+  assert.equal(f.entry.avatarCache.size, 2);
+});
+
+test("an interrupted SDK connection invalidates its pending avatar results", { timeout: 5_000 }, async t => {
+  const f = await avatarFixture(t);
+  f.sdk.emit("disconnected");
+  f.release();
+  await nextTurn();
+  assert.equal(f.entry.avatarCache.size, 0);
+  assert.deepEqual(f.calls, [2]);
 });
