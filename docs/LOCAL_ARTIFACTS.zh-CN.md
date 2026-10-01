@@ -39,6 +39,14 @@ Android 使用同一提交的 `git archive` 源码归档，在新目录安装根
 | app-armeabi-v7a-debug.apk | 72,062,619 | `a28471b248e944d01c1e72d1066711aafe7dda6524ad1736becfb4d436a064a8` |
 | app-x86_64-debug.apk | 80,901,292 | `853a82786d1733686329568661954642c60482fd9ad3e7b910856b050d157532` |
 
-APK 位于上述目录的 `web/android/app/build/outputs/apk/debug`。逐包检查了移动网关入口、TeamSpeak SDK、Opus WASM、网页和匹配 ABI 的 Node.js 原生库；未发现项目私有配置或实验 Opus 脚本。arm64 包的清单版本为 `0.2.5-preview` / code `25`，最低 SDK 24、目标 SDK 36。本机 ADB 当前无连接设备，因此这些新包尚未完成安装、启动和 Android 布局复验；真机媒体也仍待验收。
+APK 位于上述目录的 `web/android/app/build/outputs/apk/debug`。逐包检查了移动网关入口、TeamSpeak SDK、Opus WASM、网页和匹配 ABI 的 Node.js 原生库；未发现项目私有配置或实验 Opus 脚本。arm64 包的清单版本为 `0.2.5-preview` / code `25`，最低 SDK 24、目标 SDK 36。构建当日尚未安装新包；后续 x86_64 安装与启动结果见下节，Android 布局和真机媒体仍待验收。
 
 本轮发现并处理两处构建边界问题：`.dockerignore` 补充排除本地 `.env` 与 `.env.*`；Android 深层临时目录触发 CMake 250 字符对象路径警告及 Ninja 建目录失败，同源码在短路径重建通过，已将该主机构建约束补入移动文档。没有为此更改应用或原生插件逻辑。Windows 首次 npm ci 约耗时三分钟，随后构建、打包和启动均正常。
+
+## 2026-10-02 Android 安装与冷启动（09-A）
+
+安装对象为上表同一 `662dad3` 的 x86_64 APK，安装前复算 SHA-256 与记录一致。使用已有 `ws` AVD 的只读 Android 15 / x86_64 实例，启动参数包含 `-read-only -no-snapshot-save -no-window -no-audio -port 5580`，没有修改原 AVD 数据或保存新快照。
+
+`adb -s emulator-5580 install -r <APK>` 返回 `Success`；包管理器报告 `versionName=0.2.5-preview`、`versionCode=25`、最低 SDK 24、目标 SDK 36。强制停止后启动 `io.webspeak.client/.MainActivity` 返回 `Status: ok`、`LaunchState: COLD`，启动耗时 1,822 毫秒。
+
+通过临时 ADB 转发 `tcp:53040` → 设备 `tcp:3040`，实际内嵌网关 `/health` 返回 `status: ok`、`engine: webspeak-android`；`/api/public-config` 返回 `version: 0.2.5-preview`、`mobile: true`、`initialized: true`。这补齐该干净构建产物的安装、冷启动及 HTTP 网关证据；没有交互式检查 Android WebView 布局、触屏或真实媒体，不能据此关闭这些待办。验收后移除端口转发并关闭该只读模拟器。
