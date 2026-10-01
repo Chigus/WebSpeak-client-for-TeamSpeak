@@ -1,17 +1,5 @@
-export interface SkinCatalogEntry {
-  id: string;
-  name: string;
-  version: string;
-  author: string;
-  license: string;
-  description?: string;
-  minAppVersion: string;
-  previewUrl?: string;
-  installedAt: number;
-  builtIn?: boolean;
-  enabled?: boolean;
-  previewKind?: "day" | "night" | "illusia";
-}
+import type { SkinCatalogEntry } from "../../../src/shared/skin-catalog.js";
+export type { SkinCatalogEntry } from "../../../src/shared/skin-catalog.js";
 
 export const BUILTIN_ILLUSIA_SKIN_ID = "community.illusia-voice";
 

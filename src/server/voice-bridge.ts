@@ -1,3 +1,6 @@
+import type { ServerMessage } from "../shared/server-messages.js";
+import type { ChannelInfo, VoiceAudioBridgeStats } from "../shared/voice-models.js";
+import type { ChannelMember as SharedChannelMember, ServerEvent as SharedServerEvent } from "../shared/voice-models.js";
 import { WebSocketServer, WebSocket } from "ws";
 import type { IncomingMessage, Server } from "node:http";
 import { randomUUID } from "node:crypto";
@@ -104,24 +107,8 @@ export interface AudioFlowStats {
   webrtcDownlinkShortFrames: number;
 }
 
-interface ChannelMember {
-  id: number;
-  nickname: string;
-  uid: string;
-  avatar?: string;
-  away?: boolean;
-  awayMessage?: string;
-  inputMuted?: boolean;
-  outputMuted?: boolean;
-  channelCommander?: boolean;
-}
-
-interface ServerEvent {
-  id: string;
-  kind: "joined" | "left" | "moved" | "poke" | "connection";
-  message: string;
-  timestamp: number;
-}
+type ChannelMember = SharedChannelMember & { uid: string };
+type ServerEvent = SharedServerEvent & { kind: "joined" | "left" | "moved" | "poke" | "connection" };
 
 interface WebClientEntry {
   id: string;
@@ -136,7 +123,7 @@ interface WebClientEntry {
   acceleration?: AccelerationRelayOptions;
   identityLeaseKey?: string;
   webrtcPublicHost?: string;
-  channelTree: unknown[];
+  channelTree: ChannelInfo[];
   members: Map<number, ChannelMember>;
   avatarCache: Map<string, string | null>;
   eventLog: ServerEvent[];
@@ -322,7 +309,7 @@ export class VoiceBridge {
       let avatarRefreshTimer: ReturnType<typeof setTimeout> | null = null;
       let avatarRefreshRunning = false;
 
-      const sendJson = (message: Record<string, unknown>) => {
+      const sendJson = (message: ServerMessage) => {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
       };
       const addServerEvent = (kind: ServerEvent["kind"], message: string) => {
@@ -1013,7 +1000,7 @@ export class VoiceBridge {
   private handleScreenShareMessage(
     entry: WebClientEntry,
     message: ScreenShareClientMessage,
-    sendJson: (message: Record<string, unknown>) => void,
+    sendJson: (message: ServerMessage) => void,
   ): void {
     if (message.type === "screenShareList") {
       sendJson({ type: "screenShareList", streams: this.listScreenStreamsFor(entry) });
@@ -1179,7 +1166,7 @@ export class VoiceBridge {
       });
   }
 
-  private screenShareViewerCountMessage(stream: ScreenStreamRecord): Record<string, unknown> {
+  private screenShareViewerCountMessage(stream: ScreenStreamRecord): ServerMessage {
     return {
       type: "screenShareViewerCount",
       streamId: stream.streamId,
@@ -1192,7 +1179,7 @@ export class VoiceBridge {
     return stream.viewerEntryIds.size + stream.nativeViewerClids.size;
   }
 
-  private broadcastScreenMessage(stream: ScreenStreamRecord, message: Record<string, unknown>, excludeEntryId?: string): void {
+  private broadcastScreenMessage(stream: ScreenStreamRecord, message: ServerMessage, excludeEntryId?: string): void {
     for (const candidate of this.entries.values()) {
       if (candidate.id === excludeEntryId || candidate.target && teamSpeakTargetKey(candidate.target) !== stream.targetKey) continue;
       // A stream is scoped to the source channel. Do not leak its card or
@@ -1209,7 +1196,7 @@ export class VoiceBridge {
     }
   }
 
-  private sendToEntry(entryId: string, message: Record<string, unknown>): void {
+  private sendToEntry(entryId: string, message: ServerMessage): void {
     const candidate = this.entries.get(entryId);
     if (candidate?.ws.readyState === WebSocket.OPEN) candidate.ws.send(JSON.stringify(message));
   }
@@ -1225,7 +1212,7 @@ export class VoiceBridge {
       }
     }
     if (!this.screenStreams.delete(screenStreamKey(stream.targetKey, stream.streamId))) return;
-    const message = { type: "screenShareStopped", streamId: stream.streamId, reason };
+    const message: ServerMessage = { type: "screenShareStopped", streamId: stream.streamId, reason };
     this.broadcastScreenMessage(stream, message);
     stream.viewerEntryIds.clear();
     stream.nativeViewerClids.clear();
@@ -1251,7 +1238,7 @@ export class VoiceBridge {
     stream: ScreenStreamRecord,
     targetPeerId: string,
     signal: ScreenSharePeerSignal,
-    sendJson: (message: Record<string, unknown>) => void,
+    sendJson: (message: ServerMessage) => void,
   ): void {
     if (stream.source === "teamspeak") {
       if (!stream.viewerEntryIds.has(entry.id) || targetPeerId !== stream.ownerPeerId) {
@@ -1375,7 +1362,7 @@ export class VoiceBridge {
   private async joinNativeScreenStream(
     entry: WebClientEntry,
     stream: ScreenStreamRecord,
-    sendJson: (message: Record<string, unknown>) => void,
+    sendJson: (message: ServerMessage) => void,
     requestId?: string,
   ): Promise<void> {
     const sourceClientId = stream.sourceClientId;
@@ -1606,7 +1593,7 @@ export class VoiceBridge {
   private async handleWebRtcOffer(
     entry: WebClientEntry,
     offer: WebRtcSessionDescription,
-    sendJson: (message: Record<string, unknown>) => void,
+    sendJson: (message: ServerMessage) => void,
   ): Promise<void> {
     if (entry.webrtc) {
       const previousWebRtc = entry.webrtc;
@@ -1725,7 +1712,7 @@ function normalizeWebRtcHost(value: string | undefined): string | undefined {
 async function handleCommand(
   entry: WebClientEntry,
   command: ClientCommand,
-  sendJson: (message: Record<string, unknown>) => void,
+  sendJson: (message: ServerMessage) => void,
 ): Promise<void> {
   if (command.type === "latencyProbe") {
     // Keep the control-path probe for already-open older browser clients. The
@@ -1889,7 +1876,7 @@ function classifyOperationError(error: unknown, fallbackCode: string, fallbackMe
   return { code: fallbackCode, message: fallbackMessage };
 }
 
-function sendProtocolError(sendJson: (message: Record<string, unknown>) => void, code: string, message: string): void {
+function sendProtocolError(sendJson: (message: ServerMessage) => void, code: string, message: string): void {
   sendJson({ type: "error", error: { code, message, recoverable: false } });
 }
 
@@ -2055,7 +2042,7 @@ function snapshotAudioStats(entry: WebClientEntry): AudioFlowStats {
   return stats;
 }
 
-function snapshotAudioStatus(entry: WebClientEntry): Record<string, number | string | null> {
+function snapshotAudioStatus(entry: WebClientEntry): VoiceAudioBridgeStats {
   const stats = snapshotAudioStats(entry);
   return {
     transport: entry.webrtc ? "webrtc" : "websocket",
@@ -2082,7 +2069,7 @@ function snapshotAudioStatus(entry: WebClientEntry): Record<string, number | str
   };
 }
 
-function mapChannelTree(snapshot: TSDirectorySnapshot, avatarCache = new Map<string, string | null>()): unknown[] {
+function mapChannelTree(snapshot: TSDirectorySnapshot, avatarCache = new Map<string, string | null>()): ChannelInfo[] {
   return snapshot.channels.map((channel) => ({
     id: String(channel.id),
     parentID: String(channel.parentID),

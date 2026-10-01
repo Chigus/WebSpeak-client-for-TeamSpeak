@@ -1,3 +1,4 @@
+import type { SkinCatalogEntry as SharedSkinCatalogEntry } from "../shared/skin-catalog.js";
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -18,17 +19,7 @@ const EOCD_SIGNATURE = 0x06054b50;
 const CENTRAL_SIGNATURE = 0x02014b50;
 const LOCAL_SIGNATURE = 0x04034b50;
 
-export interface SkinCatalogEntry {
-  id: string;
-  name: string;
-  version: string;
-  author: string;
-  license: string;
-  description?: string;
-  minAppVersion: string;
-  previewUrl?: string;
-  previewMimeType?: string;
-  installedAt: number;
+export interface SkinCatalogEntry extends SharedSkinCatalogEntry {
   enabled: boolean;
 }
 
