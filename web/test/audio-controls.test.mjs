@@ -80,3 +80,60 @@ test("unmount stops recording and retires device preparation", async t => {
   preparation.reject(new DOMException("old", "NotAllowedError")); await Promise.resolve();
   assert.equal(controls.settingsError.value, "");
 });
+
+function whisperFixture(t) {
+  const sent = [], captures = new Set();
+  const target = { focus() {}, setPointerCapture: id => captures.add(id), hasPointerCapture: id => captures.has(id), releasePointerCapture: id => captures.delete(id) };
+  const fixture = mount(t, { whisperTargetIds: new Set([7]), setWhisperActive: active => sent.push(active) });
+  return { ...fixture, sent, captures, pointer: (id = 1, button = 0, isPrimary = true) => ({ pointerId: id, button, isPrimary, currentTarget: target }) };
+}
+const keyEvent = (key, extra = {}) => ({ key, preventDefault() {}, ...extra });
+
+test("secondary buttons and non-primary pointers cannot start whispering", t => {
+  const { controls, pointer, sent } = whisperFixture(t);
+  controls.onWhisperPttDown(pointer(1, 2));
+  controls.onWhisperPttDown(pointer(2, 0, false));
+  assert.deepEqual(sent, []);
+});
+
+test("only the pointer that started whispering may release it", t => {
+  const { controls, pointer, sent, captures } = whisperFixture(t);
+  controls.onWhisperPttDown(pointer());
+  controls.onWhisperPttUp(pointer(2));
+  assert.equal(controls.whisperPttActive.value, true);
+  controls.onWhisperPttDown(pointer(2));
+  controls.onWhisperPttUp(pointer());
+  controls.onWhisperPttUp(pointer());
+  assert.deepEqual(sent, [true, false]);
+  assert.equal(captures.size, 0);
+});
+
+test("capture failure does not leave whisper enabled", t => {
+  const { controls, pointer, sent } = whisperFixture(t);
+  const event = pointer();
+  event.currentTarget.setPointerCapture = () => { throw new Error("pointer no longer active"); };
+  assert.doesNotThrow(() => controls.onWhisperPttDown(event));
+  assert.deepEqual(sent, []);
+});
+
+test("keyboard whisper ignores repeat and unrelated releases", t => {
+  const { controls, sent, pointer } = whisperFixture(t);
+  controls.onWhisperPttKeyDown(keyEvent(" "));
+  controls.onWhisperPttKeyDown(keyEvent(" ", { repeat: true }));
+  controls.onWhisperPttKeyUp(keyEvent("Enter"));
+  controls.onWhisperPttUp(pointer());
+  assert.equal(controls.whisperPttActive.value, true);
+  controls.onWhisperPttKeyUp(keyEvent(" "));
+  controls.onWhisperPttKeyDown(keyEvent("Enter"));
+  controls.stopWhisperTalk();
+  controls.onWhisperPttKeyUp(keyEvent("Enter"));
+  assert.deepEqual(sent, [true, false, true, false]);
+});
+
+test("scope disposal releases an active whisper and its capture", t => {
+  const { controls, sent, captures, pointer, scope } = whisperFixture(t);
+  controls.onWhisperPttDown(pointer());
+  scope.stop();
+  assert.deepEqual(sent, [true, false]);
+  assert.equal(captures.size, 0);
+});

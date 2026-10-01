@@ -186,11 +186,8 @@
                 </article>
               </div>
               <div v-else class="voice-empty" data-ws-part="voice.members.empty"><span class="empty-icon"><Icon name="users" :size="20" /></span><strong>{{ t('waitingForMembers') }}</strong><span>{{ t('prepareMicrophone') }}</span></div>
-              <div v-if="whisperTargetIds.size" class="whisper-strip" data-ws-part="voice.whisper-strip">
-                <div class="whisper-strip-copy"><strong><Icon name="users" :size="15" /> {{ t('whisperTargets') }}</strong><span>{{ whisperTargets.map((member) => member.nickname).join('、') }}</span></div>
-                <button type="button" class="text-button" @click="clearWhisperTargets">{{ t('clearWhisperTargets') }}</button>
-                <button type="button" class="whisper-ptt-button" :class="{ active: whisperPttActive || whisperActive }" :aria-pressed="whisperPttActive || whisperActive" @pointerdown.prevent="onWhisperPttDown" @pointerup.prevent="onWhisperPttUp" @pointercancel.prevent="onWhisperPttUp" @lostpointercapture="onWhisperPttUp"><Icon name="mic" :size="18" /> {{ whisperPttActive || whisperActive ? t('releaseWhisper') : t('whisperHoldToTalk') }}</button>
-              </div>
+              <WhisperControls v-if="whisperTargetIds.size" :targets="whisperTargets" :active="whisperActive"
+                :enabled="!isMobileViewport || mobileSection === 'voice'" :controls="audioControls" :t="t" @clear="clearWhisperTargets" />
               <div class="mobile-voice-controls">
                 <button type="button" class="mobile-voice-toggle" :class="{ muted: microphoneMuted }" :aria-pressed="!microphoneMuted" @click="toggleMicrophone"><Icon :name="microphoneMuted ? 'mic-off' : 'mic'" :size="18" /><span>{{ microphoneMuted ? t('unmuteMic') : t('muteMic') }}</span></button>
                 <button type="button" class="mobile-voice-settings" @click="settingsOpen = true"><Icon name="settings" :size="17" /><span>{{ t('audioSettings') }}</span></button>
@@ -211,29 +208,8 @@
         :mobile-visible="mobileSection === 'channels'" :is-mobile-viewport="isMobileViewport"
         :volumes="volumes" :avatar-style="avatarStyle" :avatar-initial="avatarInitial"
         :range-style="rangeStyle" :t="t" @select-channel="selectChannel" @volume-input="onVolInput">
-        <div v-if="!isMobileViewport" class="desktop-audio-dock" data-ws-part="voice.audio-dock" role="toolbar" :aria-label="t('desktopAudioControls')">
-          <div class="desktop-audio-dock-copy"><strong>{{ t('desktopAudioControls') }}</strong><span>{{ accompanimentActive ? t('accompanimentActive') : t('desktopAudioHint') }}</span></div>
-          <div class="desktop-audio-dock-actions">
-            <div class="dock-hover-control" data-ws-part="voice.audio-dock.microphone">
-              <button type="button" class="dock-audio-button microphone-header-toggle" :class="{ muted: microphoneMuted }" :title="microphoneMuted ? t('unmuteMic') : t('muteMic')" :aria-label="microphoneMuted ? t('microphoneMuted') : t('microphoneActive')" :aria-pressed="!microphoneMuted" aria-haspopup="dialog" @click="toggleMicrophone"><Icon :name="microphoneMuted ? 'mic-off' : 'mic'" :size="18" /></button>
-              <div class="dock-hover-panel dock-microphone-panel" data-ws-part="voice.audio-dock.microphone-panel" role="dialog" :aria-label="t('microphone')">
-                <div class="dock-slider-heading"><span>{{ t('inputVolume') }}</span><strong>{{ Math.round(inputVolume * 100) }}%</strong></div>
-                <input class="dock-slider" type="range" min="0" max="100" :value="inputVolume * 100" :style="rangeStyle(inputVolume, 1)" :aria-label="t('inputVolume')" @input="onInputVolume" />
-                <div class="dock-panel-divider"></div>
-                <label class="dock-switch-row"><span><strong>{{ t('noiseSuppression') }}</strong></span><input type="checkbox" :checked="noiseSuppressionEnabled" :aria-label="t('noiseSuppression')" @change="onNoiseSuppressionToggle" /></label>
-              </div>
-            </div>
-            <div class="dock-hover-control" data-ws-part="voice.audio-dock.output">
-              <button type="button" class="dock-audio-button" :class="{ muted: outputMuted }" :title="outputMuted ? t('unmuteOutput') : t('muteOutput')" :aria-label="outputMuted ? t('unmuteOutput') : t('muteOutput')" :aria-pressed="!outputMuted" aria-haspopup="dialog" @click="toggleOutputMute"><Icon :name="outputMuted ? 'volume-off' : 'volume'" :size="18" /></button>
-              <div class="dock-hover-panel dock-output-panel" data-ws-part="voice.audio-dock.output-panel" role="dialog" :aria-label="t('overallVolume')">
-                <div class="dock-slider-heading"><span>{{ t('overallVolume') }}</span><strong>{{ Math.round(outputVolume * 100) }}%</strong></div>
-                <input class="dock-slider" type="range" min="0" max="100" :value="outputVolume * 100" :style="rangeStyle(outputVolume, 1)" :aria-label="t('overallVolume')" @input="onOutputVolume" />
-              </div>
-            </div>
-            <button type="button" class="dock-audio-button" :title="t('audioSettings')" :aria-label="t('audioSettings')" @click="settingsOpen = true"><Icon name="settings" :size="18" /></button>
-            <button type="button" class="dock-audio-button accompaniment-toggle" :class="{ active: accompanimentActive }" :title="accompanimentActive ? t('stopAccompaniment') : t('startAccompaniment')" :aria-label="accompanimentActive ? t('stopAccompaniment') : t('startAccompaniment')" :aria-pressed="accompanimentActive" @click="toggleAccompaniment"><Icon name="music" :size="18" /></button>
-          </div>
-        </div>
+        <AudioDock v-if="!isMobileViewport" :model="audioDockState" :controls="audioControls"
+          :t="t" :range-style="rangeStyle" @settings="settingsOpen = true" @output-mute="toggleOutputMute" />
       </ChannelMemberPanel>
 
       <section v-if="mobileSection === 'more'" class="mobile-more-panel" data-ws-part="voice.mobile-more">
@@ -280,6 +256,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from "vue";
 import Icon from "../components/Icon.vue";
+import AudioDock from "../components/web-client/AudioDock.vue";
+import WhisperControls from "../components/web-client/WhisperControls.vue";
 import AudioSettingsDialog from "../components/web-client/AudioSettingsDialog.vue";
 import ChannelPasswordDialog from "../components/web-client/ChannelPasswordDialog.vue";
 import ServerPasswordDialog from "../components/web-client/ServerPasswordDialog.vue";
@@ -549,8 +527,8 @@ const audioControls = useWebClientAudioControls({
   showToast,
   t,
 });
-const { whisperPttActive, onInputVolume, onNoiseSuppressionToggle, onOutputVolume,
-  toggleMicrophone, toggleAccompaniment, onWhisperPttDown, onWhisperPttUp, stopWhisperTalk } = audioControls;
+const { toggleMicrophone, stopWhisperTalk } = audioControls;
+const audioDockState = { microphoneMuted, inputVolume, outputVolume, outputMuted, noiseSuppressionEnabled, accompanimentActive };
 const audioSettingsState = {
   inputDevices,
   outputDevices,

@@ -64,6 +64,8 @@ export function useWebClientAudioControls({
   const micMeterBars = computed(() => Math.round(micLevel.value * 24));
   let settingsGeneration = 0;
   let settingsRequest = 0;
+  let whisperPointer: { id: number; target: HTMLElement } | null = null;
+  let whisperKey: string | null = null;
 
   function beginSettingsRequest(): () => boolean {
     settingsError.value = "";
@@ -167,23 +169,49 @@ export function useWebClientAudioControls({
   }
 
   function onWhisperPttDown(event: PointerEvent): void {
-    if (!whisperTargetIds.size) return;
+    if (!whisperTargetIds.size || whisperPttActive.value || event.button !== 0 || !event.isPrimary) return;
     const target = event.currentTarget as HTMLElement | null;
-    if (target?.setPointerCapture && !target.hasPointerCapture(event.pointerId)) target.setPointerCapture(event.pointerId);
+    if (!target) return;
+    target.focus();
+    try {
+      target.setPointerCapture(event.pointerId);
+    } catch {
+      return;
+    }
+    whisperPointer = { id: event.pointerId, target };
     whisperPttActive.value = true;
     setWhisperActive(true);
   }
 
   function onWhisperPttUp(event: PointerEvent): void {
-    const target = event.currentTarget as HTMLElement | null;
-    if (target?.releasePointerCapture && target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId);
+    if (event.pointerId !== whisperPointer?.id) return;
+    stopWhisperTalk();
+  }
+
+  function onWhisperPttKeyDown(event: KeyboardEvent): void {
+    if (event.key !== " " && event.key !== "Enter") return;
+    event.preventDefault();
+    if (event.repeat || event.altKey || event.ctrlKey || event.metaKey || !whisperTargetIds.size || whisperPttActive.value) return;
+    whisperKey = event.key;
+    whisperPttActive.value = true;
+    setWhisperActive(true);
+  }
+
+  function onWhisperPttKeyUp(event: KeyboardEvent): void {
+    if (event.key !== whisperKey) return;
+    event.preventDefault();
     stopWhisperTalk();
   }
 
   function stopWhisperTalk(): void {
+    const pointer = whisperPointer;
+    whisperPointer = null;
+    whisperKey = null;
     if (!whisperPttActive.value) return;
     whisperPttActive.value = false;
     setWhisperActive(false);
+    // Clear ownership first: releasing capture can synchronously emit lostpointercapture.
+    if (pointer?.target.hasPointerCapture(pointer.id)) pointer.target.releasePointerCapture(pointer.id);
   }
 
   watch(settingsOpen, (open) => {
@@ -200,6 +228,7 @@ export function useWebClientAudioControls({
   onScopeDispose(() => {
     settingsGeneration++;
     stopMicrophoneTest();
+    stopWhisperTalk();
   });
 
   return {
@@ -220,6 +249,8 @@ export function useWebClientAudioControls({
     toggleAccompaniment,
     onWhisperPttDown,
     onWhisperPttUp,
+    onWhisperPttKeyDown,
+    onWhisperPttKeyUp,
     stopWhisperTalk,
   };
 }

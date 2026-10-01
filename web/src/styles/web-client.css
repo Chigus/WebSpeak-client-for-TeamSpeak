@@ -376,16 +376,16 @@
 .workspace-actions { align-items: center; flex-wrap: nowrap; }
 .workspace-actions .header-action { flex: 0 0 34px; padding: 0; line-height: 0; }
 .workspace-actions .header-action .ui-icon { margin: 0; }
-.desktop-audio-dock { display: flex; align-items: center; gap: 9px; flex: 0 0 auto; min-width: 0; margin-top: 12px; padding: 9px; color: var(--text-muted); background: color-mix(in srgb, var(--accent) 8%, var(--surface-1)); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 8px 20px color-mix(in srgb, var(--text-primary) 10%, transparent); }
-.desktop-audio-dock-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
-.desktop-audio-dock-copy strong { overflow: hidden; color: var(--text-primary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.desktop-audio-dock-copy span { overflow: hidden; font-size: 10px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
-.desktop-audio-dock-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
-.dock-audio-button { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; color: var(--text-muted); background: transparent; border: 1px solid transparent; border-radius: 9px; cursor: pointer; transition: color .16s, background .16s, border-color .16s, transform .16s; }
-.dock-audio-button:hover, .dock-audio-button:focus-visible { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--surface-1)); border-color: color-mix(in srgb, var(--accent) 32%, var(--border)); transform: translateY(-1px); }
-.dock-audio-button.microphone-header-toggle.muted { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, var(--surface-1)); }
-.dock-audio-button.muted { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, var(--surface-1)); }
-.dock-audio-button.accompaniment-toggle.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--surface-1)); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+:deep(.desktop-audio-dock) { display: flex; align-items: center; gap: 9px; flex: 0 0 auto; min-width: 0; margin-top: 12px; padding: 9px; color: var(--text-muted); background: color-mix(in srgb, var(--accent) 8%, var(--surface-1)); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 8px 20px color-mix(in srgb, var(--text-primary) 10%, transparent); }
+:deep(.desktop-audio-dock-copy) { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
+:deep(.desktop-audio-dock-copy strong) { overflow: hidden; color: var(--text-primary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+:deep(.desktop-audio-dock-copy span) { overflow: hidden; font-size: 10px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+:deep(.desktop-audio-dock-actions) { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+:deep(.dock-audio-button) { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; color: var(--text-muted); background: transparent; border: 1px solid transparent; border-radius: 9px; cursor: pointer; transition: color .16s, background .16s, border-color .16s, transform .16s; }
+:deep(.dock-audio-button:hover), :deep(.dock-audio-button:focus-visible) { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--surface-1)); border-color: color-mix(in srgb, var(--accent) 32%, var(--border)); transform: translateY(-1px); }
+:deep(.dock-audio-button.microphone-header-toggle.muted) { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, var(--surface-1)); }
+:deep(.dock-audio-button.muted) { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, var(--surface-1)); }
+:deep(.dock-audio-button.accompaniment-toggle.active) { color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--surface-1)); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
 .settings-mode-switch { width: fit-content; margin: 0 0 7px; }
 :deep(.settings-hint) { margin: -1px 0 19px; color: #8b9994; font-size: 11px; }
 
@@ -471,12 +471,12 @@
 @media (max-width: 740px) { :deep(.member-submenu-panel) { position: static; min-width: 0; max-height: 190px; margin: 4px 0 0 24px; padding: 4px; border-radius: 10px; box-shadow: none; } :deep(.member-submenu-panel button) { min-height: 42px; font-size: 13px; } }
 
 /* M007 whisper target controls and M008 mobile navigation. */
-.whisper-strip { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding: 12px 14px; color: #52645e; border: 1px solid #d6ebe5; border-radius: 10px; background: #eef8f5; }
-.whisper-strip-copy { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
-.whisper-strip-copy strong { display: inline-flex; align-items: center; gap: 6px; color: #006a64; font-size: 12px; white-space: nowrap; }
-.whisper-strip-copy span { overflow: hidden; color: #71837d; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.whisper-ptt-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 0 12px; color: #fff; background: #006a64; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; touch-action: none; user-select: none; }
-.whisper-ptt-button.active { background: #2f9d5c; box-shadow: 0 0 0 4px rgba(47,157,92,.16); }
+:deep(.whisper-strip) { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding: 12px 14px; color: #52645e; border: 1px solid #d6ebe5; border-radius: 10px; background: #eef8f5; }
+:deep(.whisper-strip-copy) { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+:deep(.whisper-strip-copy strong) { display: inline-flex; align-items: center; gap: 6px; color: #006a64; font-size: 12px; white-space: nowrap; }
+:deep(.whisper-strip-copy span) { overflow: hidden; color: #71837d; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+:deep(.whisper-ptt-button) { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 0 12px; color: #fff; background: #006a64; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; touch-action: none; user-select: none; }
+:deep(.whisper-ptt-button.active) { background: #2f9d5c; box-shadow: 0 0 0 4px rgba(47,157,92,.16); }
 .mobile-nav, .mobile-more-panel { display: none; }
 :deep(.mobile-section-hidden) { display: block; }
 
@@ -502,9 +502,9 @@
   .mobile-nav button { display: grid; place-items: center; gap: 3px; min-width: 0; color: var(--text-muted); background: transparent; border-radius: 8px; font-size: 11px; cursor: pointer; }
   .mobile-nav button.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 700; }
   .mobile-nav button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .whisper-strip { align-items: stretch; flex-wrap: wrap; gap: 8px; }
-  .whisper-strip-copy { width: 100%; flex: 1 0 100%; }
-  .whisper-ptt-button { flex: 1; min-height: 46px; }
+  :deep(.whisper-strip) { align-items: stretch; flex-wrap: wrap; gap: 8px; }
+  :deep(.whisper-strip-copy) { width: 100%; flex: 1 0 100%; }
+  :deep(.whisper-ptt-button) { flex: 1; min-height: 46px; }
   :deep(.whisper-strip > .text-button) { min-height: 38px; }
 }
 
@@ -628,7 +628,7 @@
   :deep(.member-presence) { width: 10px; height: 10px; }
   :deep(.member-copy strong) { font-size: 14px; }
   :deep(.member-copy span) { margin-top: 3px; font-size: 12px; }
-  .desktop-audio-dock, :deep(.member-flags), :deep(.member-volume), .member-panel-tip { display: none; }
+  :deep(.desktop-audio-dock), :deep(.member-flags), :deep(.member-volume), .member-panel-tip { display: none; }
   :deep(.member-action-button) { display: grid; place-items: center; width: 38px; height: 38px; flex: 0 0 38px; color: var(--text-muted); background: transparent; border-radius: 10px; cursor: pointer; }
   :deep(.member-action-button:hover), :deep(.member-action-button:active) { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--surface-1)); }
 
@@ -898,13 +898,13 @@
         left/right:0 即与内容宽度完全一致）；chat-panel 作为包含块
         并加 padding-bottom 补偿原占位，避免消息列表被遮挡。 */
   :deep(.app-shell .member-panel) { position: relative; overflow: visible; padding-bottom: calc(18px + 12px + 52px); }
-  .desktop-audio-dock { position: absolute; z-index: 6; left: 18px; right: 18px; bottom: 18px; margin-top: 0; }
+  :deep(.desktop-audio-dock) { position: absolute; z-index: 6; left: 18px; right: 18px; bottom: 18px; margin-top: 0; }
   .app-shell .chat-panel { position: relative; padding-bottom: calc(16px + 48px); }
   :deep(.app-shell .message-composer) { position: absolute; z-index: 3; left: 0; right: 0; bottom: 16px; margin-bottom: 0; }
 }
 
-.dock-hover-control { position: relative; flex: 0 0 34px; }
-.dock-hover-panel {
+:deep(.dock-hover-control) { position: relative; flex: 0 0 34px; }
+:deep(.dock-hover-panel) {
   position: absolute;
   z-index: 20;
   right: 50%;
@@ -922,27 +922,27 @@
   transform: translate(50%, 6px);
   transition: opacity .16s ease, transform .16s ease, visibility .16s ease;
 }
-.dock-hover-panel::after { content: ""; position: absolute; right: auto; bottom: -6px; left: 50%; width: 10px; height: 10px; background: var(--surface-1); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); transform: translateX(-50%) rotate(45deg); }
-.dock-hover-control:hover .dock-hover-panel,
-.dock-hover-control:focus-within .dock-hover-panel { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(50%, 0); }
-.dock-microphone-panel { width: min(246px, calc(100vw - 32px)); }
-.dock-slider-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.dock-slider-heading span { min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.dock-slider-heading strong { flex: 0 0 auto; color: var(--accent); font-size: 11px; }
-.dock-slider { width: 100%; height: 5px; margin: 11px 0 1px; appearance: none; border-radius: 999px; outline: none; cursor: pointer; }
-.dock-slider::-webkit-slider-thumb { width: 14px; height: 14px; appearance: none; border: 2px solid #81d8d0; border-radius: 50%; background: var(--surface-1); box-shadow: 0 2px 4px color-mix(in srgb, var(--text-primary) 14%, transparent); cursor: pointer; }
-.dock-slider::-moz-range-thumb { width: 14px; height: 14px; border: 2px solid #81d8d0; border-radius: 50%; background: var(--surface-1); box-shadow: 0 2px 4px color-mix(in srgb, var(--text-primary) 14%, transparent); cursor: pointer; }
-.dock-panel-divider { height: 1px; margin: 12px 0; background: var(--border); }
-.dock-switch-row, :deep(.mobile-noise-toggle) { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; }
-.dock-switch-row > span, :deep(.mobile-noise-toggle > span) { min-width: 0; }
-.dock-switch-row strong, :deep(.mobile-noise-toggle strong) { display: block; color: var(--text-primary); font-size: 11px; }
+:deep(.dock-hover-panel::after) { content: ""; position: absolute; right: auto; bottom: -6px; left: 50%; width: 10px; height: 10px; background: var(--surface-1); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); transform: translateX(-50%) rotate(45deg); }
+:deep(.dock-hover-control:hover .dock-hover-panel),
+:deep(.dock-hover-control:focus-within .dock-hover-panel) { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(50%, 0); }
+:deep(.dock-microphone-panel) { width: min(246px, calc(100vw - 32px)); }
+:deep(.dock-slider-heading) { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+:deep(.dock-slider-heading span) { min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+:deep(.dock-slider-heading strong) { flex: 0 0 auto; color: var(--accent); font-size: 11px; }
+:deep(.dock-slider) { width: 100%; height: 5px; margin: 11px 0 1px; appearance: none; border-radius: 999px; outline: none; cursor: pointer; }
+:deep(.dock-slider::-webkit-slider-thumb) { width: 14px; height: 14px; appearance: none; border: 2px solid #81d8d0; border-radius: 50%; background: var(--surface-1); box-shadow: 0 2px 4px color-mix(in srgb, var(--text-primary) 14%, transparent); cursor: pointer; }
+:deep(.dock-slider::-moz-range-thumb) { width: 14px; height: 14px; border: 2px solid #81d8d0; border-radius: 50%; background: var(--surface-1); box-shadow: 0 2px 4px color-mix(in srgb, var(--text-primary) 14%, transparent); cursor: pointer; }
+:deep(.dock-panel-divider) { height: 1px; margin: 12px 0; background: var(--border); }
+:deep(.dock-switch-row), :deep(.mobile-noise-toggle) { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; }
+:deep(.dock-switch-row > span), :deep(.mobile-noise-toggle > span) { min-width: 0; }
+:deep(.dock-switch-row strong), :deep(.mobile-noise-toggle strong) { display: block; color: var(--text-primary); font-size: 11px; }
 :deep(.mobile-noise-toggle) { margin-bottom: 18px; padding: 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 11px; }
 :deep(.mobile-noise-toggle small) { display: block; margin-top: 3px; color: var(--text-muted); font-size: 10px; line-height: 1.4; }
-.dock-switch-row input, :deep(.mobile-noise-toggle input) { position: relative; width: 34px; height: 20px; flex: 0 0 34px; margin: 0; padding: 0; appearance: none; border: 2px solid var(--border); border-radius: 999px; outline: none; background: var(--surface-2); cursor: pointer; transition: background .16s ease, border-color .16s ease; }
-.dock-switch-row input::before, :deep(.mobile-noise-toggle input::before) { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--text-muted); transition: transform .16s ease, background .16s ease; }
-.dock-switch-row input:checked, :deep(.mobile-noise-toggle input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 72%, var(--surface-2)); }
-.dock-switch-row input:checked::before, :deep(.mobile-noise-toggle input:checked::before) { background: var(--surface-1); transform: translateX(14px); }
-.dock-switch-row input:focus-visible, :deep(.mobile-noise-toggle input:focus-visible) { outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
+:deep(.dock-switch-row input), :deep(.mobile-noise-toggle input) { position: relative; width: 34px; height: 20px; flex: 0 0 34px; margin: 0; padding: 0; appearance: none; border: 2px solid var(--border); border-radius: 999px; outline: none; background: var(--surface-2); cursor: pointer; transition: background .16s ease, border-color .16s ease; }
+:deep(.dock-switch-row input::before), :deep(.mobile-noise-toggle input::before) { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--text-muted); transition: transform .16s ease, background .16s ease; }
+:deep(.dock-switch-row input:checked), :deep(.mobile-noise-toggle input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 72%, var(--surface-2)); }
+:deep(.dock-switch-row input:checked::before), :deep(.mobile-noise-toggle input:checked::before) { background: var(--surface-1); transform: translateX(14px); }
+:deep(.dock-switch-row input:focus-visible), :deep(.mobile-noise-toggle input:focus-visible) { outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
 
 :deep(.member-row[draggable="true"]) { cursor: grab; touch-action: none; }
 :deep(.member-row[draggable="true"]:active) { cursor: grabbing; }
@@ -951,7 +951,7 @@
 :deep(.member-channel-group.drag-over .member-channel-heading) { color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, var(--surface-1)); }
 
 @media (prefers-reduced-motion: reduce) {
-  .dock-hover-panel, .dock-switch-row input, :deep(.mobile-noise-toggle input) { transition-duration: .01ms; }
+  :deep(.dock-hover-panel), :deep(.dock-switch-row input), :deep(.mobile-noise-toggle input) { transition-duration: .01ms; }
 }
 
 .screen-share-inline-error { display: flex; align-items: center; gap: 7px; margin: 10px 0 0; padding: 8px 10px; color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border)); border-radius: 9px; background: color-mix(in srgb, var(--danger) 12%, var(--surface-1)); font-size: 10px; line-height: 1.4; }
