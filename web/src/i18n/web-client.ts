@@ -2,6 +2,11 @@ export type Language = "zh" | "en" | "de" | "ru" | "ja";
 
 export const webClientTranslations: Record<string, Record<string, string>> = {
   zh: {
+    chatSending: "正在等待服务器确认…",
+    chatSendFailed: "发送未确认，草稿已保留；超时的消息可能已送达，重试前请核对。",
+    chatNotConnected: "连接恢复后才能发送消息，草稿会保留。",
+    chatTargetUnavailable: "此私聊对象已离线或身份已变化，请重新选择成员。",
+    chatChannelChanged: "所在频道与当前聊天频道不同，请确认频道后重试。",
     themeSystem: "跟随系统",
     themeLight: "浅色主题",
     themeDark: "深色主题",
@@ -390,6 +395,11 @@ export const webClientTranslations: Record<string, Record<string, string>> = {
     langSwitch: "English",
   },
   en: {
+    chatSending: "Waiting for server confirmation…",
+    chatSendFailed: "Sending was not confirmed; your draft is kept. A timed-out message may have arrived. Check before retrying.",
+    chatNotConnected: "Messages can be sent when the connection recovers. Your draft is kept.",
+    chatTargetUnavailable: "This recipient is offline or their identity changed. Select the member again.",
+    chatChannelChanged: "Your joined channel differs from this chat. Check the channel before retrying.",
     themeSystem: "System theme",
     themeLight: "Light theme",
     themeDark: "Dark theme",
@@ -781,6 +791,11 @@ export const webClientTranslations: Record<string, Record<string, string>> = {
 
 webClientTranslations.de = {
   ...webClientTranslations.en,
+  chatSending: "Warte auf die Bestätigung des Servers…",
+  chatSendFailed: "Versand nicht bestätigt; der Entwurf bleibt erhalten. Die Nachricht kann trotz Zeitüberschreitung angekommen sein. Vor dem erneuten Senden prüfen.",
+  chatNotConnected: "Senden ist nach Wiederherstellung der Verbindung möglich. Der Entwurf bleibt erhalten.",
+  chatTargetUnavailable: "Der Empfänger ist offline oder seine Identität hat sich geändert. Wähle das Mitglied erneut aus.",
+  chatChannelChanged: "Dein aktueller Kanal unterscheidet sich von diesem Chat. Prüfe den Kanal vor dem erneuten Senden.",
   themeSystem: "Systemdesign",
   themeLight: "Helles Design",
   themeDark: "Dunkles Design",
@@ -1162,6 +1177,11 @@ webClientTranslations.de = {
 
 webClientTranslations.ru = {
   ...webClientTranslations.en,
+  chatSending: "Ожидание подтверждения сервера…",
+  chatSendFailed: "Отправка не подтверждена; черновик сохранён. При тайм-ауте сообщение могло дойти. Проверьте перед повторной отправкой.",
+  chatNotConnected: "Отправка будет доступна после восстановления соединения. Черновик сохранён.",
+  chatTargetUnavailable: "Получатель отключился или его идентификатор изменился. Выберите участника заново.",
+  chatChannelChanged: "Текущий канал отличается от этого чата. Проверьте канал перед повторной отправкой.",
   accompanimentAudioFailed: "Не удалось подключить звук сопровождения. Выберите источник звука заново или повторите попытку позже.",
   themeSystem: "Системная тема",
   themeLight: "Светлая тема",
@@ -1337,6 +1357,11 @@ webClientTranslations.ru = {
 
 webClientTranslations.ja = {
   ...webClientTranslations.en,
+  chatSending: "サーバーの確認を待っています…",
+  chatSendFailed: "送信を確認できませんでした。下書きは保持されています。タイムアウトしても届いている場合があるため、再送前に確認してください。",
+  chatNotConnected: "接続が復旧すると送信できます。下書きは保持されています。",
+  chatTargetUnavailable: "相手がオフラインか識別情報が変わりました。メンバーを選び直してください。",
+  chatChannelChanged: "参加中のチャンネルとこのチャットが異なります。チャンネルを確認してから再送してください。",
   accompanimentAudioFailed: "伴奏音声を追加できませんでした。音声ソースを選び直すか、後でもう一度お試しください。",
   themeSystem: "システム設定",
   themeLight: "ライトテーマ",

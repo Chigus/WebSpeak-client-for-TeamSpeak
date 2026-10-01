@@ -1168,6 +1168,17 @@
   z-index: 3;
 }
 
+.app-shell .chat-status {
+  position: relative;
+  z-index: 3;
+  flex: 0 0 auto;
+  margin: 8px 0 0;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 740px) {
 .app-shell .voice-section {
     padding: 14px 10px 16px;

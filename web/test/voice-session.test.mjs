@@ -3,7 +3,7 @@ import { before, after, beforeEach, afterEach, test } from "node:test";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
-import { effectScope, ref } from "vue";
+import { computed, effectScope, nextTick, ref } from "vue";
 
 // Exercise the actual composable and shared wire parser. Only browser/network
 // boundaries are simulated; these tests make no claim about real audio quality.
@@ -152,6 +152,8 @@ let vite;
 let useVoiceWebSocket;
 let useWebClientAudioControls;
 let useWebClientI18n;
+let useWebClientChat;
+let useWebClientChannels;
 let webClientTranslations;
 let voice;
 const savedGlobals = new Map();
@@ -173,6 +175,8 @@ before(async () => {
   ({ useVoiceWebSocket } = await vite.ssrLoadModule("/src/composables/useVoiceWebSocket.ts"));
   ({ useWebClientAudioControls } = await vite.ssrLoadModule("/src/composables/useWebClientAudioControls.ts"));
   ({ useWebClientI18n } = await vite.ssrLoadModule("/src/composables/useWebClientI18n.ts"));
+  ({ useWebClientChat } = await vite.ssrLoadModule("/src/composables/useWebClientChat.ts"));
+  ({ useWebClientChannels } = await vite.ssrLoadModule("/src/composables/useWebClientChannels.ts"));
   ({ webClientTranslations } = await vite.ssrLoadModule("/src/i18n/web-client.ts"));
 });
 
@@ -244,6 +248,361 @@ async function connect() {
   assert.ok(socket, "join ticket should open a voice socket");
   return socket;
 }
+
+test("directory snapshots keep member names, flags and identity-scoped volume in sync", async () => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1, members: [{ id: 7, uid: "old-user", nickname: "Before" }] });
+  voice.setVolume(7, 0.3);
+  const memberList = voice.members;
+  const channelList = voice.channels;
+  socket.receive({ type: "channelList", channels: [{ id: "1", parentID: "0", name: "Lobby", members: [
+    { id: 7, uid: "old-user", nickname: "Renamed", away: true, awayMessage: "Lunch", inputMuted: true, outputMuted: true, channelCommander: true },
+    { id: 1, uid: "self", nickname: "Visitor" },
+  ] }] });
+  assert.equal(voice.members, memberList);
+  assert.equal(voice.channels, channelList);
+  assert.equal(voice.members.find(member => member.id === 7).nickname, "Renamed");
+  assert.equal(voice.members.find(member => member.id === 7).awayMessage, "Lunch");
+  assert.equal(voice.members.find(member => member.id === 7).inputMuted, true);
+  assert.equal(voice.members.find(member => member.id === 1).isSelf, true);
+  assert.equal(voice.volumes[7], 0.3);
+  socket.receive({ type: "channelList", channels: [{ id: "1", parentID: "0", name: "Lobby", members: [
+    { id: 7, uid: "replacement-user", nickname: "Replacement" },
+  ] }] });
+  assert.deepEqual(voice.members.map(member => member.id), [7]);
+  assert.equal(voice.members[0].uid, "replacement-user");
+  assert.equal(voice.members[0].away, undefined);
+  assert.equal(voice.volumes[7] ?? 1, 1, "a reused numeric ID must not inherit the previous member's gain");
+});
+
+test("member-enter preserves status fields and updates an already listed member", async () => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  socket.receive({ type: "memberEnter", id: 7, uid: "user", nickname: "Before", away: true,
+    awayMessage: "Away", inputMuted: true, outputMuted: true, channelCommander: true });
+  assert.equal(voice.members[0].awayMessage, "Away");
+  assert.equal(voice.members[0].outputMuted, true);
+  assert.equal(voice.members[0].channelCommander, true);
+  socket.receive({ type: "channelList", channels: [{ id: "1", parentID: "0", name: "Lobby", members: [...voice.members] }] });
+  socket.receive({ type: "memberEnter", id: 7, uid: "user", nickname: "After", away: false, inputMuted: false });
+  assert.equal(voice.members.length, 1);
+  assert.equal(voice.members[0].nickname, "After");
+  assert.equal(voice.channels[0].members[0].nickname, "After");
+  assert.equal(voice.channels[0].members[0].inputMuted, false);
+});
+
+test("member departure immediately removes every directory projection and per-ID state", async () => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1, members: [{ id: 7, uid: "user", nickname: "Leaving" }] });
+  socket.receive({ type: "channelList", channels: [{ id: "1", parentID: "0", name: "Lobby", members: [...voice.members] }] });
+  socket.receive({ type: "whisperTargets", targetIds: [7], active: true });
+  voice.setVolume(7, 0.5);
+  socket.receive({ type: "memberLeave", id: 7 });
+  assert.equal(voice.members.length, 0);
+  assert.equal(voice.channels[0].members.length, 0);
+  assert.equal(voice.volumes[7], undefined);
+  assert.equal(voice.whisperTargetIds.has(7), false);
+  assert.equal(voice.whisperActive.value, false);
+});
+
+test("omitted channel members preserve known data and avatars reject a different UID", async () => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1, members: [{ id: 7, uid: "user", nickname: "Visitor" }] });
+  socket.receive({ type: "channelList", channels: [{ id: "1", parentID: "0", name: "Lobby", members: [...voice.members] }] });
+  socket.receive({ type: "channelList", channels: [{ id: "1", parentID: "0", name: "Renamed lobby" }] });
+  assert.equal(voice.members.length, 1);
+  assert.equal(voice.channels[0].members?.[0]?.nickname, "Visitor");
+  socket.receive({ type: "memberAvatar", id: 7, uid: "other-user", avatar: "wrong" });
+  assert.equal(voice.members[0].avatar, undefined);
+  socket.receive({ type: "memberAvatar", id: 7, uid: "user", avatar: "correct" });
+  assert.equal(voice.members[0].avatar, "correct");
+  assert.equal(voice.channels[0].members[0].avatar, "correct");
+});
+
+test("explicit disconnect and replacement target clear all session history and notifications", async () => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  const history = voice.serverEvents;
+  const pokes = voice.pokeNotifications;
+  socket.receive({ type: "serverEvent", event: { id: "event", kind: "joined", message: "Old server", timestamp: 1 } });
+  socket.receive({ type: "pokeReceived", invokerId: 7, invokerUid: "old-user", invokerName: "Old user", message: "Old poke" });
+  voice.disconnect();
+  assert.equal(history.length, 0);
+  assert.equal(pokes.length, 0);
+  await connect();
+  assert.equal(voice.serverEvents, history);
+  assert.equal(voice.pokeNotifications, pokes);
+  assert.equal(pokes.length, 0);
+});
+
+test("a recovered session replaces its directory even when the gateway omits members", async () => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1, members: [{ id: 7, uid: "old-user", nickname: "Previous" }] });
+  socket.receive({ type: "channelList", channels: [{ id: "1", parentID: "0", name: "Lobby", members: [...voice.members] }] });
+  socket.receive({ type: "chatMessage", invokerId: 7, invokerName: "Previous", message: "Keep room history", scope: "channel" });
+  socket.receive({ type: "disconnected", recoverable: true });
+  assert.equal(voice.chatMessages.length, 1);
+  socket.receive({ type: "connected", tsClientId: 2 });
+  assert.equal(voice.members.length, 0);
+  assert.equal(voice.channels.length, 0);
+  assert.equal(voice.chatMessages.length, 1, "same-socket recovery may retain historical messages");
+});
+
+function chatView(t, overrides = {}) {
+  const scope = effectScope();
+  t.after(() => scope.stop());
+  return scope.run(() => useWebClientChat({
+    messages: voice.chatMessages, members: voice.members,
+    currentChannel: ref({ id: "1", parentID: "0", name: "Lobby" }), currentChannelName: ref("Lobby"),
+    selectedChannelId: ref("1"), clientId: computed(() => voice.state.tsClientId),
+    connected: computed(() => voice.state.connected), sessionEpoch: voice.sessionEpoch,
+    memberConversationKey: id => voice.memberConversationKey(id),
+    isMobileViewport: ref(false), mobileSection: ref("chat"), closeMemberMenu() {}, notifyPrivateMessage() {},
+    sendTextMessage: voice.sendTextMessage, sendServerMessage: voice.sendServerMessage, sendPrivateMessage: voice.sendPrivateMessage,
+    t: key => key, ...overrides,
+  }));
+}
+
+test("chat cannot create a local success while disconnected or recovering", async () => {
+  await assert.rejects(async () => voice.sendServerMessage("Offline"));
+  assert.equal(voice.chatMessages.length, 0);
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  socket.receive({ type: "reconnecting", attempt: 1 });
+  await assert.rejects(async () => voice.sendTextMessage("Recovering", "1"));
+  assert.equal(socket.messages.some(message => message.type === "sendTextMessage"), false);
+  assert.equal(voice.chatMessages.length, 0);
+});
+
+test("chat waits for acknowledgement and keeps server rejection out of successful history", async () => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  const sent = voice.sendServerMessage(" Hello ");
+  assert.equal(voice.chatMessages.length, 0);
+  const command = socket.messages.at(-1);
+  assert.ok(command.requestId);
+  socket.receive({ type: "chatMessage", invokerId: 1, message: "Hello", scope: "server" });
+  socket.receive({ type: "commandCompleted", requestId: command.requestId });
+  await sent;
+  assert.equal(voice.chatMessages.length, 1);
+  assert.equal(voice.chatMessages[0].message, "Hello");
+  const rejected = voice.sendServerMessage("Refused");
+  const rejection = assert.rejects(rejected, error => error.code === "PERMISSION_DENIED");
+  socket.receive({ type: "error", requestId: socket.messages.at(-1).requestId, error: { code: "PERMISSION_DENIED", message: "Refused" } });
+  await rejection;
+  assert.equal(voice.chatMessages.length, 1);
+});
+
+test("acknowledgement queued immediately before replacement cannot append into the new room", async () => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  const sent = voice.sendServerMessage("Old room");
+  const rejected = assert.rejects(sent);
+  socket.receive({ type: "commandCompleted", requestId: socket.messages.at(-1).requestId });
+  voice.disconnect();
+  await rejected;
+  assert.equal(voice.chatMessages.length, 0);
+});
+
+test("chat submission keeps rejected drafts, coalesces clicks and preserves newer typing", async t => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  let pending = deferred(), calls = 0;
+  const chat = chatView(t, { sendTextMessage: () => { calls++; return pending.promise; } });
+  chat.messageDraft.value = "Keep this";
+  const first = chat.submitMessage();
+  const duplicate = chat.submitMessage();
+  assert.equal(calls, 1);
+  pending.reject(new Error("Rejected"));
+  await Promise.all([first, duplicate]);
+  assert.equal(chat.messageDraft.value, "Keep this");
+  assert.equal(chat.sendError.value, "chatSendFailed");
+  pending = deferred();
+  const next = chat.submitMessage();
+  chat.messageDraft.value = "New typing";
+  pending.resolve();
+  await next;
+  assert.equal(chat.messageDraft.value, "New typing");
+  pending = deferred();
+  const final = chat.submitMessage();
+  pending.resolve();
+  await final;
+  assert.equal(chat.messageDraft.value, "");
+});
+
+test("changing servers resets private selection and draft before another member reuses the ID", async t => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1, members: [{ id: 7, uid: "old", nickname: "Old" }] });
+  const chat = chatView(t);
+  chat.openPrivateChat(7);
+  chat.messageDraft.value = "Old private draft";
+  voice.connect("different.example:9987", "", "Visitor");
+  await nextTurn();
+  TestSocket.instances.at(-1).receive({ type: "connected", tsClientId: 1, members: [{ id: 7, uid: "new", nickname: "New" }] });
+  await nextTick();
+  assert.equal(chat.privateClientId.value, 0);
+  assert.equal(chat.tab.value, "channel");
+  assert.equal(chat.messageDraft.value, "");
+});
+
+test("private history and selection do not follow a reused client ID", async t => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1, members: [{ id: 7, uid: "old", nickname: "Old" }] });
+  const chat = chatView(t);
+  socket.receive({ type: "chatMessage", scope: "private", invokerId: 7, senderUid: "old", invokerName: "Old", message: "Old private message" });
+  chat.openPrivateChat(7);
+  chat.messageDraft.value = "For old user";
+  socket.receive({ type: "memberLeave", id: 7 });
+  socket.receive({ type: "memberEnter", id: 7, uid: "new", nickname: "New" });
+  await nextTick();
+  await chat.submitMessage();
+  assert.equal(socket.messages.some(message => message.type === "sendPrivateMessage"), false);
+  assert.equal(chat.messageDraft.value, "For old user");
+  assert.equal(chat.conversations.value[0].name, "Old");
+  chat.openPrivateChat(7);
+  assert.equal(chat.visibleMessages.value.length, 0, "the new member does not inherit the old member's private history");
+});
+
+test("a retired chat submission cannot clear or report errors in the next session", async t => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  const pending = deferred();
+  const chat = chatView(t, { sendTextMessage: () => pending.promise });
+  chat.messageDraft.value = "Same text";
+  const submitting = chat.submitMessage();
+  voice.disconnect();
+  await nextTick();
+  chat.messageDraft.value = "Same text";
+  pending.resolve();
+  await submitting;
+  assert.equal(chat.messageDraft.value, "Same text");
+  assert.equal(chat.sendError.value, "");
+});
+
+test("private sends carry the recipient UID and confirmed history keeps the recipient name", async t => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1, members: [{ id: 7, uid: "recipient", nickname: "Alice" }] });
+  const chat = chatView(t);
+  chat.openPrivateChat(7);
+  chat.messageDraft.value = "Private";
+  const sent = chat.submitMessage();
+  const command = socket.messages.at(-1);
+  assert.equal(command.payload.clientUid, "recipient");
+  socket.receive({ type: "commandCompleted", requestId: command.requestId });
+  await sent;
+  socket.receive({ type: "memberLeave", id: 7 });
+  assert.equal(chat.conversations.value[0].name, "Alice");
+  assert.equal(chat.visibleMessages.value[0].message, "Private");
+  assert.equal(chat.messageDraft.value, "");
+});
+
+test("legacy members without UIDs get fresh private scopes after departure and recovery", async t => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1, members: [{ id: 7, nickname: "Legacy" }] });
+  const chat = chatView(t);
+  chat.openPrivateChat(7);
+  const before = chat.privateConversationKey.value;
+  socket.receive({ type: "chatMessage", scope: "private", invokerId: 7, invokerName: "Legacy", message: "Old" });
+  assert.equal(chat.visibleMessages.value.length, 1);
+  socket.receive({ type: "memberLeave", id: 7 });
+  socket.receive({ type: "memberEnter", id: 7, nickname: "Another" });
+  chat.openPrivateChat(7);
+  assert.notEqual(chat.privateConversationKey.value, before);
+  assert.equal(chat.visibleMessages.value.length, 0);
+  const second = chat.privateConversationKey.value;
+  socket.receive({ type: "disconnected", recoverable: true });
+  socket.receive({ type: "connected", tsClientId: 2, members: [{ id: 7, nickname: "Recovered" }] });
+  assert.notEqual(voice.memberConversationKey(7), second);
+  assert.equal(chat.canSend.value, false);
+});
+
+test("leaving the chat scope retires pending feedback and manual submission", async t => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  const pending = deferred();
+  let calls = 0;
+  const scope = effectScope();
+  const chat = scope.run(() => chatView({ after: cleanup => t.after(cleanup) }, { sendTextMessage: () => { calls++; return pending.promise; } }));
+  chat.messageDraft.value = "Keep";
+  const sent = chat.submitMessage();
+  scope.stop();
+  pending.reject(new Error("Late rejection"));
+  await sent;
+  await chat.submitMessage();
+  assert.equal(calls, 1);
+  assert.equal(chat.messageDraft.value, "Keep");
+  assert.equal(chat.sendError.value, "");
+});
+
+test("chat feedback is translated in all five languages", () => {
+  for (const key of ["chatSending", "chatSendFailed", "chatNotConnected", "chatTargetUnavailable", "chatChannelChanged"]) {
+    const values = ["zh", "en", "de", "ru", "ja"].map(language => webClientTranslations[language][key]);
+    assert.ok(values.every(value => typeof value === "string" && value.length > 0));
+    assert.equal(new Set(values).size, 5);
+  }
+});
+
+test("returning to a pending conversation cannot submit it twice", async t => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  let calls = 0;
+  const pending = deferred();
+  const chat = chatView(t, { sendTextMessage: () => { calls++; return pending.promise; } });
+  chat.messageDraft.value = "In flight";
+  const sending = chat.submitMessage();
+  chat.tab.value = "server";
+  chat.messageDraft.value = "Server draft";
+  chat.tab.value = "channel";
+  const duplicate = chat.submitMessage();
+  assert.equal(calls, 1);
+  chat.tab.value = "server";
+  pending.resolve();
+  await Promise.all([sending, duplicate]);
+  assert.equal(chat.messageDraft.value, "Server draft");
+  chat.tab.value = "channel";
+  assert.equal(chat.messageDraft.value, "", "acknowledgement clears only the submitted conversation's unchanged draft");
+});
+
+test("an unidentified private sender cannot become a later member with the same numeric ID", async t => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  const chat = chatView(t);
+  socket.receive({ type: "chatMessage", scope: "private", invokerId: 7, invokerName: "Unknown old sender", message: "Old" });
+  socket.receive({ type: "memberEnter", id: 7, nickname: "New legacy member" });
+  chat.openPrivateChat(7);
+  assert.equal(chat.visibleMessages.value.length, 0);
+  assert.equal(chat.conversations.value[0].name, "Unknown old sender");
+});
+
+function channelView(t, channels) {
+  const scope = effectScope();
+  t.after(() => scope.stop());
+  return scope.run(() => useWebClientChannels({ channels, members: [], clientId: ref(1), selectedChannelId: ref(""),
+    channelName: ref(""), memberQuery: ref(""), whisperTargetIds: new Set(), t: key => key }));
+}
+
+test("cyclic, orphaned and duplicate channel entries produce a finite unique tree", t => {
+  const view = channelView(t, [
+    { id: "1", parentID: "1", name: "Self cycle" },
+    { id: "2", parentID: "3", name: "Cycle A" }, { id: "3", parentID: "2", name: "Cycle B" },
+    { id: "4", parentID: "99", name: "Orphan" }, { id: "4", parentID: "0", name: "Duplicate" },
+  ]);
+  assert.equal(view.channelTree.value.length, 4);
+  assert.equal(new Set(view.channelTree.value.map(channel => channel.id)).size, 4);
+  assert.equal(view.channelTree.value.find(channel => channel.id === "4").name, "Orphan");
+  assert.ok(view.channelTree.value.every(channel => channel.depth >= 0 && channel.depth <= 1));
+});
+
+test("channel traversal preserves sibling predecessors and handles a deep directory without recursion", t => {
+  const normal = channelView(t, [
+    { id: "3", parentID: "0", order: "2", name: "Third" }, { id: "2", parentID: "0", order: "1", name: "Second" },
+    { id: "1", parentID: "0", order: "0", name: "First" }, { id: "4", parentID: "1", name: "Child" },
+  ]);
+  assert.deepEqual(normal.channelTree.value.map(channel => [channel.id, channel.depth]), [["1", 0], ["4", 1], ["2", 0], ["3", 0]]);
+  const deep = channelView(t, Array.from({ length: 5_000 }, (_, index) => ({ id: String(index + 1), parentID: String(index), name: "Deep" })).reverse());
+  assert.equal(deep.channelTree.value.length, 5_000);
+  assert.equal(deep.channelTree.value.at(-1).depth, 4_999);
+});
 
 async function connectWebRtc() {
   const socket = await connect();

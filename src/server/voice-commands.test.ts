@@ -8,6 +8,7 @@ import { handleCommand, type VoiceCommandContext } from "./voice-commands.js";
 function fixture() {
   const calls: Array<[string, ...unknown[]]> = [];
   const messages: ServerMessage[] = [];
+  const members = new Map<number, { uid?: string }>([[1, {}], [2, {}]]);
   const context: VoiceCommandContext = {
     tsClient: {
       execCommandWithResponse: async request => { calls.push(["exec", request]); return []; },
@@ -20,7 +21,7 @@ function fixture() {
       setInputMuted: async (...args) => { calls.push(["mute", ...args]); },
     },
     channelTree: [{ id: "18446744073709551615", parentID: "0", name: "Large ID" }],
-    members: new Map([[1, {}], [2, {}]]),
+    members,
     whisperTargetIds: new Set(), whisperActive: false,
     lastAudioStatsProbeAt: 0, lastLatencyProbeAt: 0,
     audio: createAudioFlowStats(), webrtc: null,
@@ -34,7 +35,7 @@ function fixture() {
       messages.push(message);
     }, () => now);
   }
-  return { context, calls, messages, run };
+  return { context, members, calls, messages, run };
 }
 
 test("moving a visible member preserves bigint channel IDs and request correlation", async () => {
@@ -42,6 +43,29 @@ test("moving a visible member preserves bigint channel IDs and request correlati
   await f.run({ type: "moveClient", payload: { clientId: 2, channelId: "18446744073709551615", password: "ignored-for-admin-move" }, requestId: "move-1" });
   assert.deepEqual(f.calls, [["move", 2, 18446744073709551615n]]);
   assert.deepEqual(f.messages, [{ type: "commandCompleted", requestId: "move-1" }]);
+});
+
+test("private text rejects an ID now owned by a different UID and confirms the intended recipient", async () => {
+  const f = fixture();
+  f.members.set(2, { uid: "new-user" });
+  await f.run({ type: "sendPrivateMessage", requestId: "old", payload: { clientId: 2, clientUid: "old-user", message: "Private" } });
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.messages[0]?.type, "error");
+  assert.equal(f.messages[0]?.requestId, "old");
+  await f.run({ type: "sendPrivateMessage", requestId: "new", payload: { clientId: 2, clientUid: "new-user", message: "Private" } });
+  assert.deepEqual(f.calls, [["text", "private", "Private", 2n]]);
+  assert.deepEqual(f.messages.at(-1), { type: "commandCompleted", requestId: "new" });
+});
+
+test("channel text cannot silently go to a different channel after a failed or racing move", async () => {
+  const f = fixture();
+  await f.run({ type: "sendTextMessage", requestId: "wrong", payload: { channelId: "6", message: "Message" } });
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.messages[0]?.type, "error");
+  await f.run({ type: "sendTextMessage", requestId: "right", payload: { channelId: "5", message: "Message" } });
+  assert.deepEqual(f.calls, [["text", "channel", "Message", 5n]]);
+  await f.run({ type: "sendTextMessage", payload: { message: "Legacy" } });
+  assert.deepEqual(f.calls.at(-1), ["text", "channel", "Legacy", 5n]);
 });
 
 test("invalid move targets are rejected before invoking the SDK", async () => {

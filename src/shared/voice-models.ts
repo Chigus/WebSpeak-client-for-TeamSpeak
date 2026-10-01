@@ -27,6 +27,9 @@ export interface ChatMessage {
   scope: "channel" | "server" | "private" | "system";
   targetId?: string;
   conversationId?: string;
+  /** Browser-local identity scope and display snapshot for private history. */
+  conversationKey?: string;
+  conversationName?: string;
   senderId?: number;
   senderUid?: string;
   invokerName: string;

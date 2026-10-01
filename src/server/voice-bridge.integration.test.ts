@@ -223,6 +223,20 @@ test("directory snapshots during reconnect backoff cannot leak members into the 
   assert.equal(entry.members.has(9), false);
 });
 
+test("commands arriving during recovery receive a correlated rejection", { timeout: 5_000 }, async t => {
+  const f = await fixture(t);
+  const rejected = new Promise<{ requestId?: string }>(resolve => {
+    f.socket.on("message", (data, binary) => {
+      if (binary) return;
+      const message = JSON.parse(data.toString());
+      if (message.type === "error" && message.error?.code === "SESSION_NOT_READY") resolve(message);
+    });
+  });
+  f.sdk.emit("disconnected");
+  f.socket.send(JSON.stringify({ type: "sendServerMessage", requestId: "chat-in-flight", payload: { message: "Hello" } }));
+  assert.equal((await rejected).requestId, "chat-in-flight");
+});
+
 for (const order of ["kick-first", "disconnect-first"] as const) {
   test(`a kick remains terminal when notifications arrive ${order}`, { timeout: 5_000 }, async t => {
     const f = await fixture(t);

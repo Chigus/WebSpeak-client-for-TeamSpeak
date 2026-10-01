@@ -235,7 +235,7 @@
               <div class="chat-tabs" data-ws-part="voice.chat.tabs" role="tablist" :aria-label="t('chatTabs')">
                 <button type="button" data-ws-part="voice.chat.tab" :data-ws-state="chatTab === 'channel' ? 'active' : 'idle'" :class="{ active: chatTab === 'channel' }" @click="chatTab = 'channel'"><Icon name="hash" :size="15" /> {{ currentChannelName }}</button>
                 <button type="button" data-ws-part="voice.chat.tab" :data-ws-state="chatTab === 'server' ? 'active' : 'idle'" :class="{ active: chatTab === 'server' }" @click="chatTab = 'server'"><Icon name="server" :size="15" /> {{ t('serverChat') }}</button>
-                <button v-for="conversation in privateConversations" :key="conversation.id" type="button" data-ws-part="voice.chat.tab" :data-ws-state="chatTab === 'private' && privateClientId === conversation.id ? 'active' : 'idle'" :class="{ active: chatTab === 'private' && privateClientId === conversation.id }" @click="openPrivateChat(conversation.id)"><Icon name="message" :size="15" /> {{ conversation.name }}</button>
+                <button v-for="conversation in privateConversations" :key="conversation.key" type="button" data-ws-part="voice.chat.tab" :data-ws-state="chatTab === 'private' && privateConversationKey === conversation.key ? 'active' : 'idle'" :class="{ active: chatTab === 'private' && privateConversationKey === conversation.key }" @click="openConversation(conversation)"><Icon name="message" :size="15" /> {{ conversation.name }}</button>
                 <button type="button" data-ws-part="voice.chat.tab" :data-ws-state="chatTab === 'events' ? 'active' : 'idle'" :class="{ active: chatTab === 'events' }" @click="chatTab = 'events'"><Icon name="bell" :size="15" /> {{ t('eventLog') }}</button>
               </div>
               <div class="section-heading chat-heading" data-ws-part="voice.chat.heading"><div><span class="section-kicker">{{ chatTabLabel }}</span><h2><Icon :name="chatTab === 'server' ? 'server' : chatTab === 'events' ? 'bell' : chatTab === 'private' ? 'message' : 'hash'" :size="20" /> {{ chatTitle }}</h2></div><span class="section-counter">{{ chatTab === 'events' ? t('eventCount', { count: serverEvents.length }) : t('messageCount', { count: visibleChatMessages.length }) }}</span></div>
@@ -254,8 +254,9 @@
               </div>
                <form v-if="chatTab !== 'events'" class="message-composer" data-ws-part="voice.chat.composer" @submit.prevent="submitMessage">
                  <input v-model="messageDraft" maxlength="500" :placeholder="chatPlaceholder" :aria-label="t('send')" />
-                 <button class="send-button" type="submit" :disabled="!messageDraft.trim()" :title="t('send')"><Icon name="send" :size="18" /></button>
+                 <button class="send-button" type="submit" :disabled="!canSendChat || !messageDraft.trim()" :title="t('send')"><Icon name="send" :size="18" /></button>
                </form>
+               <p v-if="chatStatus" class="chat-status" data-ws-part="voice.chat.status" role="status">{{ chatStatus }}</p>
              </section>
           </div>
         </div>
@@ -421,6 +422,8 @@ import { DEFAULT_TEAM_SPEAK_PORT, splitTeamSpeakTarget } from "../services/teams
 
 const {
   state: voiceState,
+  sessionEpoch,
+  memberConversationKey,
   members,
   channels,
   chatMessages,
@@ -861,7 +864,9 @@ const {
 });
 const {
   tab: chatTab,
-  privateClientId,
+  privateConversationKey,
+  canSend: canSendChat,
+  status: chatStatus,
   messageDraft,
   listElement: chatListEl,
   conversations: privateConversations,
@@ -870,6 +875,7 @@ const {
   title: chatTitle,
   placeholder: chatPlaceholder,
   openPrivateChat,
+  openConversation,
   submitMessage,
 } = useWebClientChat({
   messages: chatMessages,
@@ -878,6 +884,9 @@ const {
   currentChannelName,
   selectedChannelId,
   clientId: computed(() => voiceState.tsClientId),
+  connected: computed(() => voiceState.connected),
+  sessionEpoch,
+  memberConversationKey,
   isMobileViewport,
   mobileSection,
   closeMemberMenu: () => { memberMenu.value = null; },

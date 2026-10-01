@@ -2,9 +2,9 @@
 export interface ClientCommandPayloads {
   switchChannel: { channelId: string; password?: string };
   moveClient: { clientId: number; channelId: string; password?: string };
-  sendTextMessage: { message: string };
+  sendTextMessage: { message: string; channelId?: string };
   sendServerMessage: { message: string };
-  sendPrivateMessage: { clientId: number; message: string };
+  sendPrivateMessage: { clientId: number; message: string; clientUid?: string };
   poke: { clientId: number; message: string };
   setAway: { away: boolean; message?: string };
   setWhisperTargets: { targetIds: number[] };
@@ -60,6 +60,12 @@ export function parseClientCommand(raw: string): ClientCommandResult {
   }
   if (value.type === "sendTextMessage" && (typeof value.payload.message !== "string" || value.payload.message.length > 500)) {
     return { error: { code: "INVALID_TEXT_MESSAGE", message: "文字消息无效" } };
+  }
+  if (value.type === "sendTextMessage" && value.payload.channelId !== undefined && (typeof value.payload.channelId !== "string" || !/^\d{1,20}$/.test(value.payload.channelId))) {
+    return { error: { code: "INVALID_CHANNEL_ID", message: "频道标识无效" } };
+  }
+  if (value.type === "sendPrivateMessage" && value.payload.clientUid !== undefined && (typeof value.payload.clientUid !== "string" || !value.payload.clientUid || value.payload.clientUid.length > 128)) {
+    return { error: { code: "INVALID_CLIENT_ID", message: "成员标识无效" } };
   }
   if ((value.type === "sendServerMessage" || value.type === "sendPrivateMessage") && (typeof value.payload.message !== "string" || value.payload.message.length > 500)) {
     return { error: { code: "INVALID_TEXT_MESSAGE", message: "文字消息无效" } };

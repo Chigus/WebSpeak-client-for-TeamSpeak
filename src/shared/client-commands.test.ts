@@ -19,6 +19,18 @@ test("all command payloads preserve request IDs through the shared parser", () =
   }
 });
 
+test("optional chat destination guards reject malformed values and preserve legacy payloads", () => {
+  for (const clientUid of ["", 7, "x".repeat(129)]) {
+    assert.ok("error" in parseClientCommand(JSON.stringify({ type: "sendPrivateMessage", payload: { clientId: 2, message: "Hello", clientUid } })));
+  }
+  for (const channelId of ["", "-1", 1, "x".repeat(21)]) {
+    assert.ok("error" in parseClientCommand(JSON.stringify({ type: "sendTextMessage", payload: { message: "Hello", channelId } })));
+  }
+  for (const payload of [{ clientId: 2, message: "Hello" }, { clientId: 2, clientUid: "user", message: "Hello" }]) {
+    assert.deepEqual(parseClientCommand(JSON.stringify({ type: "sendPrivateMessage", payload })), { type: "sendPrivateMessage", payload });
+  }
+});
+
 test("malformed commands keep existing public error codes", () => {
   const cases = [
     [{ type: "moveClient", payload: { clientId: 0, channelId: "1" } }, "INVALID_CLIENT_ID"],

@@ -477,7 +477,7 @@ export class VoiceBridge {
           return;
         }
         if (!tsReady || session.state !== "connected") {
-          sendProtocolError(sendJson, "SESSION_NOT_READY", "TeamSpeak 会话尚未就绪");
+          sendProtocolError(sendJson, "SESSION_NOT_READY", "TeamSpeak 会话尚未就绪", command.requestId);
           return;
         }
         void handleCommand(entry!, command, sendJson);
@@ -777,6 +777,6 @@ function normalizeWebRtcHost(value: string | undefined): string | undefined {
   }
 }
 
-function sendProtocolError(sendJson: (message: ServerMessage) => void, code: string, message: string): void {
-  sendJson({ type: "error", error: { code, message, recoverable: false } });
+function sendProtocolError(sendJson: (message: ServerMessage) => void, code: string, message: string, requestId?: string): void {
+  sendJson({ type: "error", ...(requestId ? { requestId } : {}), error: { code, message, recoverable: false } });
 }

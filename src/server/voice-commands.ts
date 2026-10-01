@@ -11,7 +11,7 @@ import { teamSpeakServerErrorCode } from "../errors.js";
 export interface VoiceCommandContext extends AudioStatsSource {
   tsClient: Pick<TSClient, "execCommandWithResponse" | "switchChannel" | "getClientId" | "getChannelId" | "moveClient" | "sendTextMessage" | "poke" | "setAway" | "setInputMuted">;
   channelTree: ChannelInfo[];
-  members: ReadonlyMap<number, unknown>;
+  members: ReadonlyMap<number, { uid?: string }>;
   whisperTargetIds: Set<number>;
   whisperActive: boolean;
   lastLatencyProbeAt: number;
@@ -103,14 +103,20 @@ export async function handleCommand(
       // not prompt for or depend on the target channel's join password.
       await entry.tsClient.moveClient(clientId, BigInt(channelId));
     } else if (command.type === "sendTextMessage") {
+      const channelId = entry.tsClient.getChannelId();
+      if (command.payload.channelId !== undefined && BigInt(command.payload.channelId) !== channelId) {
+        sendJson({ type: "error", requestId: command.requestId, error: { code: "CHANNEL_CHANGED", message: "所在频道已变化，请确认频道后重试", recoverable: false } });
+        return;
+      }
       const message = command.payload.message.trim();
-      if (message) await entry.tsClient.sendTextMessage("channel", message, entry.tsClient.getChannelId());
+      if (message) await entry.tsClient.sendTextMessage("channel", message, channelId);
     } else if (command.type === "sendServerMessage") {
       const message = command.payload.message.trim();
       if (message) await entry.tsClient.sendTextMessage("server", message);
     } else if (command.type === "sendPrivateMessage") {
       const clientId = command.payload.clientId;
-      if (!entry.members.has(clientId)) {
+      const recipient = entry.members.get(clientId);
+      if (!recipient || (command.payload.clientUid !== undefined && recipient.uid !== command.payload.clientUid)) {
         sendJson({ type: "error", requestId: command.requestId, error: { code: "CLIENT_NOT_FOUND", message: "成员已离线", recoverable: false } });
         return;
       }

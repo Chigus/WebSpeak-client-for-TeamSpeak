@@ -32,6 +32,8 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 | `web/src/voice/microphone-meter.ts` | Optional per-peer level sampling, owned analysis nodes and timer, partial-failure cleanup and stale-tick rejection |
 | `web/src/voice/webrtc-transport.ts`, `webrtc-playback.ts` | Per-attempt peer negotiation, input/meter ownership, compatibility fallback and independently owned playback elements and retries |
 | `web/src/voice/connection.ts`, `commands.ts` | Cancellable ticket acquisition, socket and connection generations, plus per-command acknowledgement deadlines and cleanup |
+| `web/src/voice/session-state.ts` | Reactive directory, chat history, events and notifications; complete versus omitted directory data, session resets and private-conversation identity scopes |
+| `web/src/composables/useWebClientChat.ts`, `useWebClientChannels.ts` | Destination-owned drafts and pending sends, identity-bound private history, and iterative channel-tree projection |
 | `web/src/voice/audio-diagnostics.ts`, `web/src/composables/useWebClientPerformance.ts` | Session-owned diagnostic probes and compatibility counters, browser statistics, comparable sample scopes and cancellable UI polling |
 | `web/src/platform/` | Browser mounting and cancellable Android gateway readiness handshake |
 | `web/src/services/`, `web/src/i18n/`, `web/src/skins/` | Browser persistence, identity import, skin packages and translations |
@@ -70,6 +72,16 @@ Each remote WebRTC audio element owns its in-flight play attempt and retry liste
 Ticket acquisition has a 15-second browser deadline covering preference readiness, fetch and response-body reading. Disconnect and replacement abort the owning request immediately; stale success, rejection and deadline callbacks cannot open a socket or update a newer connection. This is separate from the gateway's TeamSpeak handshake policy. Browser cancellation does not undo a server-side invite consumption or ticket issuance. Preserve the gateway close code over generic WebSocket errors, detach retired handlers, and tolerate socket-close failures.
 
 Every acknowledged command owns its original socket, connection generation and deadline. Success, server rejection, synchronous send failure, timeout and disconnect all use one idempotent completion path; release the registration and timer immediately. Fire-and-forget commands keep the existing shared wire contract.
+
+Chat sends require a connected TeamSpeak session and append local history only after acknowledgement. A queued acknowledgement cannot append after session resource release. Recovery rejections retain the command request ID. Optional channelId and clientUid command fields let the gateway verify the actual channel and recipient before invoking the SDK; legacy payloads remain accepted without those additional guards. Confirmation is not a read receipt, and a timeout does not prove non-delivery.
+
+Directory, chat, events and poke lists retain their reactive array identities. Complete channel snapshots replace the member directory, while omitted members remain unknown rather than empty. Channel projections share canonical members. Departure and UID replacement release the old member's playback, speaking state, temporary volume and whisper selection; persisted UID-based preferences remain. A recovered TeamSpeak connection replaces its directory even when the connected message omits members.
+
+Explicit disconnect, target replacement and ordinary socket closure reset message state and advance the page's session epoch. Same-socket recovery may preserve chat history, but cannot send until connected; recovered directories and events replace old snapshots and clear old pokes. Failed recovery may retain its history for the failure panel until retry or exit.
+
+Private history uses UID scopes when available and member-lifetime scopes for legacy clients without UIDs. Unknown senders must not become later members merely because a numeric ID matches. Preserve the recipient name in outgoing history. Drafts, pending submissions and errors belong to a destination within a session; switching tabs cannot duplicate an in-flight send. Confirmation clears only the unchanged submitted draft, including when its tab is inactive. Reset or disposal retires late feedback.
+
+Channel projection uses iterative parent and sibling traversal, emits each ID at most once, keeps the first duplicate, promotes missing-parent channels to roots and starts isolated cycles at their first source entry. Do not reintroduce recursive traversal or silently discard the entire directory on a malformed topology.
 
 Audio diagnostic probes retain their cancellation entry and deadline until both gateway and browser statistics finish. Bind the result to the original socket, connection generation and peer; disconnect settles pending consumers immediately, and a late browser getStats result cannot mix with a replacement peer. A probe send failure returns no sample.
 

@@ -7,15 +7,16 @@ import { createAccompaniment, type AccompanimentErrorCode } from "../voice/accom
 import { createWebRtcTransport } from "../voice/webrtc-transport.js";
 import { createVoiceConnection } from "../voice/connection.js";
 import { createVoiceCommands } from "../voice/commands.js";
+import { createVoiceSessionState } from "../voice/session-state.js";
 import { createAudioDiagnostics, type AudioPermission, type VoiceAudioStatusSample } from "../voice/audio-diagnostics.js";
 export type { AudioPermission, BrowserVoiceAudioStats, VoiceAudioStatusSample } from "../voice/audio-diagnostics.js";
 import type { SinkAudioElement } from "../voice/webrtc-playback.js";
 import { createScreenShareController } from "../voice/screen-share.js";
 export type { ScreenShareOutputSettings, ScreenShareCaptureStats, ScreenSharePeerStats, ScreenShareWebRtcStats } from "../voice/screen-share.js";
 import { parseServerMessage } from "../../../src/shared/server-messages.js";
+import type { ChatMessage } from "../../../src/shared/voice-models.js";
 import type { ClientCommandPayloads, ClientCommandType } from "../../../src/shared/client-commands.js";
 export type { ScreenShareStreamDescription as ScreenShareStream, ScreenShareViewerDescription as ScreenShareViewer, ScreenSharePeerSignal as ScreenShareSignal } from "../../../src/shared/screen-share.js";
-import type { ChannelMember, ChannelInfo, ChatMessage, ServerEvent } from "../../../src/shared/voice-models.js";
 export type { ChannelMember, ChannelInfo, ChatMessage, ServerEvent, VoiceAudioBridgeStats } from "../../../src/shared/voice-models.js";
 import { reactive, ref, shallowRef } from "vue";
 import { loadLocalPreferences, saveLocalPreferences } from "../services/local-persistence.js";
@@ -189,11 +190,19 @@ class CancelledMediaOperation extends Error {
 export function useVoiceWebSocket() {
   const ws = shallowRef<WebSocket | null>(null);
   const state = reactive<VoiceState>({ connected: false, connecting: false, reconnecting: false, reconnectAttempt: 0, reconnectFailed: false, tsClientId: 0, error: "", errorCode: "", microphoneError: "", microphoneErrorCode: "", audioNotice: "", audioNoticeCode: "", channelSwitchedChannelId: "" });
-  const members = reactive<ChannelMember[]>([]);
-  const channels = reactive<ChannelInfo[]>([]);
-  const chatMessages = reactive<ChatMessage[]>([]);
-  const serverEvents = reactive<ServerEvent[]>([]);
-  const pokeNotifications = reactive<{ id: string; invokerId: number; invokerUid: string; invokerName: string; message: string; timestamp: number }[]>([]);
+  const sessionState = createVoiceSessionState({
+    selfId: () => state.tsClientId,
+    onMemberRemoved(id) {
+      clearSpeaking(id);
+      remotePlayback.clear(id);
+      delete volumes[id];
+      whisperTargetIds.delete(id);
+      if (!whisperTargetIds.size) whisperActive.value = false;
+    },
+    onMembersChanged: syncKnownMemberVolumes,
+  });
+  const { members, channels, chatMessages, serverEvents, pokeNotifications } = sessionState;
+  let chatGeneration = 0;
   const voiceConnection = createVoiceConnection({
     onSocket: socket => { ws.value = socket; },
     onMessage: handleMessage,
@@ -203,6 +212,8 @@ export function useVoiceWebSocket() {
       state.connected = false;
       state.connecting = false;
       state.reconnecting = false;
+      state.tsClientId = 0;
+      if (!state.reconnectFailed) sessionState.reset();
       if (event.code !== 1000 && !state.reconnectFailed && !state.errorCode) {
         state.errorCode = closeErrorCode(event.code, event.reason);
         state.error = closeReason(event.code, event.reason);
@@ -994,14 +1005,13 @@ export function useVoiceWebSocket() {
     state.errorCode = "";
     state.channelSwitchedChannelId = "";
     if (!keepRememberedIdentity) identityMaterial.value = "";
-    members.length = 0;
-    channels.length = 0;
-    chatMessages.length = 0;
+    sessionState.reset();
     for (const key of Object.keys(volumes)) delete volumes[Number(key)];
   }
 
   /** All ways a session ends release the same owned media and pending work. */
   function releaseSessionResources(sendScreenStop = false): void {
+    chatGeneration++;
     inputDeviceGeneration++;
     outputDeviceGeneration++;
     deviceListGeneration++;
@@ -1022,7 +1032,7 @@ export function useVoiceWebSocket() {
 
   function handleMessage(raw: unknown): void {
     const msg = parseServerMessage(raw);
-    if (!msg || screenShare.handleMessage(msg)) return;
+    if (!msg || screenShare.handleMessage(msg) || sessionState.receive(msg)) return;
     switch (msg.type) {
       case "connected":
         const wasReconnecting = state.reconnecting;
@@ -1041,16 +1051,8 @@ export function useVoiceWebSocket() {
         // native TeamSpeak users even before WebRTC negotiation completes.
         sendCmd("setMicrophoneMuted", { muted: microphoneMuted.value });
         screenShare.setIceServers(msg.screenShareIceServers);
+        sessionState.connected(msg);
         applyWhisperState(msg.whisperTargetIds, msg.whisperActive);
-        if (Array.isArray(msg.members)) {
-          members.length = 0;
-          for (const member of msg.members) {
-            members.push({ ...member, isSelf: Number(member.id) === state.tsClientId });
-          }
-          syncKnownMemberVolumes();
-        }
-        serverEvents.length = 0;
-        if (Array.isArray(msg.serverEventLog)) serverEvents.push(...msg.serverEventLog);
         if (typeof msg.identity === "string" && msg.identity.length <= 8192) {
           identityMaterial.value = msg.identity;
           if (lastConnection) lastConnection.identity = msg.identity;
@@ -1068,71 +1070,6 @@ export function useVoiceWebSocket() {
           void ensureMicrophone().catch((error: unknown) => { setMicrophoneError(error); });
         }
         screenShare.refreshStreams();
-        break;
-      case "memberEnter":
-        if (!members.some((member) => member.id === msg.id)) {
-          members.push({ id: msg.id, nickname: msg.nickname, uid: typeof msg.uid === "string" ? msg.uid : undefined, avatar: typeof msg.avatar === "string" ? msg.avatar : undefined, isSelf: Boolean(msg.isSelf) });
-          syncKnownMemberVolumes();
-        }
-        break;
-      case "memberLeave": {
-        const clientId = Number(msg.id);
-        clearSpeaking(clientId);
-        remotePlayback.clear(clientId);
-        const index = members.findIndex((member) => member.id === clientId);
-        if (index >= 0) members.splice(index, 1);
-        break;
-      }
-      case "channelList":
-        channels.length = 0;
-        if (Array.isArray(msg.channels)) {
-          for (const channel of msg.channels) channels.push(channel);
-        }
-        syncKnownMemberVolumes();
-        break;
-      case "memberAvatar": {
-        const clientId = Number(msg.id);
-        const uid = typeof msg.uid === "string" ? msg.uid : "";
-        const avatar = typeof msg.avatar === "string" ? msg.avatar : "";
-        const member = members.find((candidate) => candidate.id === clientId && (!uid || candidate.uid === uid));
-        if (member) member.avatar = avatar || undefined;
-        for (const channel of channels) {
-          const channelMember = channel.members?.find((candidate) => candidate.id === clientId && (!uid || candidate.uid === uid));
-          if (channelMember) channelMember.avatar = avatar || undefined;
-        }
-        break;
-      }
-      case "chatMessage":
-        if (Number(msg.invokerId) === state.tsClientId) break;
-        const incomingScope = msg.scope === "private" || msg.scope === "server" || msg.scope === "channel" ? msg.scope : "system";
-        const rawTargetId = typeof msg.targetId === "string" || typeof msg.targetId === "number" ? String(msg.targetId) : undefined;
-        // Older gateways and TeamSpeak channel notifications may use 0 as
-        // the broadcast sentinel. It must not be compared with a channel id.
-        const incomingTargetId = rawTargetId && rawTargetId !== "0" ? rawTargetId : undefined;
-        chatMessages.push({
-          id: `remote-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          scope: incomingScope,
-          ...(incomingTargetId ? { targetId: incomingTargetId } : {}),
-          ...(incomingScope === "private" ? { conversationId: String(Number(msg.invokerId) || 0) } : {}),
-          senderId: Number(msg.invokerId) || undefined,
-          senderUid: typeof msg.senderUid === "string" ? msg.senderUid : undefined,
-          invokerName: String(msg.invokerName || "Unknown"),
-          message: String(msg.message || ""),
-          timestamp: typeof msg.timestamp === "number" ? msg.timestamp : Date.now(),
-        });
-        break;
-      case "serverEvent":
-        if (msg.event && typeof msg.event.id === "string") serverEvents.push(msg.event as ServerEvent);
-        break;
-      case "pokeReceived":
-        pokeNotifications.push({
-          id: `poke-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          invokerId: Number(msg.invokerId) || 0,
-          invokerUid: typeof msg.invokerUid === "string" ? msg.invokerUid : "",
-          invokerName: String(msg.invokerName || "Unknown"),
-          message: String(msg.message || ""),
-          timestamp: typeof msg.timestamp === "number" ? msg.timestamp : Date.now(),
-        });
         break;
       case "channelSwitched":
         state.channelSwitchedChannelId = typeof msg.channelId === "string" || typeof msg.channelId === "number" ? String(msg.channelId) : "";
@@ -1263,34 +1200,44 @@ export function useVoiceWebSocket() {
     return audioDiagnostics.measure(timeoutMs);
   }
 
-  function sendTextMessage(message: string, targetId = ""): void {
-    const trimmed = message.trim();
-    if (!trimmed || trimmed.length > 500) return;
-    sendCmd("sendTextMessage", { message: trimmed });
-    chatMessages.push({
-      id: `self-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      scope: "channel",
-      ...(targetId ? { targetId } : {}),
-      senderId: state.tsClientId,
-      invokerName: "你",
-      message: trimmed,
-      timestamp: Date.now(),
-      isSelf: true,
-    });
+  function chatText(message: string): string {
+    if (!state.connected || ws.value?.readyState !== WebSocket.OPEN) {
+      throw Object.assign(new Error("TeamSpeak 会话尚未就绪"), { code: "SESSION_NOT_READY" });
+    }
+    const text = message.trim();
+    if (!text || text.length > 500) throw Object.assign(new Error("文字消息无效"), { code: "INVALID_TEXT_MESSAGE" });
+    return text;
   }
 
-  function sendServerMessage(message: string): void {
-    const trimmed = message.trim();
-    if (!trimmed || trimmed.length > 500) return;
-    sendCmd("sendServerMessage", { message: trimmed });
-    chatMessages.push({ id: `self-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, scope: "server", senderId: state.tsClientId, invokerName: "你", message: trimmed, timestamp: Date.now(), isSelf: true });
+  async function sendChat<K extends "sendTextMessage" | "sendServerMessage" | "sendPrivateMessage">(
+    type: K, payload: ClientCommandPayloads[K], local: Pick<ChatMessage, "scope" | "targetId" | "conversationId" | "conversationKey" | "conversationName">,
+  ): Promise<void> {
+    const generation = chatGeneration;
+    const senderId = state.tsClientId;
+    await sendCommandAndWait(type, payload);
+    if (generation !== chatGeneration || !state.connected) throw new Error("语音连接已关闭");
+    sessionState.appendLocal({ ...local, senderId, invokerName: "你", message: payload.message });
   }
 
-  function sendPrivateMessage(clientId: number, message: string, targetId = ""): void {
-    const trimmed = message.trim();
-    if (!trimmed || trimmed.length > 500) return;
-    sendCmd("sendPrivateMessage", { clientId, message: trimmed });
-    chatMessages.push({ id: `self-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, scope: "private", targetId, conversationId: String(clientId), senderId: state.tsClientId, invokerName: "你", message: trimmed, timestamp: Date.now(), isSelf: true });
+  async function sendTextMessage(message: string, targetId = ""): Promise<void> {
+    const text = chatText(message);
+    await sendChat("sendTextMessage", { message: text, ...(targetId ? { channelId: targetId } : {}) },
+      { scope: "channel", ...(targetId ? { targetId } : {}) });
+  }
+
+  async function sendServerMessage(message: string): Promise<void> {
+    await sendChat("sendServerMessage", { message: chatText(message) }, { scope: "server" });
+  }
+
+  async function sendPrivateMessage(clientId: number, message: string, targetId = "", expectedKey?: string): Promise<void> {
+    const text = chatText(message);
+    const member = members.find(candidate => candidate.id === clientId);
+    const key = sessionState.memberConversationKey(clientId);
+    if (!member || clientId === state.tsClientId || (expectedKey !== undefined && key !== expectedKey)) {
+      throw Object.assign(new Error("成员已离线或当前不可见"), { code: "CLIENT_NOT_FOUND" });
+    }
+    await sendChat("sendPrivateMessage", { clientId, message: text, ...(member.uid ? { clientUid: member.uid } : {}) },
+      { scope: "private", targetId, conversationId: String(clientId), conversationKey: key, conversationName: member.nickname });
   }
 
   function sendPoke(clientId: number, message = ""): void {
@@ -1451,6 +1398,8 @@ export function useVoiceWebSocket() {
     ...screenShare.api,
     ws,
     state,
+    sessionEpoch: sessionState.epoch,
+    memberConversationKey: sessionState.memberConversationKey,
     members,
     channels,
     chatMessages,
