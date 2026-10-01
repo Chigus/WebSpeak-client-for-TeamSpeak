@@ -190,6 +190,7 @@ beforeEach(() => {
   replaceGlobal("location", { protocol: "https:", host: "gateway.example" });
   replaceGlobal("fetch", async () => ({ ok: true, json: async () => ({ ticket: "test-ticket" }) }));
   replaceGlobal("AudioContext", AudioContextStub);
+  replaceGlobal("AudioWorkletNode", class {});
   replaceGlobal("AudioDecoder", AudioDecoderStub);
   replaceGlobal("MediaRecorder", RecorderStub);
   const storage = new Map();
@@ -967,4 +968,178 @@ test("replacing compatibility capture prevents the old graph from sending into t
   voice.disconnect();
   current.onaudioprocess(event);
   assert.equal(socket.messages.filter(message => message instanceof ArrayBuffer).length, 1);
+});
+
+test("a failed replacement processing graph preserves the live microphone and PCM path", async t => {
+  navigator.mediaDevices.enumerateDevices = async () => availableDevices;
+  const initial = microphoneStream();
+  navigator.mediaDevices.getUserMedia = async () => initial;
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  await nextTurn();
+  const capture = AudioContextStub.processors.at(-1);
+  const replacement = microphoneStream();
+  navigator.mediaDevices.getUserMedia = async () => replacement;
+  const ctx = AudioContextStub.instances.at(-1);
+  const processing = { ...voice.microphoneProcessing };
+  t.mock.method(ctx, "createGain", () => { throw new Error("Gain allocation failed"); });
+  await assert.rejects(voice.setInputDevice("mic-b"), /Gain allocation failed/);
+  assert.equal(initial.track.readyState, "live");
+  assert.equal(replacement.track.readyState, "ended");
+  capture.onaudioprocess({ inputBuffer: { getChannelData: () => new Float32Array(960).fill(0.25) } });
+  assert.equal(socket.messages.filter(message => message instanceof ArrayBuffer).length, 1);
+  assert.deepEqual({ ...voice.microphoneProcessing }, processing);
+  assert.equal(voice.selectedInputDeviceId.value, "");
+  assert.notEqual(voice.state.microphoneErrorCode, "");
+});
+
+test("waiting for a replacement worklet keeps the current graph sending", async t => {
+  navigator.mediaDevices.enumerateDevices = async () => availableDevices;
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  await nextTurn();
+  const capture = AudioContextStub.processors.at(-1);
+  const module = deferred();
+  AudioContextStub.instances.at(-1).audioWorklet = { addModule: url => url === "/mic-capture-worklet.js" ? module.promise : Promise.resolve() };
+  // A missing worklet constructor must still permit the ScriptProcessor fallback.
+  replaceGlobal("AudioWorkletNode", class { constructor() { throw new Error("Worklet unavailable"); } });
+  t.after(() => module.resolve());
+  const pending = voice.setInputDevice("mic-a");
+  await nextTurn();
+  capture.onaudioprocess({ inputBuffer: { getChannelData: () => new Float32Array(960).fill(0.25) } });
+  const framesWhilePreparing = socket.messages.filter(message => message instanceof ArrayBuffer).length;
+  module.resolve();
+  await pending;
+  assert.equal(framesWhilePreparing, 1);
+  AudioContextStub.processors.at(-1).onaudioprocess({ inputBuffer: { getChannelData: () => new Float32Array(960).fill(0.25) } });
+  assert.equal(socket.messages.filter(message => message instanceof ArrayBuffer).length, 2);
+});
+
+test("disconnect during worklet preparation releases every candidate node and track", async t => {
+  navigator.mediaDevices.enumerateDevices = async () => availableDevices;
+  await voice.ensureMicrophone();
+  const module = deferred();
+  const ctx = AudioContextStub.instances.at(-1);
+  ctx.audioWorklet = { addModule: url => url === "/mic-capture-worklet.js" ? module.promise : Promise.resolve() };
+  const source = new AudioNodeStub();
+  const destination = Object.assign(new AudioNodeStub(), { stream: microphoneStream() });
+  t.mock.method(ctx, "createMediaStreamSource", () => source);
+  t.mock.method(ctx, "createMediaStreamDestination", () => destination);
+  const stream = microphoneStream();
+  navigator.mediaDevices.getUserMedia = async () => stream;
+  const pending = voice.setInputDevice("mic-a");
+  t.after(() => module.resolve());
+  await nextTurn();
+  voice.disconnect();
+  assert.equal(stream.track.readyState, "ended");
+  assert.equal(destination.stream.track.readyState, "ended");
+  assert.ok(source.disconnects > 0);
+  module.resolve();
+  await pending;
+  assert.equal(voice.ws.value, null);
+});
+
+test("a failed first capture graph reports an error and releases its stream", async t => {
+  const stream = microphoneStream();
+  navigator.mediaDevices.getUserMedia = async () => stream;
+  t.mock.method(AudioContextStub.prototype, "createScriptProcessor", () => { throw new Error("Capture node unavailable"); });
+  await assert.rejects(voice.ensureMicrophone(), /Capture node unavailable/);
+  assert.equal(stream.track.readyState, "ended");
+  assert.notEqual(voice.state.microphoneErrorCode, "");
+});
+
+test("removing the selected microphone restarts WebRTC with the default input", async () => {
+  navigator.mediaDevices.enumerateDevices = async () => availableDevices;
+  await voice.setInputDevice("mic-a");
+  const { peer, socket } = await connectWebRtc();
+  navigator.mediaDevices.enumerateDevices = async () => availableDevices.filter(device => device.deviceId !== "mic-a");
+  const replacement = microphoneStream();
+  navigator.mediaDevices.getUserMedia = async () => replacement;
+  await voice.refreshAudioDevices();
+  await nextTurn();
+  assert.equal(peer.connectionState, "closed");
+  assert.equal(socket.messages.filter(message => message.type === "webrtcOffer").length, 2);
+  assert.equal(voice.selectedInputDeviceId.value, "");
+  assert.equal(localStorage.getItem("webspeak:input-device"), "");
+  assert.equal(replacement.track.readyState, "live");
+});
+
+test("a failed default input fallback does not overwrite the last successful preference", async () => {
+  navigator.mediaDevices.enumerateDevices = async () => availableDevices;
+  await voice.setInputDevice("mic-a");
+  await voice.ensureMicrophone();
+  navigator.mediaDevices.enumerateDevices = async () => availableDevices.filter(device => device.deviceId !== "mic-a");
+  navigator.mediaDevices.getUserMedia = async () => { throw new Error("Default microphone unavailable"); };
+  await voice.refreshAudioDevices();
+  await nextTurn();
+  assert.equal(voice.selectedInputDeviceId.value, "mic-a");
+  assert.equal(localStorage.getItem("webspeak:input-device"), "mic-a");
+  assert.notEqual(voice.state.microphoneErrorCode, "");
+});
+
+test("a rejected default output fallback preserves the last preference and reports the failure", async t => {
+  navigator.mediaDevices.enumerateDevices = async () => availableDevices;
+  await voice.prepareInputDevices();
+  await voice.setOutputDevice("speaker-a");
+  navigator.mediaDevices.enumerateDevices = async () => availableDevices.filter(device => device.deviceId !== "speaker-a");
+  const ctx = AudioContextStub.instances.at(-1);
+  t.mock.method(ctx, "setSinkId", async id => { if (id === "default") throw new Error("Default output unavailable"); ctx.sinkId = id; });
+  await voice.refreshAudioDevices();
+  await nextTurn();
+  assert.equal(voice.selectedOutputDeviceId.value, "speaker-a");
+  assert.equal(localStorage.getItem("webspeak:output-device"), "speaker-a");
+  assert.equal(voice.state.audioNoticeCode, "OUTPUT_DEVICE_UNAVAILABLE");
+});
+
+test("an AudioWorklet capture sends PCM and ignores late port messages after teardown", async () => {
+  navigator.mediaDevices.enumerateDevices = async () => availableDevices;
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  await nextTurn();
+  const worklets = [];
+  replaceGlobal("AudioWorkletNode", class extends AudioNodeStub {
+    port = { onmessage: null, closed: false, close() { this.closed = true; } };
+    constructor() { super(); worklets.push(this); }
+  });
+  AudioContextStub.instances.at(-1).audioWorklet = { addModule: async () => {} };
+  await voice.setInputDevice("mic-b");
+  const capture = worklets.at(-1);
+  const onmessage = capture.port.onmessage;
+  onmessage({ data: { samples: new Float32Array(960).fill(0.25) } });
+  assert.equal(socket.messages.filter(message => message instanceof ArrayBuffer).length, 1);
+  voice.disconnect();
+  assert.equal(capture.port.closed, true);
+  assert.ok(capture.disconnects > 0);
+  onmessage({ data: { samples: new Float32Array(960).fill(0.25) } });
+  assert.equal(socket.messages.filter(message => message instanceof ArrayBuffer).length, 1);
+});
+
+test("a failed newer switch restores the device whose graph is already live during enumeration", async () => {
+  navigator.mediaDevices.enumerateDevices = async () => availableDevices;
+  await voice.ensureMicrophone();
+  const enumeration = deferred();
+  let reads = 0;
+  navigator.mediaDevices.enumerateDevices = () => ++reads === 1 ? enumeration.promise : Promise.resolve(availableDevices);
+  const replacement = microphoneStream();
+  navigator.mediaDevices.getUserMedia = ({ audio }) => audio.deviceId.exact === "mic-a"
+    ? Promise.resolve(replacement) : Promise.reject(new Error("Newer input failed"));
+  const first = voice.setInputDevice("mic-a");
+  await nextTurn();
+  await assert.rejects(voice.setInputDevice("mic-b"), /Newer input failed/);
+  enumeration.resolve(availableDevices);
+  await first;
+  assert.equal(replacement.track.readyState, "live");
+  assert.equal(voice.selectedInputDeviceId.value, "mic-a");
+  assert.equal(localStorage.getItem("webspeak:input-device"), "mic-a");
+});
+
+test("disconnect while initial device labels load still cancels microphone readiness", async () => {
+  const enumeration = deferred();
+  navigator.mediaDevices.enumerateDevices = () => enumeration.promise;
+  const readiness = voice.ensureMicrophone();
+  await nextTurn();
+  voice.disconnect();
+  enumeration.resolve(availableDevices);
+  await assert.rejects(readiness, error => error.name === "AbortError");
+  assert.equal(voice.state.microphoneErrorCode, "");
 });

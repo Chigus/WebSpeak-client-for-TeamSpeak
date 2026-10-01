@@ -246,6 +246,12 @@ function localizedAudioNotice(code: string, message: string) {
       ru: "Не удалось получить список аудиоустройств. Будут использованы устройства браузера по умолчанию",
       ja: "オーディオデバイスを一覧表示できません。ブラウザのデフォルトデバイスを使用します",
     },
+    OUTPUT_DEVICE_UNAVAILABLE: {
+      en: "The selected audio output could not be activated. Check the device connection or choose another speaker",
+      de: "Die ausgewählte Audioausgabe konnte nicht aktiviert werden. Prüfe die Geräteverbindung oder wähle einen anderen Lautsprecher",
+      ru: "Не удалось включить выбранное устройство вывода. Проверьте подключение или выберите другие динамики",
+      ja: "選択した音声出力に切り替えられませんでした。接続を確認するか、別のスピーカーを選択してください",
+    },
     AUDIO_CONTEXT_SUSPENDED: {
       en: "Browser audio processing is paused. Click the page once to resume microphone and speaker audio",
       de: "Die Audioverarbeitung des Browsers ist pausiert. Klicke einmal auf die Seite, um Mikrofon und Lautsprecher fortzusetzen",

@@ -1,5 +1,7 @@
 import { createRemotePlayback } from "../voice/remote-playback.js";
 import { createMicrophoneTest } from "../voice/microphone-test.js";
+import { createMicrophoneCaptureFactory, type MicrophoneCapture, type MicrophoneProcessingSettings } from "../voice/microphone-capture.js";
+export type { MicrophoneProcessingSettings } from "../voice/microphone-capture.js";
 import { createAudioSinkRouter } from "../voice/audio-sink.js";
 import { createScreenShareController } from "../voice/screen-share.js";
 export type { ScreenShareOutputSettings, ScreenShareCaptureStats, ScreenSharePeerStats, ScreenShareWebRtcStats } from "../voice/screen-share.js";
@@ -10,13 +12,7 @@ export type { ScreenShareStreamDescription as ScreenShareStream, ScreenShareView
 import type { ChannelMember, ChannelInfo, ChatMessage, ServerEvent, VoiceAudioBridgeStats } from "../../../src/shared/voice-models.js";
 export type { ChannelMember, ChannelInfo, ChatMessage, ServerEvent, VoiceAudioBridgeStats } from "../../../src/shared/voice-models.js";
 import { reactive, ref, shallowRef } from "vue";
-import { RnnoiseWorkletNode, loadRnnoise } from "@sapphi-red/web-noise-suppressor";
-import rnnoiseSimdWasmUrl from "@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?url";
-import rnnoiseWasmUrl from "@sapphi-red/web-noise-suppressor/rnnoise.wasm?url";
-import rnnoiseWorkletUrl from "@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?url";
 import { loadLocalPreferences, saveLocalPreferences } from "../services/local-persistence.js";
-
-const micCaptureWorkletUrl = "/mic-capture-worklet.js";
 
 export interface VoiceState {
   connected: boolean;
@@ -52,13 +48,6 @@ export interface AudioOutputDevice {
 }
 
 export type AudioPermission = "unknown" | "granted" | "denied";
-
-export interface MicrophoneProcessingSettings {
-  echoCancellation: boolean | null;
-  noiseSuppression: boolean | null;
-  autoGainControl: boolean | null;
-  rnnoise: boolean | null;
-}
 
 type SinkAudioContext = AudioContext & {
   setSinkId?: (sinkId: string) => Promise<void>;
@@ -265,18 +254,9 @@ export function useVoiceWebSocket() {
   // for deployments where the gateway's built-in UDP media range is unavailable.
   let audioCtx: SinkAudioContext | null = null;
   let micStream: MediaStream | null = null;
-  let scriptNode: ScriptProcessorNode | null = null;
-  let captureGraphGeneration = 0;
-  let workletNode: AudioWorkletNode | null = null;
-  let workletContext: AudioContext | null = null;
-  let workletModulePromise: Promise<void> | null = null;
-  let rnnoiseNode: RnnoiseWorkletNode | null = null;
-  let rnnoiseWorkletModulePromise: Promise<void> | null = null;
-  let rnnoiseWasmPromise: Promise<ArrayBuffer> | null = null;
-  let micSource: MediaStreamAudioSourceNode | null = null;
-  let micGain: GainNode | null = null;
-  let silentGain: GainNode | null = null;
-  let processedMicDestination: MediaStreamAudioDestinationNode | null = null;
+  const microphoneCaptureFactory = createMicrophoneCaptureFactory();
+  let microphoneCapture: MicrophoneCapture | null = null;
+  let pendingMicrophoneCapture: AbortController | null = null;
   const accompanimentActive = ref(false);
   const accompanimentSupported = ref(typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getDisplayMedia));
   const accompanimentErrorCode = ref<"" | "unsupported" | "needsWebRtc" | "noAudio" | "permission">("");
@@ -619,210 +599,119 @@ export function useVoiceWebSocket() {
       .map((device) => ({ deviceId: device.deviceId, label: device.label, groupId: device.groupId }));
     inputDevices.splice(0, inputDevices.length, ...microphones);
     outputDevices.splice(0, outputDevices.length, ...speakers);
-    if (selectedInputDeviceId.value && !microphones.some((device) => device.deviceId === selectedInputDeviceId.value)) {
-      inputDeviceTouched = true;
-      selectedInputDeviceId.value = "";
-      committedInputDeviceId = "";
-      localStorage.setItem("webspeak:input-device", selectedInputDeviceId.value);
-      void saveAudioPreferences();
-      if (micStream) void startMicrophone().catch(() => undefined);
-    }
-    if (selectedOutputDeviceId.value && !speakers.some((device) => device.deviceId === selectedOutputDeviceId.value)) {
-      outputDeviceTouched = true;
-      selectedOutputDeviceId.value = "";
-      committedOutputDeviceId = "";
-      localStorage.setItem("webspeak:output-device", "");
-      void saveAudioPreferences();
-      if (audioCtx && outputDeviceSupported.value) void setAudioSink(audioCtx, "").catch(() => undefined);
-    }
+    const missingInput = selectedInputDeviceId.value && !microphones.some(device => device.deviceId === selectedInputDeviceId.value);
+    const missingOutput = selectedOutputDeviceId.value && !speakers.some(device => device.deviceId === selectedOutputDeviceId.value);
+    // Use the normal configuration transactions: a replacement input must also
+    // restart WebRTC, and rejected fallbacks must not be saved as successful.
+    const fallbackOperations: Promise<void>[] = [];
+    if (missingInput) fallbackOperations.push(setInputDevice(""));
+    if (missingOutput) fallbackOperations.push(setOutputDevice(""));
+    await Promise.allSettled(fallbackOperations);
   }
 
   async function refreshInputDevices(): Promise<void> {
     await refreshAudioDevices();
   }
 
-  async function createRnnoiseNode(ctx: AudioContext, generation: number): Promise<RnnoiseWorkletNode | null> {
-    if (typeof AudioWorkletNode === "undefined" || !ctx.audioWorklet) {
-      microphoneProcessing.rnnoise = false;
-      return null;
-    }
-    try {
-      if (!rnnoiseWasmPromise) {
-        rnnoiseWasmPromise = loadRnnoise({ url: rnnoiseWasmUrl, simdUrl: rnnoiseSimdWasmUrl }).catch((error) => {
-          rnnoiseWasmPromise = null;
-          throw error;
-        });
+  function handleCaptureChunk(input: Float32Array, rms?: number): void {
+    if (!input.length) return;
+    micLevel.value = Math.min(1, (rms ?? Math.sqrt(input.reduce((sum, sample) => sum + sample * sample, 0) / input.length)) * 6);
+    const socket = ws.value;
+    const shouldSend = !microphoneMuted.value
+      && !microphoneTestActive.value
+      && !webrtcActive.value
+      && socket?.readyState === WebSocket.OPEN
+      && voxGate(input);
+    if (!shouldSend) {
+      accumLen = 0;
+      if (microphoneMuted.value) {
+        voxAttack = 0;
+        voxRelease = 0;
       }
-      if (!rnnoiseWorkletModulePromise) {
-        rnnoiseWorkletModulePromise = ctx.audioWorklet.addModule(rnnoiseWorkletUrl).catch((error) => {
-          rnnoiseWorkletModulePromise = null;
-          throw error;
-        });
-      }
-      const [wasmBinary] = await Promise.all([rnnoiseWasmPromise, rnnoiseWorkletModulePromise]);
-      if (generation !== microphoneGeneration) return null;
-      const node = new RnnoiseWorkletNode(ctx, { maxChannels: 1, wasmBinary });
-      microphoneProcessing.rnnoise = true;
-      return node;
-    } catch {
-      // Native browser NS remains active as a fallback. RNNoise is an optional
-      // enhancement and must never prevent a microphone from starting.
-      if (generation === microphoneGeneration) microphoneProcessing.rnnoise = false;
-      return null;
+      return;
     }
+    if (!socket) {
+      accumLen = 0;
+      return;
+    }
+    const bufferedBytes = socket.bufferedAmount;
+    if (bufferedBytes > MAX_AUDIO_BUFFERED_BYTES) {
+      accumLen = 0;
+      return;
+    }
+
+    if (convBuf.length < input.length) convBuf = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i++) {
+      const sample = Math.max(-1, Math.min(1, input[i]!));
+      convBuf[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+    }
+
+    const need = accumLen + input.length;
+    if (accumBuf.length < need) accumBuf = new Int16Array(Math.max(need, accumBuf.length * 2));
+    accumBuf.set(convBuf.subarray(0, input.length), accumLen);
+    accumLen = need;
+
+    let offset = 0;
+    while (offset + AUDIO_FRAME_SAMPLES <= accumLen && socket.readyState === WebSocket.OPEN && socket.bufferedAmount <= MAX_AUDIO_BUFFERED_BYTES) {
+      socket.send(accumBuf.slice(offset, offset + AUDIO_FRAME_SAMPLES).buffer);
+      offset += AUDIO_FRAME_SAMPLES;
+    }
+    if (offset > 0) markSpeaking(state.tsClientId);
+    accumLen -= offset;
+    if (offset > 0) accumBuf.set(accumBuf.subarray(offset, offset + accumLen), 0);
   }
 
   async function startMicrophone(): Promise<void> {
     const generation = ++microphoneGeneration;
+    pendingMicrophoneCapture?.abort();
+    const controller = new AbortController();
+    pendingMicrophoneCapture = controller;
     const ctx = getAudioCtx();
     const assertCurrent = (): void => {
-      if (generation !== microphoneGeneration || audioCtx !== ctx) throw new CancelledMediaOperation();
+      if (generation !== microphoneGeneration || audioCtx !== ctx || controller.signal.aborted) throw new CancelledMediaOperation();
     };
-    if (ctx.state === "suspended") {
-      try { await ctx.resume(); } catch { /* the audio context notice explains the silence */ }
-    }
-    assertCurrent();
-    // Acquire the replacement stream before tearing down the current graph so
-    // changing devices does not interrupt an active microphone on failure.
-    let nextStream: MediaStream;
+    let nextStream: MediaStream | null = null;
+    let nextCapture: MicrophoneCapture | null = null;
+    let factoryOwnsStream = false;
     try {
-      nextStream = await navigator.mediaDevices.getUserMedia({ audio: microphoneConstraints() });
-    } catch (error) {
+      if (ctx.state === "suspended") {
+        try { await ctx.resume(); } catch { /* the audio context notice explains the silence */ }
+      }
       assertCurrent();
-      if (error instanceof DOMException && ["NotAllowedError", "SecurityError"].includes(error.name)) audioPermission.value = "denied";
-      // Never let the raw DOMException (usually an English message) reach the UI:
-      // record a readable failure first, then let the caller decide how to show it.
-      setMicrophoneError(error);
-      throw error;
-    }
-    try {
+      nextStream = await navigator.mediaDevices.getUserMedia({ audio: microphoneConstraints() });
       assertCurrent();
       audioPermission.value = "granted";
-      clearMicrophoneError();
-      const microphoneTrack = nextStream.getAudioTracks()[0];
-      const settings = microphoneTrack?.getSettings();
-      microphoneProcessing.echoCancellation = typeof settings?.echoCancellation === "boolean" ? settings.echoCancellation : null;
-      microphoneProcessing.noiseSuppression = typeof settings?.noiseSuppression === "boolean" ? settings.noiseSuppression : null;
-      microphoneProcessing.autoGainControl = typeof settings?.autoGainControl === "boolean" ? settings.autoGainControl : null;
+      factoryOwnsStream = true;
+      nextCapture = await microphoneCaptureFactory.prepare({
+        context: ctx, stream: nextStream, signal: controller.signal, assertCurrent,
+        noiseSuppression: noiseSuppressionEnabled.value, volume: inputVolume.value, onSamples: handleCaptureChunk,
+      });
+      assertCurrent();
+      // Commit only a complete graph. Permission and node failures leave the
+      // previous stream, PCM route and WebRTC peer untouched.
       stopMicrophone(false);
       micStream = nextStream;
-
-      micSource = ctx.createMediaStreamSource(micStream);
-      const nextRnnoiseNode = noiseSuppressionEnabled.value ? await createRnnoiseNode(ctx, generation) : null;
-      if (generation !== microphoneGeneration || audioCtx !== ctx) {
-        nextRnnoiseNode?.destroy();
-        nextRnnoiseNode?.disconnect();
-        throw new CancelledMediaOperation();
-      }
-      rnnoiseNode = nextRnnoiseNode;
-      if (!noiseSuppressionEnabled.value) microphoneProcessing.rnnoise = false;
-      const processedSource: AudioNode = rnnoiseNode ?? micSource;
-      if (rnnoiseNode) micSource.connect(rnnoiseNode);
-      processedMicDestination = ctx.createMediaStreamDestination();
-      processedMicDestination.channelCount = 1;
-      processedMicDestination.channelCountMode = "explicit";
-      processedSource.connect(processedMicDestination);
-      micGain = ctx.createGain();
-      micGain.gain.value = inputVolume.value;
-      silentGain = ctx.createGain();
-      silentGain.gain.value = 0;
-
-      const captureGeneration = captureGraphGeneration;
-      const handleCaptureChunk = (input: Float32Array, rms?: number): void => {
-        // A replacement permission request does not invalidate the live graph.
-        // Only replacing or stopping that graph may silence its callbacks.
-        if (captureGeneration !== captureGraphGeneration || micStream !== nextStream || audioCtx !== ctx) return;
-        if (!input.length) return;
-        micLevel.value = Math.min(1, (rms ?? Math.sqrt(input.reduce((sum, sample) => sum + sample * sample, 0) / input.length)) * 6);
-        const socket = ws.value;
-        const shouldSend = !microphoneMuted.value
-          && !microphoneTestActive.value
-          && !webrtcActive.value
-          && socket?.readyState === WebSocket.OPEN
-          && voxGate(input);
-        if (!shouldSend) {
-          accumLen = 0;
-          if (microphoneMuted.value) {
-            voxAttack = 0;
-            voxRelease = 0;
-          }
-          return;
-        }
-        if (!socket) {
-          accumLen = 0;
-          return;
-        }
-        const bufferedBytes = socket.bufferedAmount;
-        if (bufferedBytes > MAX_AUDIO_BUFFERED_BYTES) {
-          accumLen = 0;
-          return;
-        }
-
-        if (convBuf.length < input.length) convBuf = new Int16Array(input.length);
-        for (let i = 0; i < input.length; i++) {
-          const sample = Math.max(-1, Math.min(1, input[i]!));
-          convBuf[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-        }
-
-        const need = accumLen + input.length;
-        if (accumBuf.length < need) accumBuf = new Int16Array(Math.max(need, accumBuf.length * 2));
-        accumBuf.set(convBuf.subarray(0, input.length), accumLen);
-        accumLen = need;
-
-        let offset = 0;
-        while (offset + AUDIO_FRAME_SAMPLES <= accumLen && socket.readyState === WebSocket.OPEN && socket.bufferedAmount <= MAX_AUDIO_BUFFERED_BYTES) {
-          socket.send(accumBuf.slice(offset, offset + AUDIO_FRAME_SAMPLES).buffer);
-          offset += AUDIO_FRAME_SAMPLES;
-        }
-        if (offset > 0) markSpeaking(state.tsClientId);
-        accumLen -= offset;
-        if (offset > 0) accumBuf.set(accumBuf.subarray(offset, offset + accumLen), 0);
-      };
-
-      if (typeof AudioWorkletNode !== "undefined" && ctx.audioWorklet) {
-        try {
-          if (workletContext !== ctx || !workletModulePromise) {
-            workletContext = ctx;
-            workletModulePromise = ctx.audioWorklet.addModule(micCaptureWorkletUrl);
-          }
-          await workletModulePromise;
-          assertCurrent();
-          workletNode = new AudioWorkletNode(ctx, "webspeak-mic-capture", {
-            numberOfInputs: 1,
-            numberOfOutputs: 1,
-            outputChannelCount: [1],
-          });
-          workletNode.port.onmessage = (event: MessageEvent<{ samples?: Float32Array; rms?: number }>) => {
-            const samples = event.data?.samples;
-            if (samples instanceof Float32Array) handleCaptureChunk(samples, event.data.rms);
-          };
-        } catch {
-          assertCurrent();
-          workletNode?.disconnect();
-          workletNode = null;
-          workletContext = null;
-          workletModulePromise = null;
-        }
-      }
-
-      if (!workletNode) {
-        scriptNode = ctx.createScriptProcessor(1024, 1, 1);
-        scriptNode.onaudioprocess = (event) => handleCaptureChunk(event.inputBuffer.getChannelData(0));
-      }
-
-      processedSource.connect(micGain);
-      const captureNode = workletNode ?? scriptNode!;
-      micGain.connect(captureNode);
-      captureNode.connect(silentGain);
-      silentGain.connect(ctx.destination);
-      await refreshAudioDevices();
-      assertCurrent();
-      syncAudioContextNotice();
+      microphoneCapture = nextCapture;
+      Object.assign(microphoneProcessing, nextCapture.processing);
+      nextCapture.setVolume(inputVolume.value);
+      nextCapture.activate();
+      // The fallback for a later failed change is this actual live graph, even
+      // if device enumeration or WebRTC negotiation is still in progress.
+      committedInputDeviceId = selectedInputDeviceId.value;
+      committedNoiseSuppressionEnabled = noiseSuppressionEnabled.value;
+      clearMicrophoneError();
     } catch (error) {
-      nextStream.getTracks().forEach(track => track.stop());
-      if (generation === microphoneGeneration) stopMicrophone(false);
+      nextCapture?.dispose();
+      if (!factoryOwnsStream) nextStream?.getTracks().forEach(track => track.stop());
+      if (generation === microphoneGeneration && !(error instanceof CancelledMediaOperation)) {
+        if (error instanceof DOMException && ["NotAllowedError", "SecurityError"].includes(error.name)) audioPermission.value = "denied";
+        setMicrophoneError(error);
+      }
       throw error;
+    } finally {
+      if (pendingMicrophoneCapture === controller) pendingMicrophoneCapture = null;
     }
+    syncAudioContextNotice();
   }
 
   // 导出给 WebClient：开麦前先 await 此函数完成真实采集，避免出现“假成功”
@@ -830,7 +719,11 @@ export function useVoiceWebSocket() {
     if (microphoneStartPromise) return microphoneStartPromise;
     if (micStream) return;
     if (!microphoneStartPromise) {
-      const pending = startMicrophone().finally(() => {
+      const generation = microphoneGeneration + 1;
+      const pending = startMicrophone().then(async () => {
+        await refreshAudioDevices();
+        if (generation !== microphoneGeneration || !micStream) throw new CancelledMediaOperation();
+      }).finally(() => {
         if (microphoneStartPromise === pending) microphoneStartPromise = null;
       });
       microphoneStartPromise = pending;
@@ -887,7 +780,7 @@ export function useVoiceWebSocket() {
     // Use the browser-native processed track plus the browser-side RNNoise
     // graph. Display/application audio is added separately below and never
     // passes through this microphone denoiser.
-    const microphoneStream = processedMicDestination?.stream ?? micStream;
+    const microphoneStream = microphoneCapture?.processedStream ?? micStream;
     const microphoneSource = ctx.createMediaStreamSource(microphoneStream);
     const microphoneGain = ctx.createGain();
     microphoneGain.gain.value = microphoneMuted.value ? 0 : inputVolume.value;
@@ -1254,56 +1147,37 @@ export function useVoiceWebSocket() {
   }
 
   function stopCaptureGraph(): void {
-    captureGraphGeneration++;
     accumLen = 0;
     voxAttack = 0;
     voxRelease = 0;
     micLevel.value = 0;
-    scriptNode?.disconnect();
-    workletNode?.port.close();
-    workletNode?.disconnect();
-    micGain?.disconnect();
-    silentGain?.disconnect();
-    scriptNode = null;
-    workletNode = null;
-    micGain = null;
-    silentGain = null;
-  }
-
-  function stopMicrophoneProcessingGraph(): void {
-    rnnoiseNode?.destroy();
-    rnnoiseNode?.disconnect();
-    rnnoiseNode = null;
-    micSource?.disconnect();
-    processedMicDestination?.disconnect();
-    processedMicDestination?.stream.getTracks().forEach((track) => track.stop());
-    micSource = null;
-    processedMicDestination = null;
+    microphoneCapture?.stopCapture();
   }
 
   function stopMicrophone(closeContext = true): void {
     if (closeContext) {
       microphoneGeneration++;
       microphoneStartPromise = null;
+      pendingMicrophoneCapture?.abort();
+      pendingMicrophoneCapture = null;
     }
     stopCaptureGraph();
-    stopMicrophoneProcessingGraph();
+    microphoneCapture?.dispose();
+    microphoneCapture = null;
     releaseAccompanimentStream();
     stopWebRtcMix();
-    micStream?.getTracks().forEach((track) => track.stop());
     micStream = null;
     if (closeContext) {
       void audioCtx?.close().catch(() => undefined);
       audioCtx = null;
-      workletContext = null;
-      workletModulePromise = null;
-      rnnoiseWorkletModulePromise = null;
     }
   }
 
   async function prepareInputDevices(): Promise<void> {
     if (!micStream) await startMicrophone();
-    else await refreshAudioDevices();
+    const generation = microphoneGeneration;
+    await refreshAudioDevices();
+    if (generation !== microphoneGeneration || !micStream) throw new CancelledMediaOperation();
   }
 
   async function setInputDevice(deviceId: string): Promise<void> {
@@ -1363,10 +1237,11 @@ export function useVoiceWebSocket() {
     const previousDeviceId = committedOutputDeviceId;
     selectedOutputDeviceId.value = deviceId;
     try {
-      await setAudioSink(getAudioCtx(), deviceId);
+      if (audioCtx || deviceId) await setAudioSink(audioCtx ?? getAudioCtx(), deviceId);
       if (!isCurrent()) return;
       committedOutputDeviceId = deviceId;
       localStorage.setItem("webspeak:output-device", deviceId);
+      clearAudioNotice("OUTPUT_DEVICE_UNAVAILABLE");
       await saveAudioPreferences();
     } catch (error) {
       if (!isCurrent()) return;
@@ -1375,6 +1250,7 @@ export function useVoiceWebSocket() {
       // One endpoint may have changed before the other rejected the request.
       if (audioCtx) await setAudioSink(audioCtx, previousDeviceId).catch(() => undefined);
       if (!isCurrent()) return;
+      setAudioNotice("OUTPUT_DEVICE_UNAVAILABLE", "无法切换到所选音频输出设备，请检查设备连接或选择其他扬声器");
       throw error;
     }
   }
@@ -2144,7 +2020,7 @@ export function useVoiceWebSocket() {
 
   function setInputVolume(volume: number): void {
     inputVolume.value = Math.max(0, Math.min(1, volume));
-    if (micGain) micGain.gain.value = inputVolume.value;
+    microphoneCapture?.setVolume(inputVolume.value);
     if (webrtcMixMicGain) webrtcMixMicGain.gain.value = microphoneMuted.value ? 0 : inputVolume.value;
     void saveAudioPreferences();
   }

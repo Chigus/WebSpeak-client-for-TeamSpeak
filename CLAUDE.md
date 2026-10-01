@@ -22,6 +22,7 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 | `web/src/voice/screen-share.ts` | Per-session screen capture, peer negotiation, cleanup and diagnostics |
 | `web/src/voice/remote-playback.ts` | Per-speaker compatibility decoding, bounded scheduling, volume and resource cleanup |
 | `web/src/voice/microphone-test.ts` | Cancellable recording tests, recorder deadline and playback URL ownership |
+| `web/src/voice/microphone-capture.ts` | Prepared microphone processing graphs, per-context worklet loading, optional RNNoise and independent PCM activation/cleanup |
 | `web/src/voice/audio-sink.ts` | Serialized device routing per audio endpoint, with stale-operation guards |
 | `web/src/platform/` | Browser mounting and cancellable Android gateway readiness handshake |
 | `web/src/services/`, `web/src/i18n/`, `web/src/skins/` | Browser persistence, identity import, skin packages and translations |
@@ -60,6 +61,8 @@ Remote playback owns each speaker's decoder, gain and source nodes as one resour
 Microphone recording tests own their recorder, timeout and object URL, while the capture layer owns the microphone stream. A normal stop may publish its final recording; replacement and session teardown discard late results and revoke the old URL. Stopping a test while connected must preserve room capture. Test cancellation and stale permission failures must not change a newer test's state.
 
 Device and noise-suppression changes share one configuration operation. Persist only the last successful settings; stale failures cannot roll back a newer choice. Acquiring a replacement microphone must preserve the current WebRTC peer and compatibility PCM capture until the replacement is ready. Capture callbacks are invalidated when their graph stops, separately from permission-request generations. Closing settings also releases standalone device-preview capture when no recording was started.
+
+Prepare microphone nodes and streams before replacing the live graph. A failed allocation or delayed worklet load must leave the old capture usable. Aborting preparation releases its candidate resources immediately; only activation enables PCM callbacks. Worklet module caches belong to their AudioContext. Device removal uses the normal input/output configuration transactions, including WebRTC restart and rollback on failed default-device selection. A committed graph becomes the fallback preference before subsequent device enumeration completes.
 
 Serialize `setSinkId` on each audio context or media element, since an in-flight browser sink change cannot be cancelled. Bind subsequent work to the original endpoint and current operation; session teardown invalidates queued changes and device enumeration results. If one output endpoint rejects after another changed, attempt to restore the last committed output.
 
