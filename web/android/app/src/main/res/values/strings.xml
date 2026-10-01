@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">WebSpeak</string>
+    <string name="title_activity_main">WebSpeak</string>
+    <string name="package_name">io.webspeak.client</string>
+    <string name="custom_url_scheme">io.webspeak.client</string>
+</resources>

@@ -1,6 +1,5 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { IncomingMessage, Server } from "node:http";
-import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { isIP } from "node:net";
 import { identityFromString } from "@echosixhiya/teamspeak-client";
@@ -18,11 +17,7 @@ import { WebRtcAudioSession, type WebRtcAudioOptions, type WebRtcAudioStats, typ
 import { pingTeamSpeakSession } from "./network-probe.js";
 import type { AccelerationRelayOptions, ConfiguredAccelerationRelay } from "./acceleration-relay.js";
 import { normalizeScreenShareIceServers, parseScreenShareMessage, type ScreenShareClientMessage, type ScreenShareIceServer, type ScreenSharePeerSignal, type ScreenShareStreamDescription, type ScreenShareViewerDescription } from "./screen-share.js";
-
-const require = createRequire(import.meta.url);
-const { OpusEncoder } = require("@discordjs/opus") as {
-  OpusEncoder: new (sampleRate: number, channels: number) => { encode(pcm: Buffer): Buffer };
-};
+import { OpusEncoder } from "./opus-codec.js";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const AUDIO_FRAME_BYTES = 1_920;
@@ -145,7 +140,7 @@ interface WebClientEntry {
   members: Map<number, ChannelMember>;
   avatarCache: Map<string, string | null>;
   eventLog: ServerEvent[];
-  opusEncoder: { encode(pcm: Buffer): Buffer } | null;
+  opusEncoder: OpusEncoder | null;
   opusEncoderWarnedAt: number; // Opus 编码器不可用告警的时间戳，用于限流避免反复刷屏
   whisperTargetIds: Set<number>;
   whisperActive: boolean;
@@ -940,6 +935,7 @@ export class VoiceBridge {
       clearTimeout(entry.reconnectTimer);
       entry.reconnectTimer = null;
     }
+    entry.opusEncoder?.dispose();
     entry.opusEncoder = null;
     const webRtc = entry.webrtc;
     entry.webrtc = null;

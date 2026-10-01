@@ -26,6 +26,7 @@ export function useWebClientPublicConfig({
 }: UseWebClientPublicConfigOptions) {
   const accessMode = ref<"fixed" | "open">("fixed");
   const initialized = ref(false);
+  const mobileMode = ref(false);
   const siteName = ref("WebSpeak");
   const appVersion = ref("0.2.5-preview");
   const visitorNumber = ref<number | null>(null);
@@ -45,6 +46,7 @@ export function useWebClientPublicConfig({
       const config = await response.json() as {
         version?: unknown;
         initialized?: unknown;
+        mobile?: unknown;
         siteName?: unknown;
         welcomeText?: unknown;
         welcomeTextEn?: unknown;
@@ -60,6 +62,7 @@ export function useWebClientPublicConfig({
       visitorNumber.value = Number.isSafeInteger(config.visitorNumber) && Number(config.visitorNumber) > 0 ? Number(config.visitorNumber) : null;
       visitorTotal.value = Number.isSafeInteger(config.visitorTotal) && Number(config.visitorTotal) > 0 ? Number(config.visitorTotal) : null;
       initialized.value = config.initialized === true;
+      mobileMode.value = config.mobile === true;
       if (typeof config.siteName === "string" && config.siteName.trim()) siteName.value = config.siteName.trim();
       if (typeof config.welcomeText === "string") welcomeTexts.zh = config.welcomeText;
       if (typeof config.welcomeTextEn === "string") welcomeTexts.en = config.welcomeTextEn;
@@ -101,6 +104,7 @@ export function useWebClientPublicConfig({
   return {
     accessMode,
     initialized,
+    mobileMode,
     siteName,
     appVersion,
     visitorNumber,

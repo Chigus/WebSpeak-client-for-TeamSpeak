@@ -1,5 +1,4 @@
 import { randomInt } from "node:crypto";
-import { createRequire } from "node:module";
 import {
   MediaStreamTrack,
   RtpHeader,
@@ -9,16 +8,9 @@ import {
 import type { Logger as LoggerType } from "../logger.js";
 import type { TSVoiceData } from "./ts-client.js";
 import { WEBRTC_UDP_PORT_RANGE } from "./webrtc-config.js";
+import { OpusEncoder } from "./opus-codec.js";
 
 export { DEFAULT_WEBRTC_UDP_PORT_RANGE, WEBRTC_UDP_PORT_RANGE } from "./webrtc-config.js";
-
-const require = createRequire(import.meta.url);
-const { OpusEncoder } = require("@discordjs/opus") as {
-  OpusEncoder: new (sampleRate: number, channels: number) => {
-    decode(data: Buffer): Buffer;
-    encode(data: Buffer): Buffer;
-  };
-};
 
 const AUDIO_SAMPLE_RATE = 48_000;
 const AUDIO_FRAME_SAMPLES = 960;
@@ -109,7 +101,7 @@ export class WebRtcAudioSession {
   private readonly onVoiceFrame: (data: Buffer, codec: 4 | 5) => void;
   private readonly onVoiceActivity: (clientIds: number[]) => void;
   private readonly outgoingTrack: MediaStreamTrack;
-  private readonly decoderByClient = new Map<number, { decode(data: Buffer): Buffer }>();
+  private readonly decoderByClient = new Map<number, OpusEncoder>();
   private readonly partialPcmByClient = new Map<number, Buffer>();
   private readonly pendingFrames = new Map<number, PendingAudioFrame[]>();
   private readonly memberVolumes = new Map<number, number>();
@@ -117,7 +109,7 @@ export class WebRtcAudioSession {
   private readonly opusPayloadTypes = new Set<number>();
   private audioTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly activityTimer: ReturnType<typeof setInterval>;
-  private encoder: { encode(data: Buffer): Buffer } | null;
+  private encoder: OpusEncoder | null;
   private sequenceNumber = randomInt(0, 65_536);
   private timestamp = randomInt(0, 0x1_0000_0000) >>> 0;
   private readonly ssrc = randomInt(1, 0x1_0000_0000) >>> 0;
@@ -316,7 +308,9 @@ export class WebRtcAudioSession {
     this.memberVolumes.clear();
     this.partialPcmByClient.clear();
     this.activeSpeakerIds.clear();
+    for (const decoder of this.decoderByClient.values()) decoder.dispose();
     this.decoderByClient.clear();
+    this.encoder?.dispose();
     this.encoder = null;
     this.outgoingTrack.stop();
     await this.peer.close();
