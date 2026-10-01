@@ -4,6 +4,8 @@ The Android app packages the existing Vue client with a small local gateway. Cap
 
 ## Build on Windows
 
+Use a short checkout path such as `C:\src\webspeak`. The Node.js plugin's CMake/Ninja object paths can exceed the Windows toolchain limit in deeply nested workspaces. A clean build in a nested validation directory failed with CMake's 250-character object-path warning and a Ninja `mkdir` error; the same source and dependencies built successfully from a shorter path. Changing application code or the embedded runtime is not required for this build-host issue.
+
 Use the server development Node.js version (22.5 or newer) on the build host. Install all three dependency sets, then prepare and sync the Android project:
 
 ```powershell
@@ -39,4 +41,6 @@ Gradle writes one APK per supported CPU architecture under `web/android/app/buil
 
 On October 1, 2026, the platform startup tests passed as part of 118 application tests. Backend compilation, frontend type checking, Vite production build, asset packaging, Capacitor sync and `assembleDebug` passed. Gradle produced arm64-v8a, armeabi-v7a and x86_64 debug APKs.
 
-The x86_64 APK installed and cold-started in a read-only Android 15 emulator. The embedded gateway returned `webspeak-android` from `/health` and `mobile: true` from `/api/public-config`; a screenshot confirmed that the WebView reached the join homepage. The narrow header was subsequently corrected and checked in desktop responsive viewports; an APK rebuild and Android layout check for that change remain pending. This checks startup and rendering only; real TeamSpeak connectivity, two-way audio and physical-device behavior remain unverified.
+The x86_64 APK installed and cold-started in a read-only Android 15 emulator. The embedded gateway returned `webspeak-android` from `/health` and `mobile: true` from `/api/public-config`; a screenshot confirmed that the WebView reached the join homepage. The narrow header was subsequently corrected and checked in desktop responsive viewports. The clean rebuild below includes those changes; installation and Android layout checks of that rebuilt APK remain pending. The earlier emulator check covers startup and rendering only; real TeamSpeak connectivity, two-way audio and physical-device behavior remain unverified.
+
+Later on October 1, commit `662dad36fc4d8cf9f35268a99b8221851f6fc52c` was exported with `git archive` into a fresh short directory. All three dependency sets were installed again from their lock files, and the pinned TeamSpeak SDK was rebuilt. `android:sync` and `assembleDebug --no-daemon` passed using Windows x64, Node.js 24.12.0, Android Studio JDK 25.0.2, Gradle 9.5.0 and Android SDK 36. All 134 Gradle tasks executed. The three ABI-specific APKs contain the gateway entry, SDK bundle, Opus WASM, frontend and matching native Node.js libraries; their manifest reports version `0.2.5-preview` / code `25`, minimum SDK 24 and target SDK 36. Artifact hashes are recorded in `docs/LOCAL_ARTIFACTS.zh-CN.md`. This was a debug build check, not a signed release or a new device/media test.

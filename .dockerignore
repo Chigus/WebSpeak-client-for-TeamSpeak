@@ -17,4 +17,6 @@ scripts/acceleration-poc
 *.tar.xz
 claude.pem
 config.json
+.env
+.env.*
 *.log
