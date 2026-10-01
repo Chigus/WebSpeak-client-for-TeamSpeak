@@ -4,6 +4,7 @@ import pino from "pino";
 import { VoiceBridge } from "./voice-bridge.js";
 import { JoinTicketStore } from "./join-ticket.js";
 import { createAudioFlowStats } from "./audio-stats.js";
+import { SessionAudioTransport } from "./session-audio.js";
 import type { WebRtcAudioSession, WebRtcAudioSessionOptions, WebRtcSessionDescription } from "./webrtc-audio.js";
 import type { ServerMessage } from "../shared/server-messages.js";
 
@@ -21,6 +22,7 @@ class PeerStub {
   constructor(readonly options: WebRtcAudioSessionOptions) {}
   async close() { this.closed = true; await this.closeResult; }
   getStats() { return { webrtcIngressRtpFrames: 10 }; }
+  pushTeamSpeakVoice() {}
   async createAnswer(offer: WebRtcSessionDescription): Promise<WebRtcSessionDescription> {
     await this.answerResult;
     return { type: "answer", sdp: offer.sdp };
@@ -31,10 +33,11 @@ function fixture() {
   const peers: PeerStub[] = [];
   const messages: ServerMessage[] = [];
   const entry = {
-    id: "session", session: { state: "connected" }, ws: { readyState: 1 },
+    id: "session", session: { state: "connected" }, ws: { readyState: 1 as 0 | 1 | 2 | 3, bufferedAmount: 0, send() {} },
     webrtc: null as PeerStub | null, webrtcGeneration: 0,
-    tsClient: { setInputMuted: async (_muted: boolean) => {}, sendVoice: () => { forwarded++; } },
+    tsClient: { setInputMuted: async (_muted: boolean) => {}, sendVoice: () => { forwarded++; }, sendWhisper: () => { forwarded++; } },
     whisperActive: false, whisperTargetIds: new Set<number>(), audio: createAudioFlowStats(),
+    audioTransport: null as SessionAudioTransport | null,
   };
   let forwarded = 0;
   let configurePeer = (_peer: PeerStub): void => {};
@@ -52,6 +55,12 @@ function fixture() {
     stopWebRtc(entry: Entry): Promise<void>;
   };
   bridge.entries.set(entry.id, entry);
+  entry.audioTransport = new SessionAudioTransport({
+    audio: entry.audio, socket: entry.ws, client: entry.tsClient,
+    isCurrent: () => bridge.entries.get(entry.id) === entry,
+    isReady: () => entry.session.state === "connected", selfId: () => 1,
+    peer: () => entry.webrtc, whisperTargets: () => null, sendJson: message => messages.push(message),
+  }, { encode: frame => frame, dispose() {} });
   const offer = (sdp: string) => bridge.handleWebRtcOffer(entry, { type: "offer", sdp }, message => messages.push(message));
   return { bridge, entry, peers, messages, offer, forwarded: () => forwarded, configure: (callback: typeof configurePeer) => { configurePeer = callback; } };
 }

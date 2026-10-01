@@ -1,3 +1,4 @@
+import { SessionAudioTransport } from "./session-audio.js";
 import { ScreenShareCoordinator } from "./screen-share-coordinator.js";
 import { handleCommand } from "./voice-commands.js";
 import { createAudioFlowStats, snapshotAudioStats, type AudioFlowStats } from "./audio-stats.js";
@@ -13,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { isIP } from "node:net";
 import { identityFromString } from "@echosixhiya/teamspeak-client";
 import { DirectorySynchronizer } from "./directory-sync.js";
-import { TSClient, type TSDirectorySnapshot, type TSVoiceData, type TSRawNotification } from "./ts-client.js";
+import { TSClient, type TSClientOptions, type TSDirectorySnapshot, type TSVoiceData, type TSRawNotification } from "./ts-client.js";
 import type { Logger as LoggerType } from "../logger.js";
 import { clientConnectionFailureCode, describeTeamSpeakError, normalizeTeamSpeakError, type WebSpeakError } from "../errors.js";
 import { formatTeamSpeakTarget, teamSpeakTargetKey, type TeamSpeakTarget } from "../domain/teamspeak-target.js";
@@ -28,15 +29,6 @@ import { normalizeScreenShareIceServers, parseScreenShareMessage, type ScreenSha
 import { OpusEncoder } from "./opus-codec.js";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
-const AUDIO_FRAME_BYTES = 1_920;
-// A browser audio frame is 20 ms of mono 48 kHz PCM. Keep the server-side
-// WebSocket egress queue small enough that a slow browser cannot turn old
-// voice into seconds of latency. Opus frames are variable-sized, so this is
-// deliberately a conservative byte backpressure guard for roughly 10–20
-// small Opus frames; the browser also enforces a time-based playback limit
-// before scheduling decoded audio.
-const MAX_SERVER_AUDIO_BUFFERED_BYTES = 4_096;
-
 function publicFailureDetail(error: ReturnType<typeof normalizeTeamSpeakError>): string | undefined {
   const serverMessage = error.diagnostics.serverMessage?.trim();
   const serverId = error.diagnostics.id?.trim();
@@ -51,6 +43,11 @@ export interface VoiceBridgeOptions {
   screenShareIceServers?: ScreenShareIceServer[] | (() => ScreenShareIceServer[]);
   acceleration?: ConfiguredAccelerationRelay[] | (() => ConfiguredAccelerationRelay[]);
   accelerationName?: string | (() => string | undefined);
+}
+
+interface VoiceBridgeDependencies {
+  createTeamSpeakClient?(options: TSClientOptions, logger: LoggerType): TSClient;
+  createEncoder?(): Pick<OpusEncoder, "encode" | "dispose">;
 }
 
 export interface AdminSessionSummary {
@@ -86,8 +83,7 @@ interface WebClientEntry {
   members: Map<number, ChannelMember>;
   avatarCache: Map<string, string | null>;
   eventLog: ServerEvent[];
-  opusEncoder: OpusEncoder | null;
-  opusEncoderWarnedAt: number; // Opus 编码器不可用告警的时间戳，用于限流避免反复刷屏
+  audioTransport: SessionAudioTransport | null;
   whisperTargetIds: Set<number>;
   whisperActive: boolean;
   isAlive: boolean;
@@ -114,6 +110,7 @@ export class VoiceBridge {
     private options: VoiceBridgeOptions,
     logger: LoggerType,
     private readonly createWebRtcSession: (options: WebRtcAudioSessionOptions) => WebRtcAudioSession = options => new WebRtcAudioSession(options),
+    private readonly dependencies: VoiceBridgeDependencies = {},
   ) {
     this.logger = logger.child({ component: "voice-bridge" });
     this.screenShares = new ScreenShareCoordinator(this.entries, (entryId, message) => {
@@ -186,10 +183,12 @@ export class VoiceBridge {
       }, "WebClient connecting");
       let tsClient: TSClient;
       try {
-        tsClient = new TSClient({ target, nickname, serverPassword, defaultChannel: channelName, identity, ...(acceleration ? { acceleration } : {}) }, this.logger);
+        const createClient = this.dependencies.createTeamSpeakClient ?? ((options, logger) => new TSClient(options, logger));
+        tsClient = createClient({ target, nickname, serverPassword, defaultChannel: channelName, identity, ...(acceleration ? { acceleration } : {}) }, this.logger);
       } catch (error: unknown) {
         if (identityLeaseKey) this.identityLeases.release(identityLeaseKey, entryId);
         this.logger.error({ err: error, entryId }, "Could not create TeamSpeak client");
+        void this.sessionManager.teardown(entryId, "teamSpeak-connect-failed");
         // A 4003 with a bare close used to be reported as "identity rejected".
         // Send a structured failure so the browser says the TeamSpeak client
         // could not be created (server down / unreachable) instead.
@@ -214,8 +213,7 @@ export class VoiceBridge {
         members: new Map(),
         avatarCache: new Map(),
         eventLog: [],
-        opusEncoder: null,
-        opusEncoderWarnedAt: 0,
+        audioTransport: null,
         whisperTargetIds: new Set(),
         whisperActive: false,
         isAlive: true,
@@ -228,16 +226,27 @@ export class VoiceBridge {
         screenPeerId: entryId,
       };
       this.entries.set(entryId, entry!);
+      let tsReady = false;
+      let selfId = 0;
+      const sendJson = (message: ServerMessage) => {
+        if (this.entries.get(entryId) === entry && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+      };
       try {
-        entry!.opusEncoder = new OpusEncoder(48000, 1);
+        entry.audioTransport = new SessionAudioTransport({
+          audio: entry.audio, socket: ws, client: tsClient,
+          isCurrent: () => this.entries.get(entryId) === entry,
+          isReady: () => tsReady && session.state === "connected",
+          selfId: () => selfId,
+          peer: () => entry!.webrtc,
+          whisperTargets: () => entry!.whisperActive ? [...entry!.whisperTargetIds] : null,
+          sendJson: message => sendJson(message),
+        }, this.dependencies.createEncoder?.() ?? new OpusEncoder(48000, 1));
       } catch (error: unknown) {
         this.logger.error({ err: error, entryId }, "Could not create Opus encoder");
         void this.teardown(entryId, "teamSpeak-connect-failed");
         return;
       }
 
-      let tsReady = false;
-      let selfId = 0;
       let selfChannelId = 0n;
       let initialStateSent = false;
       let audioReady = true;
@@ -254,9 +263,6 @@ export class VoiceBridge {
       let avatarRefreshTimer: ReturnType<typeof setTimeout> | null = null;
       let avatarRefreshRunning = false;
 
-      const sendJson = (message: ServerMessage) => {
-        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
-      };
       const addServerEvent = (kind: ServerEvent["kind"], message: string) => {
         const event: ServerEvent = {
           id: `event-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
@@ -578,50 +584,7 @@ export class VoiceBridge {
         this.screenShares.handleNotification(entry!, notification);
       });
 
-      tsClient.on("voiceData", (data: TSVoiceData) => {
-        const receivedAt = Date.now();
-        if (entry!.audio.tsReceiveLastAt !== null) entry!.audio.tsReceiveMaxGapMs = Math.max(entry!.audio.tsReceiveMaxGapMs, receivedAt - entry!.audio.tsReceiveLastAt);
-        entry!.audio.tsReceiveFirstAt ??= receivedAt;
-        entry!.audio.tsReceiveLastAt = receivedAt;
-        entry!.audio.tsReceiveFrames++;
-        if (ws.readyState !== WebSocket.OPEN || data.clientId === selfId) return;
-        const webRtc = entry!.webrtc;
-        webRtc?.pushTeamSpeakVoice(data);
-        const now = receivedAt;
-        if (entry!.audio.egressLastAt !== null) entry!.audio.egressMaxGapMs = Math.max(entry!.audio.egressMaxGapMs, now - entry!.audio.egressLastAt);
-        entry!.audio.egressFirstAt ??= now;
-        entry!.audio.egressLastAt = now;
-        const sourceKey = String(data.clientId);
-        entry!.audio.egressFramesByClient[sourceKey] = (entry!.audio.egressFramesByClient[sourceKey] ?? 0) + 1;
-        // A negotiated WebRTC session owns the browser's realtime audio
-        // egress. Do not also send the same TeamSpeak packet over the
-        // reliable WebSocket, otherwise the browser plays two copies and
-        // the TCP path can still accumulate stale audio behind the peer.
-        if (webRtc) {
-          entry!.audio.egressFrames++;
-          return;
-        }
-        const packet = Buffer.allocUnsafe(3 + data.data.length);
-        packet[0] = data.codec;
-        packet.writeUInt16BE(data.clientId, 1);
-        data.data.copy(packet, 3);
-        const bufferedBytes = ws.bufferedAmount;
-        entry!.audio.egressPeakBufferedBytes = Math.max(entry!.audio.egressPeakBufferedBytes, bufferedBytes);
-        if (bufferedBytes > MAX_SERVER_AUDIO_BUFFERED_BYTES) {
-          entry!.audio.egressDroppedFrames++;
-          return;
-        }
-        try {
-          ws.send(packet);
-          entry!.audio.egressFrames++;
-          const sentAt = Date.now();
-          if (entry!.audio.egressSentLastAt !== null) entry!.audio.egressSentMaxGapMs = Math.max(entry!.audio.egressSentMaxGapMs, sentAt - entry!.audio.egressSentLastAt);
-          entry!.audio.egressSentFirstAt ??= sentAt;
-          entry!.audio.egressSentLastAt = sentAt;
-        } catch {
-          entry!.audio.egressDroppedFrames++;
-        }
-      });
+      tsClient.on("voiceData", (data: TSVoiceData) => entry!.audioTransport?.receiveTeamSpeak(data));
 
       tsClient.on("textMessage", (message) => {
         const scope = message.targetMode === 1 ? "private" : message.targetMode === 3 ? "server" : message.targetMode === 2 ? "channel" : "server";
@@ -679,46 +642,9 @@ export class VoiceBridge {
 
       ws.on("pong", () => { if (entry) entry.isAlive = true; });
       ws.on("message", (data: Buffer | string, isBinary: boolean) => {
+        if (this.entries.get(entryId) !== entry) return;
         if (isBinary) {
-          const frame = typeof data === "string" ? Buffer.from(data) : data;
-          if (!tsReady || frame.length !== AUDIO_FRAME_BYTES) {
-            entry!.audio.ingressDroppedFrames++;
-            sendProtocolError(sendJson, "INVALID_AUDIO_FRAME", "音频帧格式无效");
-            return;
-          }
-          const now = Date.now();
-          if (entry!.audio.ingressLastAt !== null) entry!.audio.ingressMaxGapMs = Math.max(entry!.audio.ingressMaxGapMs, now - entry!.audio.ingressLastAt);
-          entry!.audio.ingressFirstAt ??= now;
-          entry!.audio.ingressLastAt = now;
-          entry!.audio.ingressFrames++;
-          const encodeStartedAt = Date.now();
-          try {
-            if (entry!.opusEncoder) {
-              const encoded = entry!.opusEncoder.encode(frame);
-              const encodedAt = Date.now();
-              entry!.audio.tsEncodeMaxMs = Math.max(entry!.audio.tsEncodeMaxMs, encodedAt - encodeStartedAt);
-              if (entry!.whisperActive && entry!.whisperTargetIds.size) tsClient.sendWhisper(encoded, [...entry!.whisperTargetIds], 4);
-              else tsClient.sendVoice(encoded, 4);
-              const sentAt = Date.now();
-              if (entry!.audio.tsSendLastAt !== null) entry!.audio.tsSendMaxGapMs = Math.max(entry!.audio.tsSendMaxGapMs, sentAt - entry!.audio.tsSendLastAt);
-              entry!.audio.tsSendFirstAt ??= sentAt;
-              entry!.audio.tsSendLastAt = sentAt;
-              entry!.audio.tsSendFrames++;
-            } else {
-              // Opus 编码器不可用（初始化失败或销毁后仍有帧在途）：显式告知浏览器
-              // 而不是静默丢帧，5 秒限流避免高频告警刷屏。
-              // The Opus encoder is unavailable (init failed or torn down while
-              // frames are still in flight): say it instead of dropping silently.
-              const warnedAt = entry!.opusEncoderWarnedAt;
-              if (Date.now() - warnedAt > 5_000) {
-                entry!.opusEncoderWarnedAt = Date.now();
-                sendJson({ type: "audioError", code: "AUDIO_ENCODER_UNAVAILABLE", detail: "Opus encoder unavailable" });
-              }
-            }
-          } catch {
-            // A frame arriving during shutdown is safe to discard.
-            entry!.audio.tsSendErrors++;
-          }
+          entry!.audioTransport?.receivePcm(typeof data === "string" ? Buffer.from(data) : data);
           return;
         }
 
@@ -864,8 +790,8 @@ export class VoiceBridge {
       clearTimeout(entry.reconnectTimer);
       entry.reconnectTimer = null;
     }
-    entry.opusEncoder?.dispose();
-    entry.opusEncoder = null;
+    entry.audioTransport?.close();
+    entry.audioTransport = null;
     await this.stopWebRtc(entry);
     entry.whisperTargetIds.clear();
     entry.whisperActive = false;
@@ -873,7 +799,10 @@ export class VoiceBridge {
     entry.members.clear();
     entry.tsClient.removeAllListeners();
     try { await entry.tsClient.disconnect(); } catch { /* disconnect is intentionally idempotent */ }
-    entry.ws.removeAllListeners();
+    // Preserve WebSocketServer's close listener, which removes this socket
+    // from its clients set and allows server shutdown to finish.
+    entry.ws.removeAllListeners("message");
+    entry.ws.removeAllListeners("pong");
     if (entry.ws.readyState === WebSocket.OPEN || entry.ws.readyState === WebSocket.CONNECTING) {
       if (reason === "heartbeat-timeout" || reason === "gateway-shutdown") entry.ws.terminate();
       else entry.ws.close(reason === "protocol-error" ? 1008 : 1000, reason);
@@ -940,7 +869,9 @@ export class VoiceBridge {
     entry.webrtc = null;
     if (!peer) return;
     try { await peer.close(); } catch { /* peer teardown is idempotent */ }
-    if (entry.webrtcGeneration === generation) Object.assign(entry.audio, peer.getStats());
+    if (entry.webrtcGeneration === generation) {
+      try { Object.assign(entry.audio, peer.getStats()); } catch { /* diagnostics must not abort cleanup */ }
+    }
   }
 
   private async handleWebRtcOffer(
@@ -978,25 +909,7 @@ export class VoiceBridge {
         microphoneMuted: muted,
         accompanimentActive: offer.accompanimentActive === true,
         onVoiceFrame: (data, codec) => {
-          if (!isCurrentPeer()) return;
-          const now = Date.now();
-          if (entry.audio.ingressLastAt !== null) entry.audio.ingressMaxGapMs = Math.max(entry.audio.ingressMaxGapMs, now - entry.audio.ingressLastAt);
-          entry.audio.ingressFirstAt ??= now;
-          entry.audio.ingressLastAt = now;
-          entry.audio.ingressFrames++;
-          try {
-            if (entry.whisperActive && entry.whisperTargetIds.size) entry.tsClient.sendWhisper(data, [...entry.whisperTargetIds], codec);
-            else entry.tsClient.sendVoice(data, codec);
-            const sentAt = Date.now();
-            if (entry.audio.tsSendLastAt !== null) entry.audio.tsSendMaxGapMs = Math.max(entry.audio.tsSendMaxGapMs, sentAt - entry.audio.tsSendLastAt);
-            entry.audio.tsSendFirstAt ??= sentAt;
-            entry.audio.tsSendLastAt = sentAt;
-            entry.audio.tsSendFrames++;
-          } catch {
-            entry.audio.tsSendErrors++;
-            // A packet arriving while the TeamSpeak session is being replaced
-            // is discarded; the WebRTC peer remains independently closable.
-          }
+          if (isCurrentPeer()) entry.audioTransport?.receiveWebRtc(data, codec);
         },
         onVoiceActivity: (clientIds) => {
           if (isCurrentPeer()) sendJson({ type: "voiceActivity", clientIds });

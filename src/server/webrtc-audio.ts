@@ -110,6 +110,7 @@ export class WebRtcAudioSession {
   private readonly ssrc = randomInt(1, 0x1_0000_0000) >>> 0;
   private outgoingPayloadType = DEFAULT_WEBRTC_OPUS_PAYLOAD_TYPE;
   private closed = false;
+  private closePromise: Promise<void> | null = null;
   private nextAudioDeadline = 0;
   private lastIngressRtpAt: number | null = null;
   private lastEgressRtpAt: number | null = null;
@@ -293,8 +294,8 @@ export class WebRtcAudioSession {
     }
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
     this.closed = true;
     if (this.audioTimer) clearTimeout(this.audioTimer);
     this.audioTimer = null;
@@ -303,12 +304,21 @@ export class WebRtcAudioSession {
     this.memberVolumes.clear();
     this.partialPcmByClient.clear();
     this.activeSpeakerIds.clear();
-    for (const decoder of this.decoderByClient.values()) decoder.dispose();
-    this.decoderByClient.clear();
-    this.encoder?.dispose();
-    this.encoder = null;
-    this.outgoingTrack.stop();
-    await this.peer.close();
+    // Publish the completion before disposing resources: even reentrant or
+    // concurrent callers must wait for the same physical peer shutdown.
+    this.closePromise = Promise.resolve().then(async () => {
+      const decoders = [...this.decoderByClient.values()];
+      this.decoderByClient.clear();
+      for (const decoder of decoders) {
+        try { decoder.dispose(); } catch { /* continue releasing other resources */ }
+      }
+      const encoder = this.encoder;
+      this.encoder = null;
+      try { encoder?.dispose(); } catch { /* the track and peer still need closing */ }
+      try { this.outgoingTrack.stop(); } catch { /* always attempt peer shutdown */ }
+      await this.peer.close();
+    });
+    return this.closePromise;
   }
 
   private scheduleAudioTick(): void {
