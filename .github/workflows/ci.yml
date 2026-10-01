@@ -2,8 +2,10 @@ name: Continuous integration
 
 on:
   push:
-    branches: [main]
+    branches: [dev, master]
   pull_request:
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,10 +28,8 @@ jobs:
           npm run prepare:sdk
           npm rebuild @discordjs/opus --foreground-scripts --no-audit --no-fund
           npm --prefix web ci --no-audit --no-fund
-      - name: Build application
-        run: |
-          npm run build
-          npm --prefix web run build
+      - name: Test and build application
+        run: npm run verify
 
   docker-smoke:
     needs: verify

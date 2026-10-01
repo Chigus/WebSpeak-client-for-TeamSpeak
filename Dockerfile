@@ -14,7 +14,7 @@ RUN npm rebuild @discordjs/opus --foreground-scripts --no-audit --no-fund
 RUN npm --prefix web ci
 
 COPY . .
-RUN npm --prefix web run build \
+RUN npm run web:build \
   && npm run build \
   && npm prune --omit=dev \
   && rm -rf web/node_modules

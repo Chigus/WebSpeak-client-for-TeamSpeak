@@ -16,7 +16,11 @@ permissions:
   contents: read
 
 jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
   windows-x64:
+    needs: verify
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +51,7 @@ jobs:
             npm version --no-git-tag-version $releaseVersion
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
-          npm --prefix web run build
+          npm run web:build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -118,6 +122,7 @@ jobs:
           compression-level: 0
 
   linux-x64:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -142,7 +147,7 @@ jobs:
           if [ "$current_version" != "$release_version" ]; then
             npm version --no-git-tag-version "$release_version"
           fi
-          npm --prefix web run build
+          npm run web:build
           npm run build
           npm prune --omit=dev --no-audit --no-fund
       - name: Package and smoke-test Linux x64

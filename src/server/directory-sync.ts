@@ -16,6 +16,9 @@ type DirectoryDelta =
 export class DirectorySynchronizer {
   private snapshot: TSDirectorySnapshot | null = null;
   private clients = new Map<number, DirectoryClientInfo>();
+  // A delayed welcome snapshot or update must not undo an explicit leave.
+  // Client IDs can be reused, so a new enter event releases the tombstone.
+  private departedClientIds = new Set<number>();
   private pending: DirectoryDelta[] = [];
 
   get ready(): boolean {
@@ -25,6 +28,7 @@ export class DirectorySynchronizer {
   applySnapshot(snapshot: TSDirectorySnapshot): void {
     this.snapshot = { channels: snapshot.channels.slice(), clients: [] };
     for (const client of snapshot.clients) {
+      if (this.departedClientIds.has(client.id)) continue;
       const previous = this.clients.get(client.id);
       this.clients.set(client.id, previous ? { ...previous, ...client } : client);
     }
@@ -59,6 +63,7 @@ export class DirectorySynchronizer {
   clear(): void {
     this.snapshot = null;
     this.clients.clear();
+    this.departedClientIds.clear();
     this.pending = [];
   }
 
@@ -72,14 +77,17 @@ export class DirectorySynchronizer {
 
   private applyDelta(delta: DirectoryDelta): void {
     if (delta.type === "clientEnter") {
+      this.departedClientIds.delete(delta.info.id);
       this.clients.set(delta.info.id, delta.info);
       return;
     }
     if (delta.type === "clientLeave") {
+      this.departedClientIds.add(delta.id);
       this.clients.delete(delta.id);
       return;
     }
     if (delta.type === "clientUpdated") {
+      if (this.departedClientIds.has(delta.info.id)) return;
       const current = this.clients.get(delta.info.id);
       this.clients.set(delta.info.id, current ? { ...current, ...delta.info } : delta.info);
       return;

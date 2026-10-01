@@ -14,7 +14,11 @@ env:
   IMAGE_NAME: ghcr.io/echosixhiya/webspeak
 
 jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
   publish:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
