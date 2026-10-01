@@ -22,6 +22,11 @@ const eventLabels: Record<string, AdminTranslationKey> = {
   ADMIN_LOGIN_FAILED: "adminLoginFailedEvent", CONNECTION_TEST_SUCCEEDED: "connectionTestSucceededEvent", CONNECTION_TEST_FAILED: "connectionTestFailedEvent",
   ADMIN_LOGIN_SUCCEEDED: "loginEvent", ADMIN_LOGOUT: "logoutEvent", SETTINGS_CHANGED: "settingsEvent",
   ADMIN_INITIALIZED: "initializedEvent", LEGACY_CONFIG_IMPORTED: "importedEvent", CONNECTION_TEST: "testEvent",
+  ADMIN_PASSWORD_CHANGED: "passwordChangedEvent", ADMIN_BACKUP_EXPORTED: "backupExportedEvent",
+  ADMIN_SESSION_TERMINATED: "sessionTerminatedEvent",
+  ADMIN_SKIN_INSTALLED: "skinInstalledEvent", ADMIN_SKIN_REMOVED: "skinRemovedEvent",
+  ADMIN_SKIN_ENABLED: "skinEnabledEvent", ADMIN_SKIN_DISABLED: "skinDisabledEvent",
+  INVITE_CREATED: "inviteCreatedEvent", INVITE_REVOKED: "inviteRevokedEvent", INVITE_CONSUMED: "inviteConsumedEvent",
 };
 const errorLabels: Record<string, AdminTranslationKey> = {
   INVALID_PASSWORD: "invalidPassword", INVALID_ADMIN_PASSWORD: "setupPasswordShort", PASSWORD_CHANGE_REQUIRED: "changePasswordLead", RATE_LIMITED: "rateLimited",
