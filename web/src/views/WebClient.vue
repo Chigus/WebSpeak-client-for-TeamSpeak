@@ -2,16 +2,18 @@
   <div :class="['web-client', 'ws-skin-root', `language-${language}`, { 'skin-initializing': !skinReady }]" data-ws-part="app" :data-ws-page="voiceState.connected || voiceState.reconnecting || voiceState.reconnectFailed ? 'voice' : 'home'">
     <!-- Connection / welcome screen -->
     <section v-if="!voiceState.connected && !voiceState.reconnecting && !voiceState.reconnectFailed" class="join-page" data-ws-part="home">
-      <header class="join-header" data-ws-part="home.header">
-        <div class="brand-lockup" data-ws-part="home.brand">
-          <img class="brand-mark" src="/网站图标.jpg" alt="WebSpeak" />
-          <div>
-            <strong>{{ skinHomeCopy.brandName || siteName }}</strong>
-            <small>{{ t('browserWorkspace') }}</small>
-          </div>
-        </div>
-        <div class="header-tools" data-ws-part="home.header-tools"><div class="header-note" data-ws-part="home.gateway-status"><span class="tiny-dot"></span> {{ t('secureGateway') }}</div><a class="github-button" href="https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak" target="_blank" rel="noreferrer" :title="t('githubRepository')" :aria-label="t('githubRepository')"><Icon name="github" :size="18" /><span>{{ t('githubRepository') }}</span></a><button type="button" class="qq-button" :title="t('qqGroup')" :aria-label="t('qqGroup')" aria-haspopup="dialog" @click="qqModalOpen = true"><Icon name="qq" :size="18" /><span class="qq-label">{{ t('qqGroup') }}</span></button><a class="bilibili-button" href="https://space.bilibili.com/25414873" target="_blank" rel="noreferrer" :title="t('bilibiliProfile')" :aria-label="t('bilibiliProfile')"><span class="bilibili-glyph">B</span><span class="bilibili-label">{{ t('bilibiliProfile') }}</span></a><span class="version-badge" :title="`${t('currentVersion')}: v${appVersion}`" :aria-label="`${t('currentVersion')}: v${appVersion}`">v{{ appVersion }}</span><a class="changelog-button" href="https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/blob/master/CHANGELOG.md" target="_blank" rel="noreferrer" :title="t('viewChangelog')" :aria-label="t('viewChangelog')"><Icon name="clock" :size="16" /><span>{{ t('viewChangelog') }}</span></a><a v-if="!mobileMode" class="guide-button" href="/admin" :title="t('adminConsole')" :aria-label="t('adminConsole')"><Icon name="settings" :size="15" /><span>{{ t('adminConsole') }}</span></a><SkinSwitcher v-model="activeSkinId" class="join-skin-switcher" :menu-label="t('skinSelector')" :options="skinOptions" @change="onSkinChange" /><LanguageSwitcher v-model="language" class="join-language-switcher" :menu-label="t('languageMenu')" @change="persistLanguage" /></div>
-      </header>
+      <WebClientHeader
+        v-model:language="language"
+        v-model:skin-id="activeSkinId"
+        :brand-name="skinHomeCopy.brandName || siteName"
+        :app-version="appVersion"
+        :mobile="mobileMode"
+        :skin-options="skinOptions"
+        :t="t"
+        @open-qq="qqModalOpen = true"
+        @skin-change="onSkinChange"
+        @language-change="persistLanguage"
+      />
 
       <main class="join-content" data-ws-part="home.content">
         <div class="join-copy" data-ws-part="home.hero">
@@ -394,6 +396,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from "vue";
 import Icon from "../components/Icon.vue";
+import WebClientHeader from "../components/web-client/WebClientHeader.vue";
 import LanguageSwitcher from "../components/LanguageSwitcher.vue";
 import SkinSwitcher, { type SkinOption } from "../components/SkinSwitcher.vue";
 import { useWebClientChat } from "../composables/useWebClientChat.js";

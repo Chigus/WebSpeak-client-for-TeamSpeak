@@ -104,29 +104,3 @@ export async function listPublicSkins(): Promise<SkinCatalogEntry[]> {
     return BUILTIN_SKIN_CATALOG;
   }
 }
-
-export async function uploadSkinPackage(file: File, csrfToken: string, confirmReplace?: (id: string) => boolean): Promise<SkinCatalogEntry | null> {
-  const { importSkinPack } = await import("./skin-pack.js");
-  const skin = await importSkinPack(file);
-  if (confirmReplace && !confirmReplace(skin.id)) return null;
-  const response = await fetch(`/api/admin/skins/${encodeURIComponent(skin.id)}`, {
-    method: "PUT",
-    headers: { "content-type": "application/octet-stream", "x-csrf-token": csrfToken, accept: "application/json" },
-    body: file,
-  });
-  const payload = await response.json().catch(() => null) as { skin?: SkinCatalogEntry; message?: string; code?: string } | null;
-  if (!response.ok || !payload?.skin) throw new Error(payload?.message || payload?.code || `HTTP_${response.status}`);
-  return payload.skin;
-}
-
-export async function deleteSkinPackage(id: string, csrfToken: string): Promise<void> {
-  const response = await fetch(`/api/admin/skins/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    headers: { "content-type": "application/json", "x-csrf-token": csrfToken, accept: "application/json" },
-    body: "{}",
-  });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { code?: string } | null;
-    throw new Error(payload?.code || `HTTP_${response.status}`);
-  }
-}

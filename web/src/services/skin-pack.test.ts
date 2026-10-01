@@ -78,15 +78,16 @@ test("community skins use a scoped light fallback instead of inheriting the nigh
 });
 
 test("all public skin parts are documented and the admin console is outside skin scope", async () => {
-  const [webClient, demo, skinSwitcher, languageSwitcher, admin, documentation] = await Promise.all([
+  const [webClient, header, demo, skinSwitcher, languageSwitcher, admin, documentation] = await Promise.all([
     readFile(new URL("../views/WebClient.vue", import.meta.url), "utf8"),
+    readFile(new URL("../components/web-client/WebClientHeader.vue", import.meta.url), "utf8"),
     readFile(new URL("../views/DemoView.vue", import.meta.url), "utf8"),
     readFile(new URL("../components/SkinSwitcher.vue", import.meta.url), "utf8"),
     readFile(new URL("../components/LanguageSwitcher.vue", import.meta.url), "utf8"),
     readFile(new URL("../views/AdminView.vue", import.meta.url), "utf8"),
     readFile(new URL("../../../docs/SKIN_DEVELOPMENT.md", import.meta.url), "utf8"),
   ]);
-  const publicParts = new Set([...`${webClient}\n${demo}\n${skinSwitcher}\n${languageSwitcher}`.matchAll(/data-ws-part="([^"]+)"/g)].map((match) => match[1]));
+  const publicParts = new Set([...`${webClient}\n${header}\n${demo}\n${skinSwitcher}\n${languageSwitcher}`.matchAll(/data-ws-part="([^"]+)"/g)].map((match) => match[1]));
   for (const part of publicParts) assert.ok(documentation.includes(`\`${part}\``), `Undocumented skin part: ${part}`);
   assert.match(skinSwitcher, /data-ws-skin-id/);
   assert.match(skinSwitcher, /data-ws-state/);

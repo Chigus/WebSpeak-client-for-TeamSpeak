@@ -1,10 +1,8 @@
 import type { ChannelMember, ChannelInfo, ServerEvent, VoiceAudioBridgeStats } from "./voice-models.js";
 import { normalizeScreenShareIceServers, parseScreenShareSignal, type ScreenShareIceServer, type ScreenSharePeerSignal, type ScreenShareStreamDescription, type ScreenShareViewerDescription } from "./screen-share.js";
 
-export interface SessionDescription {
-  type: "offer" | "answer";
-  sdp: string;
-}
+import { isSessionDescription, type SessionDescription } from "./webrtc.js";
+export type { SessionDescription } from "./webrtc.js";
 
 type Message<T extends string, Fields = object> = { type: T } & Fields;
 type Request = { requestId?: string };
@@ -133,7 +131,7 @@ const valid: Record<ServerMessage["type"], (message: RecordValue) => boolean> = 
   webrtcError: m => optional(m.code, text) && optional(m.detail, text),
   audioError: m => optional(m.code, text) && optional(m.detail, text),
   whisperTargets: m => arrayOf(m.targetIds, clientId) && boolean(m.active),
-  webrtcAnswer: m => isRecord(m.payload) && isRecord(m.payload.sdp) && m.payload.sdp.type === "answer" && text(m.payload.sdp.sdp) && m.payload.sdp.sdp.length <= 256 * 1024,
+  webrtcAnswer: m => isRecord(m.payload) && isSessionDescription(m.payload.sdp, "answer"),
   voiceActivity: m => arrayOf(m.clientIds, clientId),
   commandCompleted: m => text(m.requestId),
   screenShareCompleted: m => text(m.requestId),

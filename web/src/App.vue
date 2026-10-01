@@ -3,6 +3,11 @@
 </template>
 
 <style>
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+button, input { font: inherit; }
+button { border: 0; }
+
 :root {
   --ui-scale: 1;
 }

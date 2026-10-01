@@ -9,6 +9,8 @@ import type { Logger as LoggerType } from "../logger.js";
 import type { TSVoiceData } from "./ts-client.js";
 import { WEBRTC_UDP_PORT_RANGE } from "./webrtc-config.js";
 import { OpusEncoder } from "./opus-codec.js";
+import type { WebRtcSessionDescription } from "../shared/webrtc.js";
+export type { WebRtcSessionDescription } from "../shared/webrtc.js";
 
 export { DEFAULT_WEBRTC_UDP_PORT_RANGE, WEBRTC_UDP_PORT_RANGE } from "./webrtc-config.js";
 
@@ -33,13 +35,6 @@ const SPEAKER_ACTIVITY_RMS = 160;
 export interface WebRtcAudioOptions {
   enabled: boolean;
   udpPortRange?: [number, number];
-}
-
-export interface WebRtcSessionDescription {
-  type: "offer" | "answer";
-  sdp: string;
-  muted?: boolean;
-  accompanimentActive?: boolean;
 }
 
 export interface WebRtcAudioSessionOptions {

@@ -4,6 +4,7 @@ import { createAudioFlowStats, snapshotAudioStats, type AudioFlowStats } from ".
 export type { AudioFlowStats } from "./audio-stats.js";
 import { mapChannelTree, normalizeDirectorySnapshot, avatarDataUrl } from "./directory-view.js";
 import type { ServerMessage } from "../shared/server-messages.js";
+import { parseWebRtcClientMessage } from "../shared/webrtc.js";
 import type { ChannelInfo } from "../shared/voice-models.js";
 import type { ChannelMember as SharedChannelMember, ServerEvent as SharedServerEvent } from "../shared/voice-models.js";
 import { WebSocketServer, WebSocket } from "ws";
@@ -722,8 +723,8 @@ export class VoiceBridge {
         }
 
         const rawMessage = typeof data === "string" ? data : data.toString("utf-8");
-        const webRtcOffer = parseWebRtcOffer(rawMessage);
-        if (webRtcOffer) {
+        const webRtcMessage = parseWebRtcClientMessage(rawMessage);
+        if (webRtcMessage?.type === "webrtcOffer") {
           if (this.getWebRtcOptions()?.enabled !== true) {
             sendProtocolError(sendJson, "WEBRTC_DISABLED", "WebRTC 音频传输未启用");
             return;
@@ -732,10 +733,11 @@ export class VoiceBridge {
             sendProtocolError(sendJson, "SESSION_NOT_READY", "TeamSpeak 会话尚未就绪");
             return;
           }
-          void this.handleWebRtcOffer(entry!, webRtcOffer, sendJson);
+          const { sdp, muted, accompanimentActive } = webRtcMessage.payload;
+          void this.handleWebRtcOffer(entry!, { ...sdp, muted, accompanimentActive }, sendJson);
           return;
         }
-        if (isWebRtcStopMessage(rawMessage)) {
+        if (webRtcMessage?.type === "webrtcStop") {
           void this.stopWebRtc(entry!);
           return;
         }
@@ -1072,35 +1074,6 @@ function normalizeWebRtcHost(value: string | undefined): string | undefined {
 
 function sendProtocolError(sendJson: (message: ServerMessage) => void, code: string, message: string): void {
   sendJson({ type: "error", error: { code, message, recoverable: false } });
-}
-
-function parseWebRtcOffer(raw: string): WebRtcSessionDescription | null {
-  let value: unknown;
-  try { value = JSON.parse(raw); } catch { return null; }
-  if (!isRecord(value) || value.type !== "webrtcOffer" || !isRecord(value.payload) || !isRecord(value.payload.sdp)) return null;
-  const description = value.payload.sdp;
-  if (description.type !== "offer" || typeof description.sdp !== "string" || description.sdp.length > 256 * 1024) return null;
-  if (value.payload.muted !== undefined && typeof value.payload.muted !== "boolean") return null;
-  if (value.payload.accompanimentActive !== undefined && typeof value.payload.accompanimentActive !== "boolean") return null;
-  return {
-    type: "offer",
-    sdp: description.sdp,
-    muted: value.payload.muted === true,
-    accompanimentActive: value.payload.accompanimentActive === true,
-  };
-}
-
-function isWebRtcStopMessage(raw: string): boolean {
-  try {
-    const value: unknown = JSON.parse(raw);
-    return isRecord(value) && value.type === "webrtcStop";
-  } catch {
-    return false;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function isChannelRecord(value: unknown): value is { id: string; name: string } {

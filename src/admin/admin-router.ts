@@ -261,7 +261,7 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
       options.getActiveSessions(),
       options.getPeakSessions(),
       options.startedAt,
-    ) as unknown as AdminOverview;
+    );
     response.json({
       generatedAt: new Date().toISOString(),
       gateway: {
@@ -288,7 +288,7 @@ export function createAdminRouter(options: AdminRouterOptions): Router {
       options.getActiveSessions(),
       options.getPeakSessions(),
       options.startedAt,
-    ) as unknown as AdminOverview;
+    );
     const report = {
       generatedAt: new Date().toISOString(),
       gateway: {
@@ -686,17 +686,6 @@ function readStructuredLogs(logFile: string): StructuredLogEntry[] {
     }
   }
   return entries.sort((left, right) => Date.parse(left.timestamp ?? "") - Date.parse(right.timestamp ?? ""));
-}
-
-interface AdminOverview {
-  gateway: { uptimeSeconds: number };
-  teamSpeak: {
-    target: string;
-    status: string;
-    lastTestAt: string | null;
-    latencyMs: number | null;
-    lastError: string | null;
-  };
 }
 
 function logLevelName(level: unknown): string {

@@ -1,3 +1,6 @@
+import type { AdminSettingsInput, RelayNodeInput, ManagedInviteInput } from "../shared/admin-inputs.js";
+export type { AdminSettingsInput, RelayNodeInput, ManagedInviteInput } from "../shared/admin-inputs.js";
+import type { AdminOverview, AdminSettings } from "../shared/admin-responses.js";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import type { Logger } from "../logger.js";
@@ -13,48 +16,10 @@ import { DEFAULT_ACCELERATION_RELAY_PORT, type ConfiguredAccelerationRelay } fro
 import { DEFAULT_WEBRTC_UDP_PORT_RANGE, WEBRTC_UDP_PORT_MAX, WEBRTC_UDP_PORT_MIN } from "../server/webrtc-config.js";
 import { DEFAULT_WELCOME_TEXTS, resolveWelcomeTexts } from "../site-copy.js";
 
-export interface AdminSettingsInput {
-  target: string;
-  serverPassword?: string;
-  passwordAction?: "keep" | "replace" | "remove";
-  accessMode: AccessMode;
-  siteName: string;
-  welcomeText: string;
-  welcomeTextEn?: string;
-  welcomeTextDe?: string;
-  welcomeTextRu?: string;
-  welcomeTextJa?: string;
-  webRtcEnabled: boolean;
-  webRtcUdpStart?: number;
-  webRtcUdpEnd?: number;
-  relaySettingsAction?: "keep" | "replace" | "remove";
-  relayEnabled?: boolean;
-  relayName?: string;
-  relayTarget?: string;
-  relayToken?: string;
-  relayTokenAction?: "keep" | "replace" | "remove";
-  relayNodes?: RelayNodeInput[];
-}
-
-export interface RelayNodeInput {
-  id?: string;
-  name: string;
-  target: string;
-  enabled: boolean;
-  token?: string;
-  tokenAction?: "keep" | "replace" | "remove";
-}
-
 export interface ConnectionPolicy {
   defaultTarget: TeamSpeakTarget;
   serverPassword: string;
   accessMode: AccessMode;
-}
-
-export interface ManagedInviteInput {
-  channel: string;
-  expiresInHours: number;
-  maxUses: number;
 }
 
 export interface ManagedInviteView {
@@ -136,7 +101,7 @@ export class AdminService {
     };
   }
 
-  getAdminSettings(): Record<string, unknown> {
+  getAdminSettings(): AdminSettings {
     const settings = this.database.getSettings();
     return {
       target: formatTeamSpeakTarget({ host: settings.tsHost, port: settings.tsPort }),
@@ -276,7 +241,7 @@ export class AdminService {
     }
   }
 
-  getOverview(activeSessions: number, peakSessions: number, startedAt: number): Record<string, unknown> {
+  getOverview(activeSessions: number, peakSessions: number, startedAt: number): AdminOverview {
     const settings = this.database.getSettings();
     return {
       gateway: {

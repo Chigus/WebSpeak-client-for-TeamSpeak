@@ -3,9 +3,6 @@ import { createPinia } from "pinia";
 import { createRouter, createWebHistory } from "vue-router";
 import { bootstrapPlatform } from "./platform/bootstrap.js";
 import App from "./App.vue";
-import WebClient from "./views/WebClient.vue";
-import AdminView from "./views/AdminView.vue";
-import DemoView from "./views/DemoView.vue";
 import "./services/theme.js";
 
 const BASELINE_WIDTH = 1920;
@@ -27,16 +24,22 @@ function applyUiScale(): void {
 applyUiScale();
 window.addEventListener("resize", applyUiScale, { passive: true });
 
+const WebClient = () => import("./views/WebClient.vue");
 const routes = [
   { path: "/", name: "webclient", component: WebClient },
   { path: "/join", name: "join", component: WebClient },
-  { path: "/demo", name: "demo", component: DemoView },
-  { path: "/admin/:pathMatch(.*)*", name: "admin", component: AdminView },
+  { path: "/demo", name: "demo", component: () => import("./views/DemoView.vue") },
+  { path: "/admin/:pathMatch(.*)*", name: "admin", component: () => import("./views/AdminView.vue") },
 ];
 
 const router = createRouter({
   history: createWebHistory(),
   routes,
+});
+// Route chunks keep their CSS after navigation. Gate document-level layout so
+// visiting the admin console cannot constrain scrolling on the public pages.
+router.afterEach(to => {
+  document.documentElement.dataset.wsRoute = to.name === "admin" ? "admin" : to.name === "demo" ? "demo" : "webclient";
 });
 
 void bootstrapPlatform(mountApp);

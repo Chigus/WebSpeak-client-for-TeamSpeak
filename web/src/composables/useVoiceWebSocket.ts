@@ -1,6 +1,7 @@
 import { createScreenShareController } from "../voice/screen-share.js";
 export type { ScreenShareOutputSettings, ScreenShareCaptureStats, ScreenSharePeerStats, ScreenShareWebRtcStats } from "../voice/screen-share.js";
 import { parseServerMessage } from "../../../src/shared/server-messages.js";
+import { isSessionDescription, type WebRtcClientMessage } from "../../../src/shared/webrtc.js";
 import type { ClientCommandPayloads, ClientCommandType } from "../../../src/shared/client-commands.js";
 export type { ScreenShareStreamDescription as ScreenShareStream, ScreenShareViewerDescription as ScreenShareViewer, ScreenSharePeerSignal as ScreenShareSignal } from "../../../src/shared/screen-share.js";
 import type { ChannelMember, ChannelInfo, ChatMessage, ServerEvent, VoiceAudioBridgeStats } from "../../../src/shared/voice-models.js";
@@ -218,6 +219,10 @@ const CONNECTION_FAILURE_MESSAGES: Record<string, string> = {
 
 class CancelledMediaOperation extends Error {
   constructor() { super("媒体操作已取消"); this.name = "AbortError"; }
+}
+
+function sendWebRtcMessage(socket: WebSocket, message: WebRtcClientMessage): void {
+  socket.send(JSON.stringify(message));
 }
 
 export function useVoiceWebSocket() {
@@ -1059,12 +1064,12 @@ export function useVoiceWebSocket() {
       await waitForIceGathering(peer);
       if (!isCurrentPeer()) return;
       const description = peer.localDescription;
-      if (!description) throw new Error("WebRTC offer was not created");
-      socket.send(JSON.stringify({ type: "webrtcOffer", payload: {
+      if (!description || description.type !== "offer") throw new Error("WebRTC offer was not created");
+      sendWebRtcMessage(socket, { type: "webrtcOffer", payload: {
         sdp: { type: description.type, sdp: description.sdp },
         muted: microphoneMuted.value,
         accompanimentActive: accompanimentActive.value,
-      } }));
+      } });
       webrtcAnswerTimer = window.setTimeout(() => {
         webrtcAnswerTimer = null;
         if (isCurrentPeer() && !peer.remoteDescription) void fallbackFromWebRtc(sequence, socket, "WEBRTC_ANSWER_TIMEOUT");
@@ -1124,7 +1129,7 @@ export function useVoiceWebSocket() {
     if (sequence !== connectionSequence || ws.value !== socket || !state.connected || webrtcFallbackStarted) return;
     webrtcFallbackStarted = true;
     webrtcActive.value = false;
-    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "webrtcStop" }));
+    if (socket.readyState === WebSocket.OPEN) sendWebRtcMessage(socket, { type: "webrtcStop" });
     stopWebRtcTransport();
     if (socket.readyState === WebSocket.OPEN && state.connected) {
       // Degrading to the compatibility transport must be visible: the user is
@@ -1207,12 +1212,6 @@ export function useVoiceWebSocket() {
     webrtcMicMonitorAnalyser = null;
     webrtcMicMonitorGain = null;
     if (resetLevel) micLevel.value = 0;
-  }
-
-  function isSessionDescription(value: unknown, type: "answer"): value is RTCSessionDescriptionInit {
-    return Boolean(value) && typeof value === "object"
-      && (value as { type?: unknown }).type === type
-      && typeof (value as { sdp?: unknown }).sdp === "string";
   }
 
   function stopCaptureGraph(): void {

@@ -12,6 +12,7 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 | `src/server/voice-commands.ts`, `directory-view.ts`, `audio-stats.ts` | Command execution, public directory projection and diagnostic snapshots |
 | `src/server/screen-share-coordinator.ts` | Server/channel-scoped sharing membership and browser/native signaling |
 | `src/shared/` | Browser-safe wire types and runtime parsers shared by both endpoints |
+| `src/shared/admin-inputs.ts`, `admin-responses.ts` | Shared admin request types and runtime-checked response projections |
 | `src/server/ts-client.ts` and `teamspeak-adapter.ts` | SDK integration, TS3/TS6 negotiation, identity, chat, voice and client events |
 | `src/server/session-manager.ts` and `directory-sync.ts` | Connection state, teardown, admission limits and directory reconciliation |
 | `src/server/webrtc-audio.ts` and `opus-codec.ts` | WebRTC audio mixing and platform-specific Opus codecs |
@@ -21,6 +22,7 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 | `web/src/voice/screen-share.ts` | Per-session screen capture, peer negotiation, cleanup and diagnostics |
 | `web/src/platform/` | Browser mounting and cancellable Android gateway readiness handshake |
 | `web/src/services/`, `web/src/i18n/`, `web/src/skins/` | Browser persistence, identity import, skin packages and translations |
+| `web/src/services/admin-api.ts` | Admin HTTP transport, response validation, current CSRF and authentication-expiry notification, including skin uploads and backup downloads |
 | `src/mobile/`, `mobile/`, `web/android/` | Android loopback gateway, asset packaging and Capacitor container |
 
 ## Connection and control protocol
@@ -96,5 +98,9 @@ See `mobile/README.md` for build steps and recorded limitations. The embedded No
 Platform startup owns its message listener, polling interval and deadline, including slow listener registration. Release them on success, failure, timeout and page exit. The retry button repeats the readiness handshake; it does not restart the embedded Node.js runtime.
 
 ## Repository maintenance
+
+Routes load their page modules on demand. Document-level page styles must be gated by `html[data-ws-route]` because loaded CSS remains after navigation. The admin stylesheet is independent of public skins. Component extraction must retain `data-ws-part` hooks and account for Vue scoped styles across component boundaries.
+
+Validate admin responses before applying them to page state. Network and protocol failures must preserve unsaved input; a failed logout must not be presented as a successful logout. Keep secret keep/replace/remove actions intact and do not persist credentials in UI error messages or diagnostic logs.
 
 The repository remote is `https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak`. Preserve existing local work when implementing the plan in `docs/CODE_REFACTOR_PLAN.zh-CN.md`. Keep private configuration, runtime data and local deployment archives out of source commits. Preserve documented skin hooks and browser persistence formats during component refactors.
