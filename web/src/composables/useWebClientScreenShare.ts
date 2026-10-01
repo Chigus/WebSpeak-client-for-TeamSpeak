@@ -1,4 +1,4 @@
-import { computed, nextTick, onMounted, onUnmounted, ref, watch, type Ref } from "vue";
+import { computed, onMounted, onBeforeUnmount, ref, watch, type Ref } from "vue";
 import type { ChannelMember, ScreenShareOutputSettings, ScreenShareStream } from "./useVoiceWebSocket.js";
 
 export type ScreenShareResolutionPreset = "source" | "720p" | "1080p";
@@ -62,13 +62,23 @@ export function useWebClientScreenShare({
   const errorText = computed(() => errorCode.value === "SCREEN_SHARE_NATIVE_BRIDGE_REQUIRED" ? t("screenShareNativeUnavailable") : error.value);
 
   function setVideoElement(element: unknown): void {
+    if (videoElement.value && videoElement.value !== element) videoElement.value.srcObject = null;
     videoElement.value = element instanceof HTMLVideoElement ? element : null;
+  }
+
+  function setPlayerElement(element: unknown): void {
+    const previous = playerElement.value;
+    if (previous && previous !== element && document.fullscreenElement === previous) {
+      void document.exitFullscreen().catch(() => undefined);
+    }
+    playerElement.value = element instanceof HTMLElement ? element : null;
+    syncFullscreen();
   }
 
   function streamForMember(member: ChannelMember): ScreenShareStream | null {
     return streams.find((stream) => {
-      if (typeof stream.ownerClientId === "number" && stream.ownerClientId === member.id) return true;
-      if (stream.source === "teamspeak" && stream.ownerPeerId === `ts-${member.id}`) return true;
+      if (typeof stream.ownerClientId === "number") return stream.ownerClientId === member.id;
+      if (stream.source === "teamspeak" && /^ts-\d+$/.test(stream.ownerPeerId)) return stream.ownerPeerId === `ts-${member.id}`;
       return stream.ownerNickname === member.nickname;
     }) ?? null;
   }
@@ -89,7 +99,7 @@ export function useWebClientScreenShare({
   }
 
   function syncFullscreen(): void {
-    fullscreen.value = document.fullscreenElement === playerElement.value;
+    fullscreen.value = Boolean(playerElement.value && document.fullscreenElement === playerElement.value);
   }
 
   async function toggleFullscreen(): Promise<void> {
@@ -99,7 +109,7 @@ export function useWebClientScreenShare({
       if (document.fullscreenElement === player) await document.exitFullscreen();
       else if (player.requestFullscreen) await player.requestFullscreen();
     } catch {
-      fullscreen.value = false;
+      syncFullscreen();
     }
   }
 
@@ -115,21 +125,22 @@ export function useWebClientScreenShare({
     await startScreenShare(true, settings);
   }
 
-  watch([remoteStream, remoteVolume], ([stream, volume]) => {
-    void nextTick(() => {
-      const video = videoElement.value;
-      if (!video) return;
-      if (video.srcObject !== stream) video.srcObject = stream;
-      video.volume = Math.max(0, Math.min(1, volume ?? 1));
-      if (stream) void video.play().catch(() => undefined);
-    });
-  });
+  watch([videoElement, remoteStream, remoteVolume], ([video, stream, volume]) => {
+    if (!video) return;
+    if (video.srcObject !== stream) video.srcObject = stream;
+    video.volume = Math.max(0, Math.min(1, volume ?? 1));
+    if (stream) void video.play().catch(() => undefined);
+  }, { flush: "post", immediate: true });
   watch(viewing, (isViewing) => {
-    if (!isViewing && document.fullscreenElement === playerElement.value) void document.exitFullscreen().catch(() => undefined);
+    if (!isViewing && playerElement.value && document.fullscreenElement === playerElement.value) void document.exitFullscreen().catch(() => undefined);
   });
 
   onMounted(() => document.addEventListener("fullscreenchange", syncFullscreen));
-  onUnmounted(() => document.removeEventListener("fullscreenchange", syncFullscreen));
+  onBeforeUnmount(() => {
+    document.removeEventListener("fullscreenchange", syncFullscreen);
+    setVideoElement(null);
+    setPlayerElement(null);
+  });
 
   return {
     videoElement,
@@ -146,6 +157,7 @@ export function useWebClientScreenShare({
     ownerName,
     errorText,
     setVideoElement,
+    setPlayerElement,
     streamForMember,
     toggleForMember,
     viewerStyle,

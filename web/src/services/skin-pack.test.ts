@@ -196,10 +196,10 @@ test("the activity artwork layer floats above room content without intercepting 
   assert.match(css, /:deep\(\.app-shell \.member-panel::before\)\s*\{\s*content: "";\s*position: absolute;\s*z-index: 1;\s*left: -28px;\s*bottom: 18px;\s*width: min\(430px, calc\(100vw - 24px\)\);\s*aspect-ratio: 3 \/ 2;[^}]*perspective\(1100px\) rotateY\(-8deg\)/);
   assert.match(css, /:deep\(\.app-shell \.chat-empty\[data-ws-state="messages-empty"\]\)\s*\{[^}]*min-height: 210px;\s*padding: 126px 12px 10px;/);
   assert.match(css, /:deep\(\.app-shell \.chat-panel \.section-heading\),[\s\S]*?:deep\(\.app-shell \.chat-panel \.message-composer\)\s*\{\s*position: relative;\s*z-index: 3;/);
-  assert.match(css, /\.screen-share-player\s*\{[^}]*background: var\(--surface-1\)/);
-  assert.match(css, /\.screen-share-player-exit\s*\{[^}]*z-index: 3;/);
-  assert.match(css, /\.screen-share-player-stage\s*\{[^}]*var\(--accent\)[^}]*var\(--surface-2\)/);
-  assert.match(css, /\.screen-share-player-video\s*\{[^}]*background: var\(--surface-2\)/);
+  assert.match(css, /\.screen-share-player\)?\s*\{[^}]*background: var\(--surface-1\)/);
+  assert.match(css, /\.screen-share-player-exit\)?\s*\{[^}]*z-index: 3;/);
+  assert.match(css, /\.screen-share-player-stage\)?\s*\{[^}]*var\(--accent\)[^}]*var\(--surface-2\)/);
+  assert.match(css, /\.screen-share-player-video\)?\s*\{[^}]*background: var\(--surface-2\)/);
   assert.match(css, /@media \(min-width: 741px\)\s*\{\s*\/\* Keep header menus above the independently stacked screen-share stage\. \*\/\s*\.app-shell \.workspace-header\s*\{\s*position: relative;\s*z-index: 40;/);
 });
 
