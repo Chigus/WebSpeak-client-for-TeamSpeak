@@ -76,7 +76,7 @@
               <input id="channel" v-model="channel" :placeholder="t('emptyDefault')" @keyup.enter="doConnect" />
             </div>
 
-            <details class="identity-options" data-ws-part="home.identity"><summary>{{ t('identityOptions') }}</summary><div class="identity-controls"><label class="remember-identity"><input v-model="rememberIdentity" type="checkbox" /><span><strong>{{ t('rememberIdentity') }}</strong><small>{{ t('rememberIdentityHint') }}</small></span></label><div class="identity-actions" data-ws-part="home.identity-actions"><button type="button" class="identity-action-button" data-ws-part="home.identity-import.open" @click="openIdentityImport">{{ t('identityImport') }}</button><button type="button" class="identity-action-button" data-ws-part="home.identity-export.button" :disabled="!rememberIdentity || !identityMaterial" @click="exportIdentity">{{ t('identityExport') }}</button></div></div></details><p v-if="rememberIdentity" class="identity-warning">{{ t('rememberIdentityConcurrentWarning') }}</p>
+            <details class="identity-options" data-ws-part="home.identity"><summary>{{ t('identityOptions') }}</summary><div class="identity-controls"><label class="remember-identity"><input v-model="rememberIdentity" type="checkbox" /><span><strong>{{ t('rememberIdentity') }}</strong><small>{{ t('rememberIdentityHint') }}</small></span></label><div class="identity-actions" data-ws-part="home.identity-actions"><button type="button" class="identity-action-button" data-ws-part="home.identity-import.open" @click="openIdentityImport">{{ t('identityImport') }}</button><button type="button" class="identity-action-button" data-ws-part="home.identity-export.button" :disabled="identityExportBusy || !rememberIdentity || !identityMaterial" @click="exportIdentity">{{ t('identityExport') }}</button></div></div></details><p v-if="rememberIdentity" class="identity-warning">{{ t('rememberIdentityConcurrentWarning') }}</p>
 
             <button class="primary-button connect-button" data-ws-part="home.connect" :disabled="!canJoin || serverConfigLoading || !identityReady || voiceState.connecting" type="submit">
               <span v-if="voiceState.connecting" class="button-spinner"></span>
@@ -89,19 +89,9 @@
         </div>
       </main>
 
-      <div v-if="identityImportOpen" class="modal-backdrop identity-import-backdrop" @click.self="closeIdentityImport" tabindex="-1">
-        <section ref="identityImportModal" class="identity-import-modal" data-ws-part="home.identity-import-dialog" role="dialog" aria-modal="true" aria-labelledby="identity-import-title" tabindex="-1" @keydown.esc="closeIdentityImport">
-          <header class="identity-import-header" data-ws-part="home.identity-import.header"><div><h2 id="identity-import-title">{{ t('identityImportTitle') }}</h2><p>{{ t('identityImportDescription') }}</p></div><button type="button" class="qq-modal-close" data-ws-part="home.identity-import.close" :aria-label="t('close')" @click="closeIdentityImport"><Icon name="close" :size="18" /></button></header>
-          <textarea v-model="identityImportText" class="identity-import-textarea" data-ws-part="home.identity-import.textarea" :placeholder="t('identityImportPlaceholder')" maxlength="131072" spellcheck="false"></textarea>
-          <div :class="['identity-drop-zone', { active: identityDropActive }]" data-ws-part="home.identity-import.drop-zone" role="group" tabindex="0" @click="chooseIdentityFile" @keydown.enter.prevent="chooseIdentityFile" @keydown.space.prevent="chooseIdentityFile" @dragover.prevent="identityDropActive = true" @dragleave.prevent="identityDropActive = false" @drop.prevent.stop="onIdentityFileDrop">
-            <Icon name="paperclip" :size="18" /><span>{{ t('identityDropZone') }}</span><button type="button" class="identity-file-button" data-ws-part="home.identity-import.file-button" @click.stop="chooseIdentityFile">{{ t('identityChooseFile') }}</button>
-          </div>
-          <input ref="identityFileInput" class="identity-file-input" type="file" accept=".ini,.txt,.identity,.wsi,text/plain" @change="onIdentityFileChange" />
-          <p v-if="identityImportError" class="identity-import-error" data-ws-part="home.identity-import.error" role="alert">{{ identityImportError }}</p>
-          <p class="identity-import-security" data-ws-part="home.identity-import.security"><Icon name="lock" :size="14" /> {{ t('identityImportSecurity') }}</p>
-          <footer class="identity-import-footer" data-ws-part="home.identity-import.footer"><button type="button" class="text-button" data-ws-part="home.identity-import.cancel" @click="closeIdentityImport">{{ t('identityImportCancel') }}</button><button type="button" class="primary-button identity-import-submit" data-ws-part="home.identity-import.submit" :disabled="identityImportBusy || !identityImportText.trim()" @click="importIdentity">{{ identityImportBusy ? t('connecting') : t('identityImportSubmit') }}</button></footer>
-        </section>
-      </div>
+      <IdentityImportDialog v-if="identityImportOpen" v-model="identityImportText"
+        :busy="identityImportBusy" :reading="identityFileReading" :error="identityImportError" :t="t"
+        @close="closeIdentityImport" @submit="importIdentity" @file="readIdentityFile" />
 
       <footer class="join-footer" data-ws-part="home.footer">
         <span>WebSpeak</span><span class="footer-separator">·</span><span>{{ t('teamSpeakClient') }}</span><span class="footer-spacer"></span><button type="button" class="clear-local-button" @click="clearBrowserData">{{ t('clearLocalData') }}</button><span class="footer-separator">·</span><span>{{ t('browserSupport') }}</span>
@@ -395,9 +385,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from "vue";
 import Icon from "../components/Icon.vue";
 import WebClientHeader from "../components/web-client/WebClientHeader.vue";
+import IdentityImportDialog from "../components/web-client/IdentityImportDialog.vue";
+import { useWebClientIdentity } from "../composables/useWebClientIdentity.js";
 import LanguageSwitcher from "../components/LanguageSwitcher.vue";
 import SkinSwitcher, { type SkinOption } from "../components/SkinSwitcher.vue";
 import { useWebClientChat } from "../composables/useWebClientChat.js";
@@ -412,7 +404,6 @@ import { useWebClientI18n } from "../composables/useWebClientI18n.js";
 import { useWebClientPublicConfig } from "../composables/useWebClientPublicConfig.js";
 import { useWebClientServerHistory } from "../composables/useWebClientServerHistory.js";
 import { getInitialLanguage, type Language } from "../i18n/web-client.js";
-import { exportTeamSpeakIdentity, IdentityImportError, importIdentityText } from "../services/identity-import.js";
 import { clearLocalData as clearStoredLocalData, isLocalPersistenceAvailable, listInstalledSkins, loadLocalPreferences, loadStoredIdentity, removeStoredIdentity, saveLocalPreferences, saveStoredIdentity } from "../services/local-persistence.js";
 import type { InstalledSkin, SkinHomeCopy } from "../services/skin-pack.js";
 import { getPublicDefaultSkinId, isPublicSkinEnabled, listPublicSkins, type SkinCatalogEntry } from "../services/skin-catalog.js";
@@ -528,13 +519,6 @@ const serverHost = ref(initialTarget.address);
 const serverPort = ref(initialTarget.port);
 const serverPassword = ref("");
 const rememberIdentity = ref(localStorage.getItem("webspeak:remember-identity") !== "0");
-const identityImportOpen = ref(false);
-const identityImportText = ref("");
-const identityImportError = ref("");
-const identityImportBusy = ref(false);
-const identityDropActive = ref(false);
-const identityFileInput = ref<HTMLInputElement | null>(null);
-const identityImportModal = ref<HTMLElement | null>(null);
 const accelerationRelayId = ref("");
 const browserError = ref("");
 const memberQuery = ref("");
@@ -562,6 +546,12 @@ function t(key: string, variables: Record<string, string | number> = {}) {
   if (template === undefined || !template.trim()) return translate(key, variables);
   return Object.entries(variables).reduce((value, [name, replacement]) => value.replaceAll(`{{${name}}}`, String(replacement)), template);
 }
+const {
+  open: identityImportOpen, text: identityImportText, error: identityImportError,
+  busy: identityImportBusy, reading: identityFileReading, exporting: identityExportBusy,
+  show: openIdentityImport, close: closeIdentityImport, reset: resetIdentityOperations, restore: restoreIdentity,
+  readFile: readIdentityFile, submit: importIdentity, exportIdentity,
+} = useWebClientIdentity({ identityMaterial, rememberIdentity, t, showToast });
 const {
   favoriteServers,
   recentServers,
@@ -972,6 +962,9 @@ watch(() => voiceState.connected, (connected) => {
   playNotification("connected");
   recordCurrentServer();
 });
+watch(() => voiceState.connected || voiceState.reconnecting || voiceState.reconnectFailed, (roomVisible) => {
+  if (roomVisible) resetIdentityOperations();
+}, { flush: "sync" });
 
 watch(() => voiceState.reconnecting, (reconnecting, wasReconnecting) => {
   if (reconnecting && !wasReconnecting) {
@@ -995,11 +988,9 @@ onMounted(() => {
   void loadLocalPreferences().then((preferences) => {
     if (!localStorage.getItem("webspeak:language") && (preferences.language === "zh" || preferences.language === "en" || preferences.language === "de" || preferences.language === "ru" || preferences.language === "ja")) language.value = preferences.language;
   });
-  void loadStoredIdentity().then((stored) => {
-    if (stored && localStorage.getItem("webspeak:remember-identity") === "1") {
-      identityMaterial.value = stored.privateMaterial;
-      rememberIdentity.value = true;
-    }
+  void restoreIdentity(async () => {
+    const stored = await loadStoredIdentity();
+    return stored && localStorage.getItem("webspeak:remember-identity") === "1" ? stored.privateMaterial : null;
   }).finally(() => {
     identityReady.value = true;
   });
@@ -1038,101 +1029,9 @@ function doShare() {
   navigator.clipboard?.writeText(invite.toString()).then(() => showToast(t("copiedToast")), () => showToast(t("copyFailedToast")));
 }
 
-function openIdentityImport(): void {
-  identityImportText.value = "";
-  identityImportError.value = "";
-  identityImportOpen.value = true;
-  void nextTick(() => identityImportModal.value?.focus());
-}
-
-function closeIdentityImport(): void {
-  if (identityImportBusy.value) return;
-  identityImportOpen.value = false;
-  identityDropActive.value = false;
-}
-
-function chooseIdentityFile(): void {
-  identityFileInput.value?.click();
-}
-
-function onIdentityFileChange(event: Event): void {
-  const input = event.currentTarget as HTMLInputElement;
-  const file = input.files?.[0];
-  input.value = "";
-  void readIdentityFile(file);
-}
-
-function onIdentityFileDrop(event: DragEvent): void {
-  identityDropActive.value = false;
-  void readIdentityFile(event.dataTransfer?.files[0]);
-}
-
-async function readIdentityFile(file?: File): Promise<void> {
-  if (!file) return;
-  if (file.size > 128 * 1024) {
-    identityImportError.value = t("identityImportErrorTooLarge");
-    return;
-  }
-  try {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    let encoding = "utf-8";
-    if (bytes[0] === 0xff && bytes[1] === 0xfe) encoding = "utf-16le";
-    else if (bytes[0] === 0xfe && bytes[1] === 0xff) encoding = "utf-16be";
-    identityImportText.value = new TextDecoder(encoding, { fatal: true }).decode(bytes);
-    identityImportError.value = identityImportText.value.trim() ? "" : t("identityImportErrorEmpty");
-  } catch {
-    identityImportError.value = t("identityImportErrorMalformed");
-  }
-}
-
-async function importIdentity(): Promise<void> {
-  if (identityImportBusy.value) return;
-  identityImportBusy.value = true;
-  identityImportError.value = "";
-  try {
-    const material = await importIdentityText(identityImportText.value);
-    // Imported identity material is only used if remembered identities are enabled.
-    rememberIdentity.value = true;
-    identityMaterial.value = material;
-    identityImportOpen.value = false;
-    identityImportText.value = "";
-    showToast(t("identityImportSuccess"));
-  } catch (error) {
-    const code = error instanceof IdentityImportError ? error.code : "invalid-key";
-    const errorKey = ({
-      empty: "identityImportErrorEmpty",
-      "too-large": "identityImportErrorTooLarge",
-      multiple: "identityImportErrorMultiple",
-      malformed: "identityImportErrorMalformed",
-      "invalid-key": "identityImportErrorInvalidKey",
-      unsupported: "identityImportErrorUnsupported",
-    } as const)[code];
-    identityImportError.value = t(errorKey);
-  } finally {
-    identityImportBusy.value = false;
-  }
-}
-
-async function exportIdentity(): Promise<void> {
-  if (!rememberIdentity.value || !identityMaterial.value) return;
-  try {
-    const content = await exportTeamSpeakIdentity(identityMaterial.value);
-    const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "webspeak-identity.ini";
-    document.body.append(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showToast(t("identityExportSuccess"));
-  } catch {
-    showToast(t("identityExportError"));
-  }
-}
-
 async function clearBrowserData(): Promise<void> {
   if (!window.confirm(t("clearLocalDataConfirm"))) return;
+  resetIdentityOperations();
   await clearStoredLocalData();
   for (const key of ["webspeak:nickname", "webspeak:language", "webspeak:theme", "webspeak:active-skin", "webspeak:skin-choice", "webspeak:input-device", "webspeak:output-device", "webspeak:remember-identity"]) localStorage.removeItem(key);
   clearCustomSkinStyle();

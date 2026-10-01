@@ -34,6 +34,7 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 | `web/src/voice/connection.ts`, `commands.ts` | Cancellable ticket acquisition, socket and connection generations, plus per-command acknowledgement deadlines and cleanup |
 | `web/src/voice/session-state.ts` | Reactive directory, chat history, events and notifications; complete versus omitted directory data, session resets and private-conversation identity scopes |
 | `web/src/composables/useWebClientChat.ts`, `useWebClientChannels.ts` | Destination-owned drafts and pending sends, identity-bound private history, and iterative channel-tree projection |
+| `web/src/composables/useWebClientIdentity.ts`, `web/src/components/web-client/IdentityImportDialog.vue` | Page-owned identity reads, parsing, restoration and exports; a presentation dialog with explicit input and action events |
 | `web/src/voice/audio-diagnostics.ts`, `web/src/composables/useWebClientPerformance.ts` | Session-owned diagnostic probes and compatibility counters, browser statistics, comparable sample scopes and cancellable UI polling |
 | `web/src/platform/` | Browser mounting and cancellable Android gateway readiness handshake |
 | `web/src/services/`, `web/src/i18n/`, `web/src/skins/` | Browser persistence, identity import, skin packages and translations |
@@ -119,6 +120,10 @@ Serialize `setSinkId` on each audio context or media element, since an in-flight
 
 ## Configuration and persistence
 
+Identity file reads belong to the current selection, text revision and dialog lifetime. New files (including invalid selections), manual edits, closing, entering the room, clearing local data and page disposal retire old results. Parsing owns its submitted draft; only a current result may replace the identity or notify. Preserve the 128 KiB limit, UTF-8/UTF-16 BOM decoding and existing busy-close behavior. The dialog disables submission while a selected file is being read and disables edits while parsing.
+
+Startup identity restoration must not overwrite a newer import or remember preference. Exports belong to the identity and page that started them; coalesce pending clicks, discard late serialization and release download anchors, URLs and timers independently. Keep codec parsing in the existing identity service and persistence in the page/storage layer.
+
 Admin requests belong to the login session and feature that started them. Invalidate pending work on authentication changes and page disposal; cancel feature work on management subroute exit. A late 401 must not expire a newer session, and late login or backup results must not navigate or download after disposal. Aborted work is not a user-facing failure. Failed logout preserves the authenticated draft; successful logout or session expiry resets private page state.
 
 Settings responses merge against the submitted snapshot instead of replacing newer edits. Password and action, and relay token and action, are atomic draft groups. Clear acknowledged secret inputs, retain edits made during the request, merge relay nodes by ID, and do not restore obsolete probe metadata. Serialize skin mutations and prevent duplicate invite actions; cancelling browser work does not undo a server mutation already executed.
@@ -171,6 +176,8 @@ Platform startup owns its message listener, polling interval and deadline, inclu
 ## Repository maintenance
 
 Routes load their page modules on demand. Document-level page styles must be gated by `html[data-ws-route]` because loaded CSS remains after navigation. The admin stylesheet is independent of public skins. Component extraction must retain `data-ws-part` hooks and account for Vue scoped styles across component boundaries.
+
+The identity dialog retains page-owned CSS with narrowly targeted `:deep` selectors so the existing declaration order and specificity remain intact. Shared button rules target its dedicated classes across the component boundary. Its close button is positioned within the modal. Public skin-contract tests include Vue files recursively under `components/web-client`; keep new public parts documented.
 
 Validate admin responses before applying them to page state. Network and protocol failures must preserve unsaved input; a failed logout must not be presented as a successful logout. Keep secret keep/replace/remove actions intact and do not persist credentials in UI error messages or diagnostic logs.
 

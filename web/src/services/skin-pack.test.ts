@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 import { strToU8, zipSync } from "fflate";
 import { importSkinPack, resolveSkinCssAssets, SkinPackError } from "./skin-pack.js";
@@ -78,16 +78,18 @@ test("community skins use a scoped light fallback instead of inheriting the nigh
 });
 
 test("all public skin parts are documented and the admin console is outside skin scope", async () => {
-  const [webClient, header, demo, skinSwitcher, languageSwitcher, admin, documentation] = await Promise.all([
+  const componentRoot = new URL("../components/web-client/", import.meta.url);
+  const componentFiles = (await readdir(componentRoot, { recursive: true })).filter(path => path.endsWith(".vue"));
+  const components = (await Promise.all(componentFiles.map(path => readFile(new URL(path.replaceAll("\\", "/"), componentRoot), "utf8")))).join("\n");
+  const [webClient, demo, skinSwitcher, languageSwitcher, admin, documentation] = await Promise.all([
     readFile(new URL("../views/WebClient.vue", import.meta.url), "utf8"),
-    readFile(new URL("../components/web-client/WebClientHeader.vue", import.meta.url), "utf8"),
     readFile(new URL("../views/DemoView.vue", import.meta.url), "utf8"),
     readFile(new URL("../components/SkinSwitcher.vue", import.meta.url), "utf8"),
     readFile(new URL("../components/LanguageSwitcher.vue", import.meta.url), "utf8"),
     readFile(new URL("../views/AdminView.vue", import.meta.url), "utf8"),
     readFile(new URL("../../../docs/SKIN_DEVELOPMENT.md", import.meta.url), "utf8"),
   ]);
-  const publicParts = new Set([...`${webClient}\n${header}\n${demo}\n${skinSwitcher}\n${languageSwitcher}`.matchAll(/data-ws-part="([^"]+)"/g)].map((match) => match[1]));
+  const publicParts = new Set([...`${webClient}\n${components}\n${demo}\n${skinSwitcher}\n${languageSwitcher}`.matchAll(/data-ws-part="([^"]+)"/g)].map((match) => match[1]));
   for (const part of publicParts) assert.ok(documentation.includes(`\`${part}\``), `Undocumented skin part: ${part}`);
   assert.match(skinSwitcher, /data-ws-skin-id/);
   assert.match(skinSwitcher, /data-ws-state/);
