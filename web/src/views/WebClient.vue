@@ -119,27 +119,10 @@
               <ScreenSharePlayer v-if="screenShareViewing" :model="screenShareControls"
                 :screen-share-remote-stream="screenShareRemoteStream" :screen-share-remote-volume="screenShareRemoteVolume"
                 :screen-share-error="screenShareError" :leave-screen-share="leaveScreenShare" :avatar-initial="avatarInitial" :t="t" />
-              <div v-if="currentMembers.length" class="voice-grid" data-ws-part="voice.members">
-                <article v-for="member in currentMembers" :key="member.id" :class="['voice-card', { speaking: isSpeaking(member), self: member.isSelf }]" data-ws-part="voice.member" :data-ws-state="member.isSelf ? 'self' : isSpeaking(member) ? 'speaking' : 'connected'" :data-ws-member-id="member.id" :data-ws-speaking="isSpeaking(member) ? 'true' : 'false'" :data-ws-self="member.isSelf ? 'true' : 'false'">
-                  <button v-if="isMobileViewport && !member.isSelf" type="button" class="voice-member-action" :aria-label="t('moreMemberOptions')" @click.stop="openMemberActions(member)"><Icon name="more" :size="17" /></button>
-                  <div :class="['voice-avatar-wrap', { 'screen-share-avatar-wrap': screenShareStreamForMember(member) }]" data-ws-part="voice.member.avatar-wrap">
-                    <div :class="['voice-avatar', { speaking: isSpeaking(member) }]" data-ws-part="voice.member.avatar" :style="avatarStyle(member.nickname, member.isSelf, member.avatar)">{{ member.avatar ? '' : avatarInitial(member.nickname) }}</div>
-                    <span v-if="screenShareStreamForMember(member)" class="screen-share-live-indicator" data-ws-part="voice.member.live-indicator"><span class="screen-share-wave" aria-hidden="true"><i v-for="bar in screenShareIndicatorBars" :key="bar" :style="{ height: `${bar}px` }"></i></span><span>{{ t('sharingScreen') }}</span></span>
-                    <button v-if="member.isSelf && (screenShareActive || screenShareStarting)" type="button" class="screen-share-stop-button" data-ws-part="voice.member.stop-share" :aria-label="t('stopScreenShare')" :title="t('stopScreenShare')" @click.stop="stopScreenShare"><Icon name="close" :size="14" /></button>
-                  </div>
-                  <strong data-ws-part="voice.member.name">{{ member.isSelf ? t('you') : member.nickname }}</strong><span data-ws-part="voice.member.status">{{ isSpeaking(member) ? t('speaking') : member.isSelf ? t('connectedYou') : t('connected') }}</span>
-                  <div v-if="member.isSelf || screenShareStreamForMember(member)" class="screen-share-card-actions" data-ws-part="voice.member.share-actions">
-                    <template v-if="member.isSelf && !screenShareActive && !screenShareStarting">
-                      <div class="screen-share-start-actions">
-                        <button type="button" class="screen-share-card-button" @click.stop="startScreenShareWithSettings"><Icon name="monitor" :size="13" /> {{ t('startScreenShare') }}</button>
-                        <button type="button" class="screen-share-settings-button" :aria-label="t('screenShareSettings')" :aria-expanded="screenShareSettingsOpen" :title="t('screenShareSettings')" @click.stop="screenShareSettingsOpen = !screenShareSettingsOpen"><Icon name="settings" :size="13" /></button>
-                      </div>
-                    </template>
-                    <button v-else-if="!member.isSelf" type="button" :class="['screen-share-card-button', { viewing: screenShareViewingStreamId === screenShareStreamForMember(member)?.streamId }]" :data-ws-state="screenShareViewingStreamId === screenShareStreamForMember(member)?.streamId ? 'viewing' : 'idle'" @click.stop="toggleScreenShareForMember(member)"><Icon name="monitor" :size="13" /> {{ screenShareViewingStreamId === screenShareStreamForMember(member)?.streamId ? t('watching') : t('watchScreenShare') }}</button>
-                  </div>
-                </article>
-              </div>
-              <div v-else class="voice-empty" data-ws-part="voice.members.empty"><span class="empty-icon"><Icon name="users" :size="20" /></span><strong>{{ t('waitingForMembers') }}</strong><span>{{ t('prepareMicrophone') }}</span></div>
+              <VoiceMemberCards :current-members="currentMembers" :is-mobile-viewport="isMobileViewport"
+                :sharing="memberSharingState" :controls="screenShareControls" :is-speaking="isSpeaking"
+                :avatar-style="avatarStyle" :avatar-initial="avatarInitial" :t="t"
+                @member-actions="openMemberActions" @stop-share="stopScreenShare" />
               <WhisperControls v-if="whisperTargetIds.size" :targets="whisperTargets" :active="whisperActive"
                 :enabled="!isMobileViewport || mobileSection === 'voice'" :controls="audioControls" :t="t" @clear="clearWhisperTargets" />
               <div class="mobile-voice-controls">
@@ -210,6 +193,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from "vue";
 import Icon from "../components/Icon.vue";
+import VoiceMemberCards from "../components/web-client/VoiceMemberCards.vue";
 import VoicePerformancePanel from "../components/web-client/VoicePerformancePanel.vue";
 import ScreenShareSettingsDialog from "../components/web-client/ScreenShareSettingsDialog.vue";
 import ScreenSharePlayer from "../components/web-client/ScreenSharePlayer.vue";
@@ -504,7 +488,6 @@ function persistLanguage() {
   void saveLocalPreferences({ schemaVersion: 1, language: language.value });
 }
 
-const screenShareIndicatorBars = [5, 10, 7, 12, 8, 10];
 const screenShareControls = useWebClientScreenShare({
   streams: screenShareStreams,
   viewing: screenShareViewing,
@@ -520,7 +503,8 @@ const screenShareControls = useWebClientScreenShare({
   avatarStyle,
   t,
 });
-const { settingsOpen: screenShareSettingsOpen, errorText: screenShareErrorText, streamForMember: screenShareStreamForMember, toggleForMember: toggleScreenShareForMember, startWithSettings: startScreenShareWithSettings } = screenShareControls;
+const { settingsOpen: screenShareSettingsOpen, errorText: screenShareErrorText } = screenShareControls;
+const memberSharingState = { screenShareActive, screenShareStarting, screenShareViewingStreamId, settingsOpen: screenShareSettingsOpen };
 const {
   channelTree,
   currentChannel,
