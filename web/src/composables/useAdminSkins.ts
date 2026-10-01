@@ -1,0 +1,103 @@
+import { computed, onScopeDispose, ref } from "vue";
+import type { copy } from "../i18n/admin.js";
+import { isAdminRequestCancelled, type AdminApi } from "../services/admin-api.js";
+import { createAdminRequests } from "../services/admin-requests.js";
+import { BUILTIN_SKIN_CATALOG, type SkinCatalogEntry } from "../services/skin-catalog.js";
+
+interface Options { api: AdminApi; tr(key: keyof typeof copy.zh): string }
+
+export function useAdminSkins(options: Options) {
+  const requests = createAdminRequests();
+  const skinFileInput = ref<HTMLInputElement | null>(null);
+  const skinEntries = ref<SkinCatalogEntry[]>([]);
+  const skinLoading = ref(false), skinUploading = ref(false), skinDefaultSaving = ref(false);
+  const removingSkinId = ref(""), updatingSkinId = ref(""), skinDefaultId = ref("builtin.light");
+  const skinManagerError = ref(""), skinManagerNotice = ref("");
+  const skinBusy = computed(() => skinUploading.value || skinDefaultSaving.value || Boolean(removingSkinId.value || updatingSkinId.value));
+  const enabledSkinEntries = computed(() => skinEntries.value.filter(skin => skin.builtIn || skin.enabled !== false));
+  let savedDefault = "builtin.light";
+  function cancelRequests() {
+    requests.reset();
+    skinLoading.value = false; skinUploading.value = false; skinDefaultSaving.value = false;
+    removingSkinId.value = ""; updatingSkinId.value = "";
+    skinManagerError.value = ""; skinManagerNotice.value = "";
+  }
+  function reset() { cancelRequests(); skinEntries.value = []; savedDefault = skinDefaultId.value = "builtin.light"; }
+  onScopeDispose(reset);
+  function report(error: unknown, upload = false) {
+    if (!isAdminRequestCancelled(error)) skinManagerError.value = upload && error instanceof Error ? error.message : options.tr("operationFailed");
+  }
+  async function loadSkinCatalog() {
+    const request = requests.begin("load"), selected = skinDefaultId.value;
+    skinLoading.value = true; skinManagerError.value = "";
+    try {
+      const value = await options.api.skins(request.signal);
+      if (!request.isCurrent()) return;
+      const protectedIds = new Set(BUILTIN_SKIN_CATALOG.map(skin => skin.id));
+      skinEntries.value = [...BUILTIN_SKIN_CATALOG, ...value.skins.filter(skin => !protectedIds.has(skin.id))];
+      savedDefault = value.defaultSkinId;
+      if (skinDefaultId.value === selected) skinDefaultId.value = savedDefault;
+    } catch (error) { if (request.isCurrent()) report(error); }
+    finally { if (request.isCurrent()) skinLoading.value = false; request.finish(); }
+  }
+  async function saveSkinDefault() {
+    if (skinBusy.value) return;
+    requests.cancel("load"); skinLoading.value = false;
+    const request = requests.begin("mutation"), selected = skinDefaultId.value;
+    skinDefaultSaving.value = true; skinManagerError.value = ""; skinManagerNotice.value = "";
+    try {
+      const result = await options.api.setDefaultSkin(selected, request.signal);
+      if (!request.isCurrent()) return;
+      savedDefault = result.defaultSkinId;
+      if (skinDefaultId.value === selected) skinDefaultId.value = savedDefault;
+      skinManagerNotice.value = options.tr("skinDefaultSaved");
+    } catch (error) {
+      if (request.isCurrent()) { report(error); if (skinDefaultId.value === selected) skinDefaultId.value = savedDefault; }
+    } finally { if (request.isCurrent()) skinDefaultSaving.value = false; request.finish(); }
+  }
+  async function toggleSkinEnabled(skin: SkinCatalogEntry) {
+    if (skinBusy.value) return;
+    requests.cancel("load"); skinLoading.value = false;
+    const request = requests.begin("mutation"), selected = skinDefaultId.value;
+    updatingSkinId.value = skin.id; skinManagerError.value = ""; skinManagerNotice.value = "";
+    try {
+      const result = await options.api.setSkinEnabled(skin.id, skin.enabled === false, request.signal);
+      if (!request.isCurrent()) return;
+      const current = skinEntries.value.find(entry => entry.id === skin.id);
+      if (current) Object.assign(current, result.skin);
+      savedDefault = result.defaultSkinId;
+      if (skinDefaultId.value === selected) skinDefaultId.value = savedDefault;
+      skinManagerNotice.value = options.tr(result.skin.enabled === false ? "skinDisabledNotice" : "skinEnabledNotice");
+    } catch (error) { if (request.isCurrent()) report(error); }
+    finally { if (request.isCurrent()) updatingSkinId.value = ""; request.finish(); }
+  }
+  async function onSkinFileChanged(event: Event) {
+    const input = event.target as HTMLInputElement, file = input.files?.[0];
+    if (!file || skinBusy.value) return;
+    requests.cancel("load"); skinLoading.value = false;
+    const request = requests.begin("mutation");
+    skinUploading.value = true; skinManagerError.value = ""; skinManagerNotice.value = "";
+    try {
+      const result = await options.api.uploadSkin(file, id => !skinEntries.value.some(entry => entry.id === id) || window.confirm(`${options.tr("skinReplaceConfirm")}\n${id}`), request.signal);
+      if (!request.isCurrent() || !result) return;
+      skinManagerNotice.value = options.tr("skinImported");
+      await loadSkinCatalog();
+    } catch (error) { if (request.isCurrent()) report(error, true); }
+    finally { input.value = ""; if (request.isCurrent()) skinUploading.value = false; request.finish(); }
+  }
+  async function removeSkin(skin: SkinCatalogEntry) {
+    if (skinBusy.value || !window.confirm(`${options.tr("skinConfirmRemove")}\n${skin.name} (${skin.id})`)) return;
+    requests.cancel("load"); skinLoading.value = false;
+    const request = requests.begin("mutation");
+    removingSkinId.value = skin.id; skinManagerError.value = ""; skinManagerNotice.value = "";
+    try {
+      await options.api.deleteSkin(skin.id, request.signal);
+      if (!request.isCurrent()) return;
+      skinManagerNotice.value = options.tr("skinRemoved");
+      await loadSkinCatalog();
+    } catch (error) { if (request.isCurrent()) report(error); }
+    finally { if (request.isCurrent()) removingSkinId.value = ""; request.finish(); }
+  }
+  return { skinFileInput, skinEntries, skinLoading, skinUploading, skinDefaultSaving, removingSkinId, updatingSkinId, skinDefaultId,
+    skinManagerError, skinManagerNotice, skinBusy, enabledSkinEntries, loadSkinCatalog, saveSkinDefault, toggleSkinEnabled, onSkinFileChanged, removeSkin, cancelRequests, reset };
+}

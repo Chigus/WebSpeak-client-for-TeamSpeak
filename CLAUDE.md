@@ -25,7 +25,8 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 | `web/src/voice/audio-sink.ts` | Serialized device routing per audio endpoint, with stale-operation guards |
 | `web/src/platform/` | Browser mounting and cancellable Android gateway readiness handshake |
 | `web/src/services/`, `web/src/i18n/`, `web/src/skins/` | Browser persistence, identity import, skin packages and translations |
-| `web/src/services/admin-api.ts` | Admin HTTP transport, response validation, current CSRF and authentication-expiry notification, including skin uploads and backup downloads |
+| `web/src/services/admin-api.ts`, `admin-requests.ts` | Admin HTTP validation and cancellation, session-bound CSRF and per-feature request ownership, including skin uploads and backup downloads |
+| `web/src/composables/useAdminServerSettings.ts`, `useAdminOperations.ts`, `useAdminSkins.ts` | Admin form merging, probes, operational actions and skin state; the page owns authentication, routing and overview |
 | `src/mobile/`, `mobile/`, `web/android/` | Android loopback gateway, asset packaging and Capacitor container |
 
 ## Connection and control protocol
@@ -64,6 +65,10 @@ Serialize `setSinkId` on each audio context or media element, since an in-flight
 `src/server/opus-codec.ts` loads the native `@discordjs/opus` implementation for server deployments and `opusscript` for the Android bundle. Dispose codec and media resources at the end of their owning session.
 
 ## Configuration and persistence
+
+Admin requests belong to the login session and feature that started them. Invalidate pending work on authentication changes and page disposal; cancel feature work on management subroute exit. A late 401 must not expire a newer session, and late login or backup results must not navigate or download after disposal. Aborted work is not a user-facing failure. Failed logout preserves the authenticated draft; successful logout or session expiry resets private page state.
+
+Settings responses merge against the submitted snapshot instead of replacing newer edits. Password and action, and relay token and action, are atomic draft groups. Clear acknowledged secret inputs, retain edits made during the request, merge relay nodes by ID, and do not restore obsolete probe metadata. Serialize skin mutations and prevent duplicate invite actions; cancelling browser work does not undo a server mutation already executed.
 
 | Source | Purpose |
 | --- | --- |

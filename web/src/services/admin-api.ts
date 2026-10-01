@@ -14,21 +14,64 @@ interface AdminApiOptions {
   fetch?: typeof fetch;
 }
 
+interface RequestContext {
+  token: string;
+  signal: AbortSignal;
+  assertCurrent(): void;
+}
+
+export function isAdminRequestCancelled(error: unknown): boolean {
+  return error instanceof AdminApiError && error.code === "REQUEST_CANCELLED";
+}
+
 export function createAdminApi(options: AdminApiOptions) {
   const fetcher = options.fetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
-  async function transport(path: string, init: RequestInit = {}, authenticated = true): Promise<Response> {
+  let generation = 0;
+  const pending = new Set<AbortController>();
+
+  async function execute<T>(signal: AbortSignal | undefined, run: (context: RequestContext) => Promise<T>): Promise<T> {
+    const owner = generation;
+    const token = options.csrfToken();
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+    pending.add(controller);
+    const context: RequestContext = { token, signal: controller.signal, assertCurrent() {
+      if (controller.signal.aborted || owner !== generation || token !== options.csrfToken()) {
+        throw new AdminApiError("REQUEST_CANCELLED");
+      }
+    } };
+    try {
+      context.assertCurrent();
+      const value = await run(context);
+      context.assertCurrent();
+      return value;
+    } catch (error) {
+      context.assertCurrent();
+      throw error;
+    } finally {
+      signal?.removeEventListener("abort", abort);
+      pending.delete(controller);
+    }
+  }
+
+  async function transport(context: RequestContext, path: string, init: RequestInit = {}, authenticated = true): Promise<Response> {
+    context.assertCurrent();
     const headers = new Headers(init.headers);
     if (!headers.has("accept")) headers.set("accept", "application/json");
     if (init.method && init.method !== "GET") {
-      const token = authenticated ? options.csrfToken() : "";
+      const token = authenticated ? context.token : "";
       if (token) headers.set("x-csrf-token", token);
     }
     let response: Response;
     try {
-      response = await fetcher(`/api/admin${path}`, { ...init, headers });
+      response = await fetcher(`/api/admin${path}`, { ...init, headers, signal: context.signal });
     } catch {
       throw new AdminApiError("REQUEST_FAILED");
     }
+    // Only the session that started the request may be expired by its response.
+    context.assertCurrent();
     // Notify even if a proxy returned HTML instead of a JSON error body.
     if (response.status === 401 && authenticated) options.onUnauthorized?.();
     if (!response.ok) {
@@ -45,44 +88,53 @@ export function createAdminApi(options: AdminApiOptions) {
     try { return read(value); }
     catch { throw new AdminApiError("INVALID_ADMIN_RESPONSE", response.status); }
   }
-  async function request<T>(path: string, read: AdminResponseReader<T>, method = "GET", body?: unknown, authenticated = true): Promise<T> {
-    const response = await transport(path, {
-      method, ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
-    }, authenticated);
-    return decode(response, read);
+  function request<T>(path: string, read: AdminResponseReader<T>, method = "GET", body?: unknown, authenticated = true, signal?: AbortSignal): Promise<T> {
+    return execute(signal, async context => {
+      const response = await transport(context, path, {
+        method, ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
+      }, authenticated);
+      return decode(response, read);
+    });
   }
 
   return {
-    session: () => request("/session", adminResponses.session),
-    login: (username: string, password: string) => request("/login", adminResponses.login, "POST", { username, password }, false),
-    changePassword: (newPassword: string) => request("/change-password", adminResponses.ok, "POST", { newPassword }),
-    logout: () => request("/logout", adminResponses.ok, "POST", {}),
-    overview: () => request("/overview", adminResponses.overview),
-    settings: () => request("/server", adminResponses.settings),
-    saveSettings: (body: AdminSettingsInput) => request("/server", adminResponses.savedSettings, "PUT", body),
-    probe: (body: Pick<AdminSettingsInput, "target" | "serverPassword" | "passwordAction">) => request("/server/test", adminResponses.probe, "POST", body),
-    sessions: () => request("/sessions", adminResponses.sessions),
-    terminateSession: (id: string) => request(`/sessions/${encodeURIComponent(id)}/terminate`, adminResponses.ok, "POST", {}),
-    invites: () => request("/invites", adminResponses.invites),
-    createInvite: (body: ManagedInviteInput) => request("/invites", adminResponses.createdInvite, "POST", body),
-    revokeInvite: (id: string) => request(`/invites/${encodeURIComponent(id)}/revoke`, adminResponses.ok, "POST", {}),
-    diagnostics: () => request("/diagnostics", adminResponses.diagnostics),
-    logs: () => request("/logs?limit=100", adminResponses.logs),
-    audit: () => request("/audit?limit=50", adminResponses.audit),
-    skins: () => request("/skins", adminResponses.skins),
-    setDefaultSkin: (id: string) => request("/skins/default", adminResponses.defaultSkin, "PUT", { id }),
-    setSkinEnabled: (id: string, enabled: boolean) => request(`/skins/${encodeURIComponent(id)}/enabled`, adminResponses.updatedSkin, "PUT", { enabled }),
-    deleteSkin: (id: string) => request(`/skins/${encodeURIComponent(id)}`, adminResponses.ok, "DELETE", {}),
-    async uploadSkin(file: File, confirmReplace?: (id: string) => boolean) {
-      const { importSkinPack } = await import("./skin-pack.js");
-      const skin = await importSkinPack(file);
-      if (confirmReplace && !confirmReplace(skin.id)) return null;
-      const response = await transport(`/skins/${encodeURIComponent(skin.id)}`, {
-        method: "PUT", headers: { "content-type": "application/octet-stream" }, body: file,
+    invalidate() { generation++; for (const controller of pending) controller.abort(); },
+    session: (signal?: AbortSignal) => request("/session", adminResponses.session, "GET", undefined, true, signal),
+    login: (username: string, password: string, signal?: AbortSignal) => request("/login", adminResponses.login, "POST", { username, password }, false, signal),
+    changePassword: (newPassword: string, signal?: AbortSignal) => request("/change-password", adminResponses.ok, "POST", { newPassword }, true, signal),
+    logout: (signal?: AbortSignal) => request("/logout", adminResponses.ok, "POST", {}, true, signal),
+    overview: (signal?: AbortSignal) => request("/overview", adminResponses.overview, "GET", undefined, true, signal),
+    settings: (signal?: AbortSignal) => request("/server", adminResponses.settings, "GET", undefined, true, signal),
+    saveSettings: (body: AdminSettingsInput, signal?: AbortSignal) => request("/server", adminResponses.savedSettings, "PUT", body, true, signal),
+    probe: (body: Pick<AdminSettingsInput, "target" | "serverPassword" | "passwordAction">, signal?: AbortSignal) => request("/server/test", adminResponses.probe, "POST", body, true, signal),
+    sessions: (signal?: AbortSignal) => request("/sessions", adminResponses.sessions, "GET", undefined, true, signal),
+    terminateSession: (id: string, signal?: AbortSignal) => request(`/sessions/${encodeURIComponent(id)}/terminate`, adminResponses.ok, "POST", {}, true, signal),
+    invites: (signal?: AbortSignal) => request("/invites", adminResponses.invites, "GET", undefined, true, signal),
+    createInvite: (body: ManagedInviteInput, signal?: AbortSignal) => request("/invites", adminResponses.createdInvite, "POST", body, true, signal),
+    revokeInvite: (id: string, signal?: AbortSignal) => request(`/invites/${encodeURIComponent(id)}/revoke`, adminResponses.ok, "POST", {}, true, signal),
+    diagnostics: (signal?: AbortSignal) => request("/diagnostics", adminResponses.diagnostics, "GET", undefined, true, signal),
+    logs: (signal?: AbortSignal) => request("/logs?limit=100", adminResponses.logs, "GET", undefined, true, signal),
+    audit: (signal?: AbortSignal) => request("/audit?limit=50", adminResponses.audit, "GET", undefined, true, signal),
+    skins: (signal?: AbortSignal) => request("/skins", adminResponses.skins, "GET", undefined, true, signal),
+    setDefaultSkin: (id: string, signal?: AbortSignal) => request("/skins/default", adminResponses.defaultSkin, "PUT", { id }, true, signal),
+    setSkinEnabled: (id: string, enabled: boolean, signal?: AbortSignal) => request(`/skins/${encodeURIComponent(id)}/enabled`, adminResponses.updatedSkin, "PUT", { enabled }, true, signal),
+    deleteSkin: (id: string, signal?: AbortSignal) => request(`/skins/${encodeURIComponent(id)}`, adminResponses.ok, "DELETE", {}, true, signal),
+    uploadSkin(file: File, confirmReplace?: (id: string) => boolean, signal?: AbortSignal) {
+      return execute(signal, async context => {
+        const { importSkinPack } = await import("./skin-pack.js");
+        context.assertCurrent();
+        const skin = await importSkinPack(file);
+        context.assertCurrent();
+        if (confirmReplace && !confirmReplace(skin.id)) return null;
+        const response = await transport(context, `/skins/${encodeURIComponent(skin.id)}`, {
+          method: "PUT", headers: { "content-type": "application/octet-stream" }, body: file,
+        });
+        return (await decode(response, adminResponses.uploadedSkin)).skin;
       });
-      return (await decode(response, adminResponses.uploadedSkin)).skin;
     },
-    async backup() { return (await transport("/backup", { headers: { accept: "application/octet-stream" } })).blob(); },
-    dismissLegacyNotice: () => request("/legacy-import/dismiss", adminResponses.ok, "POST", {}),
+    backup: (signal?: AbortSignal) => execute(signal, async context => (await transport(context, "/backup", { headers: { accept: "application/octet-stream" } })).blob()),
+    dismissLegacyNotice: (signal?: AbortSignal) => request("/legacy-import/dismiss", adminResponses.ok, "POST", {}, true, signal),
   };
 }
+
+export type AdminApi = ReturnType<typeof createAdminApi>;

@@ -24,15 +24,15 @@
       <aside class="admin-sidebar">
         <div class="admin-brand"><span><Icon name="waveform" :size="22" /></span><div><strong>WebSpeak</strong><small>{{ tr('adminConsole') }}</small></div></div>
         <nav><RouterLink to="/admin" exact-active-class="active"><Icon name="activity" :size="18" />{{ tr('overview') }}</RouterLink><RouterLink to="/admin/server" active-class="active"><Icon name="server" :size="18" />{{ tr('server') }}</RouterLink><RouterLink to="/admin/operations" active-class="active"><Icon name="users" :size="18" />{{ tr('operations') }}</RouterLink><RouterLink to="/admin/skins" active-class="active"><Icon name="compass" :size="18" />{{ tr('skinLibrary') }}</RouterLink></nav>
-        <div class="sidebar-bottom"><a href="/" target="_blank"><Icon name="share" :size="16" />{{ tr('openGuest') }}</a><button type="button" @click="logout"><Icon name="door" :size="16" />{{ tr('logout') }}</button></div>
+        <div class="sidebar-bottom"><a href="/" target="_blank"><Icon name="share" :size="16" />{{ tr('openGuest') }}</a><button type="button" :disabled="loggingOut" @click="logout"><Icon name="door" :size="16" />{{ tr('logout') }}</button></div>
       </aside>
 
-      <main class="admin-main">
+      <main class="admin-main" :inert="loggingOut || undefined" :aria-busy="loggingOut">
         <header class="admin-topbar"><div><small>{{ tr('adminConsole') }}</small><h1>{{ currentPageTitle }}</h1></div><div><span class="running-dot"></span>{{ tr('gatewayRunning') }}<button type="button" class="theme-toggle" :title="themeLabel" :aria-label="themeLabel" @click="cycleTheme"><Icon :name="themeIcon" :size="17" /><span>{{ themeLabel }}</span></button><LanguageSwitcher v-model="language" :menu-label="tr('languageMenu')" @change="persistLanguage" /></div></header>
 
         <div v-if="errorMessage" class="alert error page-alert">{{ errorMessage }}</div>
         <section v-if="route.path === '/admin/server'" class="page-content server-page">
-          <div class="page-heading"><div><h2>{{ tr('serverSettings') }}</h2><p>{{ tr('serverSettingsLead') }}</p></div><button class="primary-button" :disabled="submitting" @click="saveServerSettings">{{ submitting ? tr('saving') : tr('saveChanges') }}</button></div>
+          <div class="page-heading"><div><h2>{{ tr('serverSettings') }}</h2><p>{{ tr('serverSettingsLead') }}</p></div><button class="primary-button" :disabled="serverSaving" @click="saveServerSettings">{{ serverSaving ? tr('saving') : tr('saveChanges') }}</button></div>
           <div class="settings-grid">
             <details class="settings-card settings-accordion target-accordion" open>
               <summary class="settings-accordion-header">
@@ -92,8 +92,8 @@
           <div class="page-heading"><div><h2>{{ tr('operations') }}</h2><p>{{ tr('operationsLead') }}</p></div><button class="secondary-button" :disabled="operationsLoading" @click="loadOperations"><span v-if="operationsLoading" class="spinner small"></span><Icon v-else name="refresh" :size="17" />{{ tr('refresh') }}</button></div>
           <div class="alert info system-notice"><Icon name="info" :size="16" /><span>{{ tr('updateNotice', { version: operations.diagnostics.version || '—' }) }}</span></div>
           <div class="operations-grid operations-primary">
-            <article class="operation-card operation-wide"><header><div><h3>{{ tr('sessions') }}</h3><p>{{ tr('sessionsLead') }}</p></div><strong>{{ operations.sessions.length }}</strong></header><div v-if="operations.sessions.length" class="table-wrap"><table><thead><tr><th>{{ tr('nickname') }}</th><th>{{ tr('sessionState') }}</th><th>{{ tr('age') }}</th><th>{{ tr('memberCount') }}</th><th></th></tr></thead><tbody><tr v-for="session in operations.sessions" :key="session.id"><td><strong>{{ session.nickname }}</strong><small>{{ session.target }}</small></td><td><span class="state-pill">{{ sessionStateLabel(session.state) }}</span></td><td>{{ formatAge(session.ageSeconds) }}</td><td>{{ session.memberCount }}</td><td><button class="danger-button" type="button" :disabled="terminatingSession === session.id" @click="terminateSession(session)">{{ terminatingSession === session.id ? tr('terminating') : tr('endSession') }}</button></td></tr></tbody></table></div><div v-else class="operation-empty"><Icon name="users" :size="22" /><span>{{ tr('sessionEmpty') }}</span></div></article>
-            <article class="operation-card"><header><div><h3>{{ tr('invites') }}</h3><p>{{ tr('invitesLead') }}</p></div></header><form class="invite-form" @submit.prevent="createInvite"><label><span>{{ tr('inviteChannel') }}</span><input v-model.trim="inviteForm.channel" maxlength="100" :placeholder="tr('inviteChannelPlaceholder')" /></label><div class="invite-form-grid"><label><span>{{ tr('expiresIn') }}</span><input v-model.number="inviteForm.expiresInHours" type="number" min="1" max="720" /></label><label><span>{{ tr('maxUses') }}</span><input v-model.number="inviteForm.maxUses" type="number" min="0" max="10000" /></label></div><small class="field-help">{{ tr('unlimitedUses') }}</small><button class="primary-button" type="submit" :disabled="submitting"><span v-if="submitting" class="spinner small"></span>{{ tr('createInvite') }}</button></form><div v-if="createdInvite" class="generated-invite"><strong>{{ tr('inviteCreated') }}</strong><div class="generated-link"><input :value="createdInvite.link" readonly /><button class="secondary-button" type="button" @click="copyInviteLink">{{ tr('copyLink') }}</button></div><small>{{ tr('inviteSecurity') }}</small></div><div v-if="operations.invites.length" class="invite-list"><div v-for="invite in operations.invites" :key="invite.id" class="invite-row"><div><strong>{{ invite.channel || tr('defaultChannel') }}</strong><small>{{ invite.target }} · {{ formatDate(invite.expiresAt) }}</small></div><div class="invite-row-meta"><span :class="['state-pill', invite.status]">{{ inviteStatusLabel(invite.status) }}</span><span>{{ invite.useCount }}/{{ invite.maxUses || '∞' }}</span><button v-if="invite.status === 'active'" class="text-danger" type="button" @click="revokeInvite(invite)">{{ tr('revoke') }}</button></div></div></div></article>
+            <article class="operation-card operation-wide"><header><div><h3>{{ tr('sessions') }}</h3><p>{{ tr('sessionsLead') }}</p></div><strong>{{ operations.sessions.length }}</strong></header><div v-if="operations.sessions.length" class="table-wrap"><table><thead><tr><th>{{ tr('nickname') }}</th><th>{{ tr('sessionState') }}</th><th>{{ tr('age') }}</th><th>{{ tr('memberCount') }}</th><th></th></tr></thead><tbody><tr v-for="session in operations.sessions" :key="session.id"><td><strong>{{ session.nickname }}</strong><small>{{ session.target }}</small></td><td><span class="state-pill">{{ sessionStateLabel(session.state) }}</span></td><td>{{ formatAge(session.ageSeconds) }}</td><td>{{ session.memberCount }}</td><td><button class="danger-button" type="button" :disabled="Boolean(terminatingSession)" @click="terminateSession(session)">{{ terminatingSession === session.id ? tr('terminating') : tr('endSession') }}</button></td></tr></tbody></table></div><div v-else class="operation-empty"><Icon name="users" :size="22" /><span>{{ tr('sessionEmpty') }}</span></div></article>
+            <article class="operation-card"><header><div><h3>{{ tr('invites') }}</h3><p>{{ tr('invitesLead') }}</p></div></header><form class="invite-form" @submit.prevent="createInvite"><label><span>{{ tr('inviteChannel') }}</span><input v-model.trim="inviteForm.channel" maxlength="100" :placeholder="tr('inviteChannelPlaceholder')" /></label><div class="invite-form-grid"><label><span>{{ tr('expiresIn') }}</span><input v-model.number="inviteForm.expiresInHours" type="number" min="1" max="720" /></label><label><span>{{ tr('maxUses') }}</span><input v-model.number="inviteForm.maxUses" type="number" min="0" max="10000" /></label></div><small class="field-help">{{ tr('unlimitedUses') }}</small><button class="primary-button" type="submit" :disabled="inviteSubmitting"><span v-if="inviteSubmitting" class="spinner small"></span>{{ tr('createInvite') }}</button></form><div v-if="createdInvite" class="generated-invite"><strong>{{ tr('inviteCreated') }}</strong><div class="generated-link"><input :value="createdInvite.link" readonly /><button class="secondary-button" type="button" @click="copyInviteLink">{{ tr('copyLink') }}</button></div><small>{{ tr('inviteSecurity') }}</small></div><div v-if="operations.invites.length" class="invite-list"><div v-for="invite in operations.invites" :key="invite.id" class="invite-row"><div><strong>{{ invite.channel || tr('defaultChannel') }}</strong><small>{{ invite.target }} · {{ formatDate(invite.expiresAt) }}</small></div><div class="invite-row-meta"><span :class="['state-pill', invite.status]">{{ inviteStatusLabel(invite.status) }}</span><span>{{ invite.useCount }}/{{ invite.maxUses || '∞' }}</span><button v-if="invite.status === 'active'" class="text-danger" type="button" :disabled="revokingInvites.has(invite.id)" @click="revokeInvite(invite)">{{ tr('revoke') }}</button></div></div></div></article>
           </div>
           <div class="operations-grid lower-operations">
             <article class="operation-card diagnostics-card"><header><div><h3>{{ tr('diagnostics') }}</h3><p>{{ tr('diagnosticsLead') }}</p></div><a class="text-link" href="/api/admin/diagnostics/report">{{ tr('downloadReport') }}</a></header><dl class="diagnostic-list"><div><dt>{{ tr('version') }}</dt><dd>{{ operations.diagnostics.version || '—' }}</dd></div><div><dt>{{ tr('runtime') }}</dt><dd>{{ operations.diagnostics.node || '—' }}</dd></div><div><dt>{{ tr('platform') }}</dt><dd>{{ operations.diagnostics.platform || '—' }} / {{ operations.diagnostics.arch || '—' }}</dd></div><div><dt>{{ tr('databaseSchema') }}</dt><dd>v{{ operations.diagnostics.schemaVersion || '—' }}</dd></div><div><dt>{{ tr('createdSessions') }}</dt><dd>{{ operations.diagnostics.createdSessions }}</dd></div></dl><button class="secondary-button" type="button" @click="downloadBackup">{{ tr('exportBackup') }}</button></article>
@@ -103,17 +103,17 @@
         </section>
 
         <section v-else-if="route.path === '/admin/skins'" class="page-content skin-library-page">
-          <div class="page-heading"><div><h2>{{ tr('skinLibrary') }}</h2><p>{{ tr('skinLibraryLead') }}</p></div><button class="primary-button" type="button" :disabled="skinUploading" @click="skinFileInput?.click()"><span v-if="skinUploading" class="spinner small"></span><Icon v-else name="share" :size="16" />{{ skinUploading ? tr('skinUploading') : tr('skinUpload') }}</button></div>
+          <div class="page-heading"><div><h2>{{ tr('skinLibrary') }}</h2><p>{{ tr('skinLibraryLead') }}</p></div><button class="primary-button" type="button" :disabled="skinBusy" @click="skinFileInput?.click()"><span v-if="skinUploading" class="spinner small"></span><Icon v-else name="share" :size="16" />{{ skinUploading ? tr('skinUploading') : tr('skinUpload') }}</button></div>
           <input ref="skinFileInput" class="skin-file-input" type="file" accept=".wskin,application/zip" @change="onSkinFileChanged" />
           <div class="alert info skin-library-scope"><Icon name="info" :size="16" /><span>{{ tr('skinLibraryScope') }}</span></div>
-          <section class="skin-default-control"><div><strong>{{ tr('skinDefault') }}</strong><p>{{ tr('skinDefaultLead') }}</p></div><select v-model="skinDefaultId" :disabled="skinLoading || skinDefaultSaving" :aria-label="tr('skinDefault')" @change="saveSkinDefault"><option v-for="skin in enabledSkinEntries" :key="skin.id" :value="skin.id">{{ skinName(skin) }}</option></select></section>
+          <section class="skin-default-control"><div><strong>{{ tr('skinDefault') }}</strong><p>{{ tr('skinDefaultLead') }}</p></div><select v-model="skinDefaultId" :disabled="skinLoading || skinBusy" :aria-label="tr('skinDefault')" @change="saveSkinDefault"><option v-for="skin in enabledSkinEntries" :key="skin.id" :value="skin.id">{{ skinName(skin) }}</option></select></section>
           <div v-if="skinManagerError" class="alert error" role="alert">{{ skinManagerError }}</div>
           <div v-if="skinManagerNotice" class="alert success" role="status">{{ skinManagerNotice }}</div>
           <div v-if="skinLoading" class="skin-library-loading"><span class="spinner"></span>{{ tr('loading') }}</div>
           <div v-else-if="skinEntries.length" class="skin-library-grid">
             <article v-for="skin in skinEntries" :key="skin.id" class="skin-library-card">
               <div class="skin-preview" :class="`skin-preview--${skin.previewKind || 'custom'}`"><img v-if="skin.previewUrl" :src="skin.previewUrl" :alt="skinName(skin)" /><span v-else><Icon :name="skin.previewKind === 'night' ? 'moon' : 'sun'" :size="28" /></span><small>v{{ skin.version }}</small><b v-if="skin.builtIn" class="skin-builtin-badge">{{ tr('skinBuiltin') }}</b></div>
-              <div class="skin-library-copy"><div class="skin-library-title"><h3>{{ skinName(skin) }}</h3><span>{{ skin.id }}</span></div><p v-if="skinDescription(skin)">{{ skinDescription(skin) }}</p><dl><div><dt>{{ tr('skinAuthor') }}</dt><dd>{{ skin.author }}</dd></div><div><dt>{{ tr('skinLicense') }}</dt><dd>{{ skin.license }}</dd></div><div><dt>{{ tr('skinMinVersion') }}</dt><dd>{{ skin.minAppVersion }}</dd></div></dl><div class="skin-library-actions"><a v-if="skin.previewUrl" :href="skin.previewUrl" target="_blank" rel="noreferrer" class="text-link">{{ tr('skinPreview') }}</a><label v-if="!skin.builtIn" class="skin-enabled-control"><span>{{ skin.enabled === false ? tr('skinDisabled') : tr('skinEnabled') }}</span><input type="checkbox" :checked="skin.enabled !== false" :disabled="updatingSkinId === skin.id" @change="toggleSkinEnabled(skin)" /></label><span v-else class="skin-protected-label">{{ tr('skinProtected') }}</span><button v-if="!skin.builtIn" class="text-danger" type="button" :disabled="removingSkinId === skin.id" @click="removeSkin(skin)">{{ removingSkinId === skin.id ? tr('skinRemoving') : tr('skinRemove') }}</button></div></div>
+              <div class="skin-library-copy"><div class="skin-library-title"><h3>{{ skinName(skin) }}</h3><span>{{ skin.id }}</span></div><p v-if="skinDescription(skin)">{{ skinDescription(skin) }}</p><dl><div><dt>{{ tr('skinAuthor') }}</dt><dd>{{ skin.author }}</dd></div><div><dt>{{ tr('skinLicense') }}</dt><dd>{{ skin.license }}</dd></div><div><dt>{{ tr('skinMinVersion') }}</dt><dd>{{ skin.minAppVersion }}</dd></div></dl><div class="skin-library-actions"><a v-if="skin.previewUrl" :href="skin.previewUrl" target="_blank" rel="noreferrer" class="text-link">{{ tr('skinPreview') }}</a><label v-if="!skin.builtIn" class="skin-enabled-control"><span>{{ skin.enabled === false ? tr('skinDisabled') : tr('skinEnabled') }}</span><input type="checkbox" :checked="skin.enabled !== false" :disabled="skinBusy" @click.prevent="toggleSkinEnabled(skin)" /></label><span v-else class="skin-protected-label">{{ tr('skinProtected') }}</span><button v-if="!skin.builtIn" class="text-danger" type="button" :disabled="skinBusy" @click="removeSkin(skin)">{{ removingSkinId === skin.id ? tr('skinRemoving') : tr('skinRemove') }}</button></div></div>
             </article>
           </div>
           <div v-else class="skin-library-empty"><span><Icon name="compass" :size="24" /></span><strong>{{ tr('skinEmpty') }}</strong><p>{{ tr('skinEmptyLead') }}</p></div>
@@ -132,32 +132,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
-import { createAdminApi, type AdminApiError as ApiError } from "../services/admin-api.js";
-import type { AdminSettings, AdminSession, ManagedInvite, AdminLog, AdminConnectionRecord } from "../../../src/shared/admin-responses.js";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { createAdminApi, isAdminRequestCancelled, type AdminApiError as ApiError } from "../services/admin-api.js";
+import type { ManagedInvite, AdminConnectionRecord } from "../../../src/shared/admin-responses.js";
 import { copy, germanCopy, russianCopy, japaneseCopy } from "../i18n/admin.js";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import Icon from "../components/Icon.vue";
 import LanguageSwitcher from "../components/LanguageSwitcher.vue";
-import { combineTeamSpeakTarget, splitTeamSpeakTarget } from "../services/teamspeak-target.js";
-import { BUILTIN_SKIN_CATALOG, type SkinCatalogEntry } from "../services/skin-catalog.js";
+import { createAdminRequests } from "../services/admin-requests.js";
+import { useAdminServerSettings } from "../composables/useAdminServerSettings.js";
+import { useAdminOperations } from "../composables/useAdminOperations.js";
+import { useAdminSkins } from "../composables/useAdminSkins.js";
+import { DEFAULT_WELCOME_TEXTS, type SiteLanguage } from "../../../src/site-copy.js";
+import type { SkinCatalogEntry } from "../services/skin-catalog.js";
 import { applyTheme, getStoredTheme, isDarkTheme, nextTheme, saveTheme, type ThemeMode } from "../services/theme.js";
 
 type Language = "zh" | "en" | "de" | "ru" | "ja";
 type Screen = "login" | "change-password" | "admin";
-type AccessMode = "fixed" | "open";
-interface ProbeState { ok: boolean; checkType?: "network" | "protocol"; passwordVerified?: boolean; latencyMs?: number; serverName?: string | null; packetLossPercent?: number; attempts?: number; successfulAttempts?: number; code?: string; errorCode?: string }
-interface RelayNodeForm { id: string; name: string; enabled: boolean; target: string; token: string; tokenAction: "keep" | "replace" | "remove"; hasToken: boolean }
-type WelcomeLanguage = "zh" | "en" | "de" | "ru" | "ja";
+type WelcomeLanguage = SiteLanguage;
 type WelcomeTextField = "welcomeText" | "welcomeTextEn" | "welcomeTextDe" | "welcomeTextRu" | "welcomeTextJa";
-
-const DEFAULT_WELCOME_TEXTS: Record<WelcomeLanguage, string> = {
-  zh: "无需安装 TeamSpeak 客户端，打开浏览器即可加入语音频道。低延迟、轻量、专注于每一次对话。",
-  en: "No TeamSpeak client installation required. Open your browser and join a voice channel with low-latency audio built for conversation.",
-  de: "Keine Installation des TeamSpeak-Clients nötig. Öffne den Browser und tritt einem Sprachkanal bei – leichtgewichtig und mit geringer Latenz.",
-  ru: "Устанавливать клиент TeamSpeak не нужно: откройте браузер и присоединитесь к голосовому каналу. Низкая задержка и удобное общение в каждом разговоре.",
-  ja: "TeamSpeak クライアントのインストールは不要です。ブラウザを開くだけで音声チャンネルに参加できます。低遅延で軽快な会話を楽しめます。",
-};
 
 const route = useRoute();
 const router = useRouter();
@@ -170,42 +163,35 @@ applyTheme(themeMode.value);
 const loading = ref(true);
 const screen = ref<Screen>("login");
 const csrfToken = ref("");
+const pageRequests = createAdminRequests();
 const adminApi = createAdminApi({
   csrfToken: () => csrfToken.value,
   onUnauthorized: () => {
+    cancelPendingWork();
+    resetPrivateState();
     csrfToken.value = "";
     if (screen.value !== "login") { screen.value = "login"; void router.replace("/admin/login"); }
   },
 });
 const submitting = ref(false);
-const testing = ref(false);
+const loggingOut = ref(false);
 const errorMessage = ref("");
 const loginUsername = ref("admin");
 const loginPassword = ref("");
 const newPassword = ref("");
 const confirmNewPassword = ref("");
-const testResult = ref<ProbeState | null>(null);
-
-const serverForm = reactive({ address: "", port: "9987", serverPassword: "", passwordAction: "keep" as "keep" | "replace" | "remove", hasPassword: false, accessMode: "fixed" as AccessMode, siteName: "WebSpeak", welcomeText: "", welcomeTextEn: "", welcomeTextDe: "", welcomeTextRu: "", welcomeTextJa: "", welcomeDefaults: { ...DEFAULT_WELCOME_TEXTS }, webRtcEnabled: false, webRtcUdpStart: 40000, webRtcUdpEnd: 40099, relayConfigured: false, relayEnabled: false, relayName: "", relayTarget: "", relayToken: "", relayTokenAction: "keep" as "keep" | "replace" | "remove", hasRelayToken: false, relaySettingsTouched: false, relayNodes: [] as RelayNodeForm[], lastTestAt: null as string | null, lastTestLatencyMs: null as number | null });
 const welcomeLanguage = ref<WelcomeLanguage>("zh");
-const overview = reactive({ gateway: { version: "", uptimeSeconds: 0 }, teamSpeak: { target: "", status: "unknown", lastTestAt: null as string | null, latencyMs: null as number | null }, sessions: { active: 0, peak: 0, limit: 100 }, recentEvents: [] as Array<{ event: string; createdAt: string }>, legacyConfigImported: false });
-const operationsLoading = ref(false);
-const terminatingSession = ref("");
-const skinFileInput = ref<HTMLInputElement | null>(null);
-const skinEntries = ref<SkinCatalogEntry[]>([]);
-const skinLoading = ref(false);
-const skinUploading = ref(false);
-const removingSkinId = ref("");
-const updatingSkinId = ref("");
-const skinDefaultId = ref("builtin.light");
-const skinDefaultSaving = ref(false);
-const enabledSkinEntries = computed(() => skinEntries.value.filter((skin) => skin.builtIn || skin.enabled !== false));
-const skinManagerError = ref("");
-const skinManagerNotice = ref("");
-const inviteForm = reactive({ channel: "", expiresInHours: 24, maxUses: 0 });
-const createdInvite = ref<{ token: string; link: string } | null>(null);
+const emptyOverview = () => ({ gateway: { version: "", uptimeSeconds: 0 }, teamSpeak: { target: "", status: "unknown", lastTestAt: null as string | null, latencyMs: null as number | null }, sessions: { active: 0, peak: 0, limit: 100 }, recentEvents: [] as Array<{ event: string; createdAt: string }>, legacyConfigImported: false });
+const overview = reactive(emptyOverview());
 const webrtcPortNoticeOpen = ref(false);
-const operations = reactive({ sessions: [] as AdminSession[], invites: [] as ManagedInvite[], diagnostics: { version: "", node: "", platform: "", arch: "", schemaVersion: 0, createdSessions: 0 }, logs: { available: false, entries: [] as AdminLog[], sessions: [] as AdminConnectionRecord[] }, audit: [] as Array<{ event: string; createdAt: string }> });
+const serverSettings = useAdminServerSettings({ api: adminApi, errorMessage, errorText, refreshOverview: loadOverview });
+const { serverForm, serverSaving, testing, testResult, loadServerSettings, saveServerSettings, testServerConnection, addRelayNode, removeRelayNode } = serverSettings;
+const adminOperations = useAdminOperations({ api: adminApi, errorMessage, errorText, tr, refreshOverview: loadOverview });
+const { operations, operationsLoading, terminatingSession, inviteSubmitting, revokingInvites, inviteForm, createdInvite,
+  loadOperations, terminateSession, createInvite, revokeInvite, copyInviteLink, downloadBackup } = adminOperations;
+const adminSkins = useAdminSkins({ api: adminApi, tr });
+const { skinFileInput, skinEntries, skinLoading, skinUploading, removingSkinId, skinDefaultId, skinBusy,
+  enabledSkinEntries, skinManagerError, skinManagerNotice, loadSkinCatalog, saveSkinDefault, toggleSkinEnabled, onSkinFileChanged, removeSkin } = adminSkins;
 
 const welcomeLanguageOptions: Array<{ value: WelcomeLanguage; label: string }> = [
   { value: "zh", label: "中文" },
@@ -258,51 +244,120 @@ const targetStatusText = computed(() => overview.teamSpeak.status === "reachable
 const webrtcPortRangeText = computed(() => `${serverForm.webRtcUdpStart}–${serverForm.webRtcUdpEnd}`);
 
 onMounted(loadAdminView);
-watch(() => [serverForm.address, serverForm.port, serverForm.serverPassword, serverForm.passwordAction], () => { if (!testing.value && screen.value === "admin") testResult.value = null; });
-watch(() => route.path, () => { if (screen.value === "admin" && route.path === "/admin/operations") void loadOperations(); else if (screen.value === "admin" && route.path === "/admin/skins") void loadSkinCatalog(); });
-
-async function loadAdminView() { loading.value = true; try { const session = await adminApi.session(); if (!session.authenticated) { screen.value = "login"; if (route.path !== "/admin/login") await router.replace("/admin/login"); } else if (session.mustChangePassword) { csrfToken.value = String(session.csrfToken || ""); screen.value = "change-password"; if (route.path !== "/admin/change-password") await router.replace("/admin/change-password"); } else { csrfToken.value = String(session.csrfToken || ""); screen.value = "admin"; if (route.path === "/admin/login" || route.path === "/admin/change-password") await router.replace("/admin"); await Promise.all([loadOverview(), loadServerSettings()]); if (route.path === "/admin/operations") await loadOperations(); if (route.path === "/admin/skins") await loadSkinCatalog(); } } catch { errorMessage.value = tr('requestFailed'); } finally { loading.value = false; } }
-async function login() { submitting.value = true; errorMessage.value = ""; try { const result = await adminApi.login(loginUsername.value, loginPassword.value); csrfToken.value = String(result.csrfToken || ""); loginPassword.value = ""; if (result.mustChangePassword) { screen.value = "change-password"; await router.replace("/admin/change-password"); } else { screen.value = "admin"; await router.replace("/admin"); await Promise.all([loadOverview(), loadServerSettings()]); } } catch (error) { errorMessage.value = errorText((error as ApiError).code); } finally { submitting.value = false; } }
-async function changePassword() { errorMessage.value = ""; if (newPassword.value.length < 12) { errorMessage.value = tr('setupPasswordShort'); return; } if (newPassword.value !== confirmNewPassword.value) { errorMessage.value = tr('setupPasswordsMismatch'); return; } submitting.value = true; try { await adminApi.changePassword(newPassword.value); newPassword.value = ""; confirmNewPassword.value = ""; screen.value = "admin"; await router.replace("/admin"); await Promise.all([loadOverview(), loadServerSettings()]); } catch (error) { errorMessage.value = errorText((error as ApiError).code); } finally { submitting.value = false; } }
-async function logout() {
+onBeforeUnmount(() => { cancelPendingWork(); resetPrivateState(); });
+watch(() => route.path, (path, previous) => {
   errorMessage.value = "";
-  try { await adminApi.logout(); }
-  catch (error) { errorMessage.value = errorText((error as ApiError).code); return; }
-  csrfToken.value = "";
-  screen.value = "login";
-  await router.replace("/admin/login");
+  pageRequests.cancel("overview");
+  if (previous === "/admin/server") serverSettings.cancelRequests();
+  if (previous === "/admin/operations") adminOperations.cancelRequests();
+  if (previous === "/admin/skins") adminSkins.cancelRequests();
+  if (screen.value !== "admin" || loading.value || submitting.value || loggingOut.value) return;
+  if (path === "/admin/operations") void loadOperations();
+  else if (path === "/admin/skins") void loadSkinCatalog();
+  else if (path === "/admin") void loadOverview();
+});
+
+function cancelPendingWork() {
+  adminApi.invalidate();
+  pageRequests.reset();
+  serverSettings.cancelRequests();
+  adminOperations.cancelRequests();
+  adminSkins.cancelRequests();
+  loading.value = false;
+  submitting.value = false;
+  loggingOut.value = false;
 }
-async function loadOverview() { Object.assign(overview, await adminApi.overview()); }
-function mapRelayNodes(value: unknown): RelayNodeForm[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const node = item as { id?: unknown; name?: unknown; enabled?: unknown; target?: unknown; hasToken?: unknown };
-    if (typeof node.id !== "string" || typeof node.name !== "string" || typeof node.target !== "string") return [];
-    return [{ id: node.id, name: node.name, enabled: node.enabled === true, target: node.target, token: "", tokenAction: "keep" as const, hasToken: node.hasToken === true }];
-  });
+function resetPrivateState() {
+  serverSettings.reset(); adminOperations.reset(); adminSkins.reset();
+  Object.assign(overview, emptyOverview());
+  loginPassword.value = ""; newPassword.value = ""; confirmNewPassword.value = "";
+  errorMessage.value = "";
+  webrtcPortNoticeOpen.value = false;
 }
-function createRelayNode(): RelayNodeForm { return { id: `relay-new-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, name: "", enabled: false, target: "", token: "", tokenAction: "replace", hasToken: false }; }
-function addRelayNode() { serverForm.relayNodes.push(createRelayNode()); serverForm.relaySettingsTouched = true; }
-function removeRelayNode(index: number) { serverForm.relayNodes.splice(index, 1); serverForm.relaySettingsTouched = true; }
-function applyServerSettings(value: AdminSettings) { const target = splitTeamSpeakTarget(value.target); Object.assign(serverForm, value, { address: target.address, port: target.port, serverPassword: "", passwordAction: "keep", welcomeTextDe: String(value.welcomeTextDe || ""), welcomeTextRu: String(value.welcomeTextRu || ""), welcomeTextJa: String(value.welcomeTextJa || ""), welcomeDefaults: { ...DEFAULT_WELCOME_TEXTS, ...(value.welcomeDefaults && typeof value.welcomeDefaults === "object" ? value.welcomeDefaults : {}) }, webRtcEnabled: value.webRtcEnabled === true, webRtcUdpStart: Number(value.webRtcUdpStart || 40000), webRtcUdpEnd: Number(value.webRtcUdpEnd || 40099), relayConfigured: value.relayConfigured === true, relayEnabled: value.relayEnabled === true, relayName: String(value.relayName || ""), relayTarget: String(value.relayTarget || ""), relayToken: "", relayTokenAction: "keep", hasRelayToken: value.hasRelayToken === true, relaySettingsTouched: false, relayNodes: mapRelayNodes(value.relayNodes) }); }
-async function loadServerSettings() { applyServerSettings(await adminApi.settings()); }
-async function loadOperations() { operationsLoading.value = true; try { const [sessions, invites, diagnostics, logs, audit] = await Promise.all([adminApi.sessions(), adminApi.invites(), adminApi.diagnostics(), adminApi.logs(), adminApi.audit()]); operations.sessions = Array.isArray(sessions.sessions) ? sessions.sessions : []; operations.invites = Array.isArray(invites.invites) ? invites.invites : []; operations.diagnostics = { version: String(diagnostics.gateway?.version || ""), node: String(diagnostics.gateway?.node || ""), platform: String(diagnostics.gateway?.platform || ""), arch: String(diagnostics.gateway?.arch || ""), schemaVersion: Number(diagnostics.database?.schemaVersion || 0), createdSessions: Number(diagnostics.sessions?.created || 0) }; operations.logs = { available: Boolean(logs.available), entries: Array.isArray(logs.entries) ? logs.entries : [], sessions: Array.isArray(logs.sessions) ? logs.sessions : [] }; operations.audit = Array.isArray(audit.events) ? audit.events : []; } catch (error) { errorMessage.value = errorText((error as ApiError).code); } finally { operationsLoading.value = false; } }
-async function loadSkinCatalog() {
-  skinLoading.value = true;
-  skinManagerError.value = "";
+function report(error: unknown) {
+  if (!isAdminRequestCancelled(error)) errorMessage.value = errorText((error as ApiError).code);
+}
+async function loadAdminData(request: { isCurrent(): boolean }) {
+  await Promise.all([loadOverview(), loadServerSettings()]);
+  if (!request.isCurrent()) return;
+  if (route.path === "/admin/operations") await loadOperations();
+  else if (route.path === "/admin/skins") await loadSkinCatalog();
+}
+async function loadAdminView() {
+  const request = pageRequests.begin("auth");
+  loading.value = true;
   try {
-    const value = await adminApi.skins();
-    const uploaded = Array.isArray(value.skins) ? value.skins as SkinCatalogEntry[] : [];
-    const protectedIds = new Set(BUILTIN_SKIN_CATALOG.map((skin) => skin.id));
-    skinEntries.value = [...BUILTIN_SKIN_CATALOG, ...uploaded.filter((skin) => !protectedIds.has(skin.id))];
-    skinDefaultId.value = typeof value.defaultSkinId === "string" ? value.defaultSkinId : "builtin.light";
-  } catch {
-    skinManagerError.value = tr("requestFailed");
-  } finally {
-    skinLoading.value = false;
-  }
+    const session = await adminApi.session(request.signal);
+    if (!request.isCurrent()) return;
+    if (!session.authenticated) {
+      resetPrivateState(); csrfToken.value = ""; screen.value = "login";
+      if (route.path !== "/admin/login") await router.replace("/admin/login");
+    } else {
+      csrfToken.value = session.csrfToken || "";
+      screen.value = session.mustChangePassword ? "change-password" : "admin";
+      if (session.mustChangePassword) await router.replace("/admin/change-password");
+      else {
+        if (route.path === "/admin/login" || route.path === "/admin/change-password") await router.replace("/admin");
+        if (request.isCurrent()) await loadAdminData(request);
+      }
+    }
+  } catch (error) { if (request.isCurrent()) report(error); }
+  finally { if (request.isCurrent()) loading.value = false; request.finish(); }
 }
+async function login() {
+  if (submitting.value) return;
+  cancelPendingWork();
+  const request = pageRequests.begin("auth");
+  submitting.value = true; errorMessage.value = "";
+  try {
+    const result = await adminApi.login(loginUsername.value, loginPassword.value, request.signal);
+    if (!request.isCurrent()) return;
+    csrfToken.value = result.csrfToken;
+    loginPassword.value = "";
+    screen.value = result.mustChangePassword ? "change-password" : "admin";
+    await router.replace(result.mustChangePassword ? "/admin/change-password" : "/admin");
+    if (request.isCurrent() && !result.mustChangePassword) await loadAdminData(request);
+  } catch (error) { if (request.isCurrent()) report(error); }
+  finally { if (request.isCurrent()) submitting.value = false; request.finish(); }
+}
+async function changePassword() {
+  if (submitting.value) return;
+  errorMessage.value = "";
+  if (newPassword.value.length < 12) { errorMessage.value = tr("setupPasswordShort"); return; }
+  if (newPassword.value !== confirmNewPassword.value) { errorMessage.value = tr("setupPasswordsMismatch"); return; }
+  const request = pageRequests.begin("auth");
+  submitting.value = true;
+  try {
+    await adminApi.changePassword(newPassword.value, request.signal);
+    if (!request.isCurrent()) return;
+    newPassword.value = ""; confirmNewPassword.value = ""; screen.value = "admin";
+    await router.replace("/admin");
+    if (request.isCurrent()) await loadAdminData(request);
+  } catch (error) { if (request.isCurrent()) report(error); }
+  finally { if (request.isCurrent()) submitting.value = false; request.finish(); }
+}
+async function logout() {
+  if (loggingOut.value) return;
+  cancelPendingWork();
+  const request = pageRequests.begin("auth");
+  loggingOut.value = true; errorMessage.value = "";
+  try {
+    await adminApi.logout(request.signal);
+    if (!request.isCurrent()) return;
+    cancelPendingWork(); resetPrivateState(); csrfToken.value = ""; screen.value = "login";
+    await router.replace("/admin/login");
+  } catch (error) { if (request.isCurrent()) report(error); }
+  finally { if (request.isCurrent()) loggingOut.value = false; request.finish(); }
+}
+async function loadOverview() {
+  const request = pageRequests.begin("overview");
+  try {
+    const result = await adminApi.overview(request.signal);
+    if (request.isCurrent()) Object.assign(overview, result);
+  } catch (error) { if (request.isCurrent()) report(error); }
+  finally { request.finish(); }
+}
+
 function skinName(skin: SkinCatalogEntry): string {
   if (skin.id === "builtin.light") return tr("skinDay");
   if (skin.id === "builtin.dark") return tr("skinNight");
@@ -315,85 +370,15 @@ function skinDescription(skin: SkinCatalogEntry): string {
   if (skin.id === "community.illusia-voice") return tr("skinIllusiaDescription");
   return skin.description || "";
 }
-async function saveSkinDefault() {
-  skinDefaultSaving.value = true;
-  skinManagerError.value = "";
-  skinManagerNotice.value = "";
-  try {
-    const result = await adminApi.setDefaultSkin(skinDefaultId.value);
-    skinDefaultId.value = typeof result.defaultSkinId === "string" ? result.defaultSkinId : "builtin.light";
-    skinManagerNotice.value = tr("skinDefaultSaved");
-  } catch {
-    skinManagerError.value = tr("operationFailed");
-    await loadSkinCatalog();
-  } finally {
-    skinDefaultSaving.value = false;
-  }
-}
-async function toggleSkinEnabled(skin: SkinCatalogEntry) {
-  updatingSkinId.value = skin.id;
-  skinManagerError.value = "";
-  skinManagerNotice.value = "";
-  try {
-    const result = await adminApi.setSkinEnabled(skin.id, skin.enabled === false);
-    const updated = result.skin as SkinCatalogEntry | undefined;
-    if (updated) Object.assign(skin, updated);
-    if (typeof result.defaultSkinId === "string") skinDefaultId.value = result.defaultSkinId;
-    skinManagerNotice.value = tr(skin.enabled === false ? "skinDisabledNotice" : "skinEnabledNotice");
-  } catch {
-    skinManagerError.value = tr("operationFailed");
-    await loadSkinCatalog();
-  } finally {
-    updatingSkinId.value = "";
-  }
-}
-async function onSkinFileChanged(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) return;
-  skinManagerError.value = "";
-  skinManagerNotice.value = "";
-  skinUploading.value = true;
-  try {
-    const result = await adminApi.uploadSkin(file, (id) => !skinEntries.value.some((entry) => entry.id === id) || window.confirm(`${tr("skinReplaceConfirm")}\n${id}`));
-    if (!result) return;
-    skinManagerNotice.value = tr("skinImported");
-    await loadSkinCatalog();
-  } catch (error) {
-    skinManagerError.value = error instanceof Error ? error.message : tr("operationFailed");
-  } finally {
-    input.value = "";
-    skinUploading.value = false;
-  }
-}
-async function removeSkin(skin: SkinCatalogEntry) {
-  if (!window.confirm(`${tr("skinConfirmRemove")}\n${skin.name} (${skin.id})`)) return;
-  removingSkinId.value = skin.id;
-  skinManagerError.value = "";
-  skinManagerNotice.value = "";
-  try {
-    await adminApi.deleteSkin(skin.id);
-    skinManagerNotice.value = tr("skinRemoved");
-    await loadSkinCatalog();
-  } catch {
-    skinManagerError.value = tr("operationFailed");
-  } finally {
-    removingSkinId.value = "";
-  }
-}
-async function terminateSession(session: AdminSession) { if (!window.confirm(tr('confirmTerminate', { nickname: session.nickname }))) return; terminatingSession.value = session.id; errorMessage.value = ""; try { await adminApi.terminateSession(session.id); await Promise.all([loadOperations(), loadOverview()]); } catch (error) { errorMessage.value = errorText((error as ApiError).code); } finally { terminatingSession.value = ""; } }
-async function createInvite() { submitting.value = true; errorMessage.value = ""; createdInvite.value = null; try { const result = await adminApi.createInvite({ channel: inviteForm.channel, expiresInHours: inviteForm.expiresInHours, maxUses: inviteForm.maxUses }); if (typeof result.token !== "string") throw new Error("INVITE_CREATE_FAILED"); createdInvite.value = { token: result.token, link: `${location.origin}/?invite=${encodeURIComponent(result.token)}` }; inviteForm.channel = ""; await loadOperations(); } catch (error) { errorMessage.value = errorText((error as ApiError).code); } finally { submitting.value = false; } }
-async function revokeInvite(invite: ManagedInvite) { if (!window.confirm(tr('confirmRevoke'))) return; try { await adminApi.revokeInvite(invite.id); await loadOperations(); } catch (error) { errorMessage.value = errorText((error as ApiError).code); } }
-async function copyInviteLink() { if (!createdInvite.value) return; try { await navigator.clipboard.writeText(createdInvite.value.link); showOperationNotice(tr('copiedLink')); } catch { errorMessage.value = tr('operationFailed'); } }
-function showOperationNotice(message: string) { errorMessage.value = message; window.setTimeout(() => { if (errorMessage.value === message) errorMessage.value = ""; }, 2200); }
-async function downloadBackup() { try { const blob = await adminApi.backup(); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `webspeak-backup-${new Date().toISOString().slice(0, 10)}.db`; anchor.click(); URL.revokeObjectURL(url); await loadOperations(); } catch (error) { errorMessage.value = errorText((error as ApiError).code); } }
-async function saveServerSettings() { submitting.value = true; errorMessage.value = ""; try { const result = await adminApi.saveSettings(serverPayload()); applyServerSettings(result.settings); await loadOverview(); } catch (error) { errorMessage.value = errorText((error as ApiError).code); } finally { submitting.value = false; } }
 function handleWebRtcToggle() { if (serverForm.webRtcEnabled) webrtcPortNoticeOpen.value = true; }
-async function testServerConnection() { await runTest({ target: combineTeamSpeakTarget(serverForm.address, serverForm.port), serverPassword: serverForm.passwordAction === "replace" ? serverForm.serverPassword : undefined, passwordAction: serverForm.passwordAction }); if (testResult.value) { await loadOverview(); serverForm.lastTestAt = new Date().toISOString(); serverForm.lastTestLatencyMs = testResult.value.ok ? (testResult.value.latencyMs ?? null) : null; } }
-function touchRelaySettings() { serverForm.relaySettingsTouched = true; }
-function serverPayload() { return { target: combineTeamSpeakTarget(serverForm.address, serverForm.port), serverPassword: serverForm.passwordAction === "replace" ? serverForm.serverPassword : undefined, passwordAction: serverForm.passwordAction, accessMode: serverForm.accessMode, siteName: serverForm.siteName, welcomeText: serverForm.welcomeText, welcomeTextEn: serverForm.welcomeTextEn, welcomeTextDe: serverForm.welcomeTextDe, welcomeTextRu: serverForm.welcomeTextRu, welcomeTextJa: serverForm.welcomeTextJa, webRtcEnabled: serverForm.webRtcEnabled, webRtcUdpStart: serverForm.webRtcUdpStart, webRtcUdpEnd: serverForm.webRtcUdpEnd, relayNodes: serverForm.relayNodes.map((node) => ({ id: node.id, name: node.name, target: node.target, enabled: node.enabled, tokenAction: node.tokenAction, ...(node.tokenAction === "replace" ? { token: node.token } : {}) })) }; }
-async function runTest(body: Parameters<typeof adminApi.probe>[0]) { testing.value = true; errorMessage.value = ""; testResult.value = null; try { testResult.value = await adminApi.probe(body); } catch (error) { testResult.value = { ok: false, code: (error as ApiError).code }; } finally { testing.value = false; } }
-async function dismissLegacyNotice() { try { await adminApi.dismissLegacyNotice(); overview.legacyConfigImported = false; } catch (error) { errorMessage.value = errorText((error as ApiError).code); } }
+async function dismissLegacyNotice() {
+  const request = pageRequests.begin("legacy-notice");
+  try {
+    await adminApi.dismissLegacyNotice(request.signal);
+    if (request.isCurrent()) overview.legacyConfigImported = false;
+  } catch (error) { if (request.isCurrent()) report(error); }
+  finally { request.finish(); }
+}
 function persistLanguage() { localStorage.setItem("webspeak:language", language.value); }
 function cycleTheme() { themeMode.value = nextTheme(themeMode.value); saveTheme(themeMode.value); }
 function formatDate(value: string | null) { return value ? new Intl.DateTimeFormat(language.value === "zh" ? "zh-CN" : language.value === "de" ? "de-DE" : language.value === "ru" ? "ru-RU" : language.value === "ja" ? "ja-JP" : "en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "—"; }
