@@ -1,23 +1,20 @@
 import { SessionAudioTransport } from "./session-audio.js";
-import { MemberAvatarLoader } from "./member-avatars.js";
+import { SessionEventCoordinator, type SessionDirectoryState } from "./session-events.js";
 import { ScreenShareCoordinator } from "./screen-share-coordinator.js";
 import { handleCommand } from "./voice-commands.js";
 import { createAudioFlowStats, snapshotAudioStats, type AudioFlowStats } from "./audio-stats.js";
 export type { AudioFlowStats } from "./audio-stats.js";
-import { mapChannelTree, normalizeDirectorySnapshot } from "./directory-view.js";
 import type { ServerMessage } from "../shared/server-messages.js";
 import { parseWebRtcClientMessage } from "../shared/webrtc.js";
-import type { ChannelInfo } from "../shared/voice-models.js";
-import type { ChannelMember as SharedChannelMember, ServerEvent as SharedServerEvent } from "../shared/voice-models.js";
+import type { ServerEvent as SharedServerEvent } from "../shared/voice-models.js";
 import { WebSocketServer, WebSocket } from "ws";
 import type { IncomingMessage, Server } from "node:http";
 import { randomUUID } from "node:crypto";
 import { isIP } from "node:net";
 import { identityFromString } from "@echosixhiya/teamspeak-client";
-import { DirectorySynchronizer } from "./directory-sync.js";
-import { TSClient, type TSClientOptions, type TSDirectorySnapshot, type TSVoiceData, type TSRawNotification } from "./ts-client.js";
+import { TSClient, type TSClientOptions } from "./ts-client.js";
 import type { Logger as LoggerType } from "../logger.js";
-import { clientConnectionFailureCode, describeTeamSpeakError, normalizeTeamSpeakError, type WebSpeakError } from "../errors.js";
+import { clientConnectionFailureCode, describeTeamSpeakError, normalizeTeamSpeakError } from "../errors.js";
 import { formatTeamSpeakTarget, teamSpeakTargetKey, type TeamSpeakTarget } from "../domain/teamspeak-target.js";
 import { JoinTicketStore, type JoinTicketPayload } from "./join-ticket.js";
 import { IdentityLeaseStore } from "./identity-lease.js";
@@ -64,10 +61,9 @@ export interface AdminSessionSummary {
   audio: AudioFlowStats;
 }
 
-type ChannelMember = SharedChannelMember & { uid: string };
 type ServerEvent = SharedServerEvent & { kind: "joined" | "left" | "moved" | "poke" | "connection" };
 
-interface WebClientEntry {
+interface WebClientEntry extends SessionDirectoryState {
   id: string;
   session: ManagedSession;
   tsClient: TSClient;
@@ -80,14 +76,9 @@ interface WebClientEntry {
   acceleration?: AccelerationRelayOptions;
   identityLeaseKey?: string;
   webrtcPublicHost?: string;
-  channelTree: ChannelInfo[];
-  members: Map<number, ChannelMember>;
-  avatarCache: Map<string, string | null>;
-  avatarLoader: MemberAvatarLoader | null;
+  events: SessionEventCoordinator | null;
   eventLog: ServerEvent[];
   audioTransport: SessionAudioTransport | null;
-  whisperTargetIds: Set<number>;
-  whisperActive: boolean;
   isAlive: boolean;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   audio: AudioFlowStats;
@@ -214,7 +205,7 @@ export class VoiceBridge {
         channelTree: [],
         members: new Map(),
         avatarCache: new Map(),
-        avatarLoader: null,
+        events: null,
         eventLog: [],
         audioTransport: null,
         whisperTargetIds: new Set(),
@@ -230,7 +221,6 @@ export class VoiceBridge {
       };
       this.entries.set(entryId, entry!);
       let tsReady = false;
-      let selfId = 0;
       const sendJson = (message: ServerMessage) => {
         if (this.entries.get(entryId) === entry && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
       };
@@ -239,7 +229,7 @@ export class VoiceBridge {
           audio: entry.audio, socket: ws, client: tsClient,
           isCurrent: () => this.entries.get(entryId) === entry,
           isReady: () => tsReady && session.state === "connected",
-          selfId: () => selfId,
+          selfId: () => entry!.events?.selfId ?? 0,
           peer: () => entry!.webrtc,
           whisperTargets: () => entry!.whisperActive ? [...entry!.whisperTargetIds] : null,
           sendJson: message => sendJson(message),
@@ -250,30 +240,10 @@ export class VoiceBridge {
         return;
       }
 
-      let selfChannelId = 0n;
       let initialStateSent = false;
-      let audioReady = true;
-      let realtimeReady = false;
       let hasConnectedOnce = false;
-      // Set when the server kicks or bans this client. The kick and the transport
-      // drop can arrive in either order, so the reason is parked here and consumed
-      // by whichever handler runs second.
-      let pendingKickReason: WebSpeakError | null = null;
       let reconnectStartedAt = 0;
       let reconnectAttempt = 0;
-      const directory = new DirectorySynchronizer();
-      const avatarLoader = new MemberAvatarLoader({
-        members: entry.members,
-        cache: entry.avatarCache,
-        isCurrent: () => this.entries.get(entryId) === entry && tsReady && session.state === "connected",
-        load: (id, uid) => tsClient.getClientAvatar(id, uid),
-        publish: (id, uid, avatar) => sendJson({ type: "memberAvatar", id, uid, avatar }),
-        onError: (clientId, uid, error) => this.logger.debug({
-          entryId, clientId, uid, err: error instanceof Error ? error.message : String(error),
-        }, "TeamSpeak client avatar unavailable"),
-      });
-      entry.avatarLoader = avatarLoader;
-
       const addServerEvent = (kind: ServerEvent["kind"], message: string) => {
         const event: ServerEvent = {
           id: `event-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
@@ -285,56 +255,11 @@ export class VoiceBridge {
         if (entry!.eventLog.length > 200) entry!.eventLog.splice(0, entry!.eventLog.length - 200);
         if (initialStateSent) sendJson({ type: "serverEvent", event });
       };
-      const refreshDirectory = () => {
-        const snapshot = directory.getSnapshot();
-        if (!snapshot) return;
-        const previousWhisperTargets = [...entry!.whisperTargetIds].sort((a, b) => a - b);
-        const effectiveSelfId = selfId || tsClient.getClientId();
-        const sdkChannelId = tsClient.getChannelId();
-        if (selfChannelId === 0n && sdkChannelId !== 0n) selfChannelId = sdkChannelId;
-        const normalizedSnapshot = normalizeDirectorySnapshot(snapshot, effectiveSelfId, selfChannelId, nickname, channelName);
-        entry!.channelTree = mapChannelTree(normalizedSnapshot, entry!.avatarCache);
-        entry!.members.clear();
-        for (const client of normalizedSnapshot.clients) {
-          const avatar = client.uid ? entry!.avatarCache.get(client.uid) : undefined;
-          entry!.members.set(client.id, {
-            id: client.id,
-            nickname: client.nickname,
-            uid: client.uid,
-            ...(avatar ? { avatar } : {}),
-            away: client.away,
-            awayMessage: client.awayMessage,
-            inputMuted: client.inputMuted,
-            outputMuted: client.outputMuted,
-            channelCommander: client.channelCommander,
-          });
-        }
-        for (const clientId of entry!.whisperTargetIds) {
-          if (!entry!.members.has(clientId) || clientId === effectiveSelfId) entry!.whisperTargetIds.delete(clientId);
-        }
-        if (!entry!.whisperTargetIds.size) entry!.whisperActive = false;
-        const nextWhisperTargets = [...entry!.whisperTargetIds].sort((a, b) => a - b);
-        if (initialStateSent && (previousWhisperTargets.length !== nextWhisperTargets.length || previousWhisperTargets.some((clientId, index) => clientId !== nextWhisperTargets[index]))) {
-          sendJson({ type: "whisperTargets", targetIds: nextWhisperTargets, active: entry!.whisperActive });
-        }
-      };
-      const trackChannelEvents = (previous: unknown[], next: unknown[]) => {
-        if (!initialStateSent) return;
-        const before = new Map(previous.filter(isChannelRecord).map((channel) => [channel.id, channel]));
-        const after = new Map(next.filter(isChannelRecord).map((channel) => [channel.id, channel]));
-        for (const channel of after.values()) {
-          if (!before.has(channel.id)) addServerEvent("joined", `频道「${channel.name}」已创建`);
-          else if (before.get(channel.id)?.name !== channel.name) addServerEvent("moved", `频道已重命名为「${channel.name}」`);
-        }
-        for (const channel of before.values()) if (!after.has(channel.id)) addServerEvent("left", `频道「${channel.name}」已删除`);
-      };
       const sendInitialState = () => {
-        if (initialStateSent || !tsReady || !directory.ready || !realtimeReady || !audioReady || session.state !== "syncing") return;
+        if (initialStateSent || !tsReady || !events.ready || session.state !== "syncing") return;
         initialStateSent = true;
         const wasReconnecting = hasConnectedOnce;
         hasConnectedOnce = true;
-        // A previous kick reason never applies to a fresh, successful session.
-        pendingKickReason = null;
         reconnectAttempt = 0;
         reconnectStartedAt = 0;
         if (!wasReconnecting) {
@@ -350,7 +275,7 @@ export class VoiceBridge {
         session.transition("connected");
         sendJson({
           type: "connected",
-          tsClientId: selfId,
+          tsClientId: events.selfId,
           members: Array.from(entry!.members.values()),
           serverEventLog: entry!.eventLog,
           whisperTargetIds: [...entry!.whisperTargetIds],
@@ -362,21 +287,14 @@ export class VoiceBridge {
         });
         sendJson({ type: "channelList", channels: entry!.channelTree });
         if (wasReconnecting) sendJson({ type: "reconnected" });
-        avatarLoader.schedule();
+        events.scheduleAvatars();
       };
 
       const resetDirectoryForReconnect = () => {
         tsReady = false;
-        avatarLoader.reset();
+        events.reset();
         void this.stopWebRtc(entry!);
         initialStateSent = false;
-        selfId = 0;
-        selfChannelId = 0n;
-        directory.clear();
-        entry!.channelTree = [];
-        entry!.members.clear();
-        entry!.whisperTargetIds.clear();
-        entry!.whisperActive = false;
       };
 
       const failReconnect = (normalized: ReturnType<typeof normalizeTeamSpeakError>) => {
@@ -433,14 +351,7 @@ export class VoiceBridge {
           if (session.state !== "authenticating") return;
           session.transition("syncing");
           tsReady = true;
-          selfId = tsClient.getClientId();
-          const sdkChannelId = tsClient.getChannelId();
-          if (sdkChannelId !== 0n) selfChannelId = sdkChannelId;
-          refreshDirectory();
-          if (selfId > 0 && !entry!.members.has(selfId)) {
-            directory.applyClientEnter({ id: selfId, nickname, channelID: selfChannelId, uid: "", type: 1, serverGroups: [] });
-            refreshDirectory();
-          }
+          events.syncSelf();
           sendInitialState();
           void this.screenShares.discoverExistingStreams(entry!);
         } catch (error: unknown) {
@@ -480,129 +391,45 @@ export class VoiceBridge {
         }
       };
 
-      // Register every directory listener before connect(). Events emitted by
-      // the welcome flow are queued by DirectorySynchronizer until its
-      // snapshot establishes the baseline.
-      realtimeReady = true;
-      tsClient.on("directorySnapshot", (snapshot: TSDirectorySnapshot) => {
-        const previousChannels = entry!.channelTree;
-        directory.applySnapshot(snapshot);
-        refreshDirectory();
-        trackChannelEvents(previousChannels, entry!.channelTree);
-        sendInitialState();
-        if (tsReady && initialStateSent) sendJson({ type: "channelList", channels: entry!.channelTree });
-        avatarLoader.schedule();
+      const events = new SessionEventCoordinator({
+        state: entry, client: tsClient, nickname, requestedChannel: channelName,
+        isCurrent: () => this.entries.get(entryId) === entry && session.state !== "disconnecting" && session.state !== "idle" && session.state !== "failed",
+        acceptsDirectory: () => session.state === "authenticating" || session.state === "syncing" || session.state === "connected",
+        isPublished: () => tsReady && initialStateSent,
+        isConnected: () => tsReady && session.state === "connected",
+        sendJson, addEvent: addServerEvent, onDirectoryReady: sendInitialState,
+        onClientLeave: id => {
+          this.screenShares.onClientLeave(entry!, id);
+          entry!.webrtc?.setMemberVolume(id, 1);
+        },
+        onClientMove: (id, channelId) => this.screenShares.onClientMove(entry!, id, channelId),
+        onNotification: notification => this.screenShares.handleNotification(entry!, notification),
+        onVoice: data => entry!.audioTransport?.receiveTeamSpeak(data),
+        onAvatarError: (clientId, uid, error) => this.logger.debug({
+          entryId, clientId, uid, err: error instanceof Error ? error.message : String(error),
+        }, "TeamSpeak client avatar unavailable"),
+        onKick: kick => {
+          // A transport drop may arrive first and already start recovery. A
+          // subsequent kick is still terminal and must cancel that recovery.
+          if (!hasConnectedOnce) return;
+          resetDirectoryForReconnect();
+          const failureCode = clientConnectionFailureCode(kick, serverPassword);
+          const failureDetail = publicFailureDetail(kick);
+          entry!.connectionFailureCode = failureCode;
+          this.logger.warn({ entryId, code: failureCode, normalizedCode: kick.code, failureDetail: describeTeamSpeakError(kick) }, "TeamSpeak session ended by kick/ban");
+          sendJson({ type: "connectionFailed", code: failureCode, ...(failureDetail ? { detail: failureDetail } : {}) });
+          void this.teardown(entryId, "teamSpeak-kicked");
+        },
+        onDisconnect: error => {
+          if (!hasConnectedOnce || session.state !== "connected") return;
+          this.screenShares.removePeer(entryId);
+          resetDirectoryForReconnect();
+          const normalized = error ? normalizeTeamSpeakError(error) : null;
+          sendJson({ type: "disconnected", recoverable: isRecoverable(normalized) });
+          scheduleReconnect(normalized);
+        },
       });
-
-      tsClient.on("clientEnter", (info) => {
-        const candidateSelfId = tsClient.getClientId();
-        if (candidateSelfId > 0 && info.id === candidateSelfId) {
-          selfId = candidateSelfId;
-          if (info.channelID !== undefined && info.channelID !== 0n) selfChannelId = info.channelID;
-        }
-        const wasKnown = entry!.members.has(info.id);
-        directory.applyClientEnter(info);
-        refreshDirectory();
-        if (tsReady && initialStateSent) {
-          sendJson({ type: "channelList", channels: entry!.channelTree });
-          if (!wasKnown) sendJson({ type: "memberEnter", id: info.id, nickname: info.nickname, uid: info.uid, isSelf: info.id === selfId });
-          if (!wasKnown && info.id !== selfId) addServerEvent("joined", `${info.nickname || "未知用户"} 加入了服务器`);
-          avatarLoader.schedule();
-        }
-      });
-
-      tsClient.on("clientLeave", (info) => {
-        this.screenShares.onClientLeave(entry!, info.id);
-        const wasKnown = entry!.members.has(info.id);
-        const leavingMember = entry!.members.get(info.id);
-        entry!.webrtc?.setMemberVolume(info.id, 1);
-        directory.applyClientLeave(info.id);
-        refreshDirectory();
-        if (tsReady && initialStateSent && wasKnown) {
-          sendJson({ type: "memberLeave", id: info.id });
-          sendJson({ type: "channelList", channels: entry!.channelTree });
-          if (info.id !== selfId) addServerEvent("left", `${leavingMember?.nickname || "用户"} 离开了服务器`);
-        }
-      });
-
-      tsClient.on("clientMoved", (info) => {
-        if (info.targetChannelID === undefined || info.targetChannelID === 0n) return;
-        this.screenShares.onClientMove(entry!, info.id, info.targetChannelID);
-        const movedMember = entry!.members.get(info.id);
-        if (info.id === selfId) selfChannelId = info.targetChannelID;
-        directory.applyClientMoved(info.id, info.targetChannelID);
-        refreshDirectory();
-        if (tsReady && initialStateSent) {
-          sendJson({ type: "channelList", channels: entry!.channelTree });
-          if (info.id !== selfId) addServerEvent("moved", `${movedMember?.nickname || "用户"} 移动到了其他频道`);
-        }
-      });
-
-      tsClient.on("clientUpdated", (info) => {
-        directory.applyClientUpdated(info);
-        refreshDirectory();
-        if (tsReady && initialStateSent) sendJson({ type: "channelList", channels: entry!.channelTree });
-      });
-
-      tsClient.on("rawNotification", (notification: TSRawNotification) => {
-        this.screenShares.handleNotification(entry!, notification);
-      });
-
-      tsClient.on("voiceData", (data: TSVoiceData) => entry!.audioTransport?.receiveTeamSpeak(data));
-
-      tsClient.on("textMessage", (message) => {
-        const scope = message.targetMode === 1 ? "private" : message.targetMode === 3 ? "server" : message.targetMode === 2 ? "channel" : "server";
-        const targetId = message.targetId ?? 0n;
-        // TeamSpeak channel notifications omit `target`; the SDK represents
-        // that as 0. Bind the broadcast to this session's current channel so
-        // it remains visible now but cannot leak into another channel after a
-        // later channel switch.
-        const effectiveTargetId = scope === "channel" && targetId === 0n ? tsClient.getChannelId() : targetId;
-        sendJson({
-          type: "chatMessage",
-          scope,
-          ...(effectiveTargetId !== 0n ? { targetId: String(effectiveTargetId) } : {}),
-          senderUid: message.invokerUid,
-          timestamp: Date.now(),
-          invokerName: message.invokerName,
-          invokerId: message.invokerId,
-          message: message.message,
-        });
-      });
-
-      tsClient.on("poked", (event) => {
-        sendJson({ type: "pokeReceived", invokerId: event.invokerID, invokerUid: event.invokerUID, invokerName: event.invokerName, message: event.message, timestamp: Date.now() });
-        addServerEvent("poke", `${event.invokerName || "用户"} 戳了你一下`);
-      });
-
-      // 被踢/封禁对本会话是终态：把服务器给出的原因回放给浏览器并拆除会话，
-      // 而不是像以前那样因原因被丢弃而反复重连、再次撞上同一踢出。
-      // A kick or ban is terminal for this session: replay the reason the server
-      // sent instead of reconnecting, which is what used to happen once the reason
-      // message was dropped (the browser kept retrying straight into the kick).
-      tsClient.on("kicked", (kick: WebSpeakError) => {
-        if (!hasConnectedOnce || session.state !== "connected") return;
-        pendingKickReason = kick;
-        resetDirectoryForReconnect();
-        const failureCode = clientConnectionFailureCode(kick, serverPassword);
-        const failureDetail = publicFailureDetail(kick);
-        entry!.connectionFailureCode = failureCode;
-        this.logger.warn({ entryId, code: failureCode, normalizedCode: kick.code, failureDetail: describeTeamSpeakError(kick) }, "TeamSpeak session ended by kick/ban");
-        sendJson({ type: "connectionFailed", code: failureCode, ...(failureDetail ? { detail: failureDetail } : {}) });
-        void this.teardown(entryId, "teamSpeak-kicked");
-      });
-
-      tsClient.on("disconnected", (error?: Error) => {
-        if (!hasConnectedOnce || session.state !== "connected") return;
-        this.screenShares.removePeer(entryId);
-        resetDirectoryForReconnect();
-        // Prefer a kick reason over the generic transport error that follows it,
-        // regardless of which of the two events arrives first.
-        const normalized = pendingKickReason ?? (error ? normalizeTeamSpeakError(error) : null);
-        pendingKickReason = null;
-        sendJson({ type: "disconnected", recoverable: isRecoverable(normalized) });
-        scheduleReconnect(normalized);
-      });
+      entry.events = events;
 
       ws.on("pong", () => { if (entry) entry.isAlive = true; });
       ws.on("message", (data: Buffer | string, isBinary: boolean) => {
@@ -750,8 +577,8 @@ export class VoiceBridge {
   private async cleanupEntry(entry: WebClientEntry, reason: SessionTeardownReason): Promise<void> {
     this.screenShares.removePeer(entry.id);
     if (this.entries.get(entry.id) === entry) this.entries.delete(entry.id);
-    entry.avatarLoader?.close();
-    entry.avatarLoader = null;
+    entry.events?.close();
+    entry.events = null;
     if (entry.reconnectTimer) {
       clearTimeout(entry.reconnectTimer);
       entry.reconnectTimer = null;
@@ -763,7 +590,6 @@ export class VoiceBridge {
     entry.whisperActive = false;
     entry.channelTree = [];
     entry.members.clear();
-    entry.tsClient.removeAllListeners();
     try { await entry.tsClient.disconnect(); } catch { /* disconnect is intentionally idempotent */ }
     // Preserve WebSocketServer's close listener, which removes this socket
     // from its clients set and allows server shutdown to finish.
@@ -953,8 +779,4 @@ function normalizeWebRtcHost(value: string | undefined): string | undefined {
 
 function sendProtocolError(sendJson: (message: ServerMessage) => void, code: string, message: string): void {
   sendJson({ type: "error", error: { code, message, recoverable: false } });
-}
-
-function isChannelRecord(value: unknown): value is { id: string; name: string } {
-  return Boolean(value) && typeof value === "object" && typeof (value as { id?: unknown }).id === "string" && typeof (value as { name?: unknown }).name === "string";
 }

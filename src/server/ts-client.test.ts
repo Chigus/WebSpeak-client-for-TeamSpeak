@@ -108,3 +108,31 @@ test("a retired SDK client's disconnect cannot invalidate a current avatar reque
   assert.deepEqual(await result, { cacheKey: "marker", data: Buffer.from("GIF89a") });
   assert.equal(replacement.downloaded, 1);
 });
+
+const retiredEvents: Array<[string, unknown]> = [
+  ["voiceData", { clientId: 2, codec: 4, data: Buffer.from([1]) }],
+  ["directorySnapshot", { channels: [], clients: [] }],
+  ["rawNotification", { name: "notification", params: {} }],
+  ["textMessage", { invokerName: "Member", invokerID: 2, invokerUID: "uid", targetMode: 2, targetID: 1n, message: "Message" }],
+  ["poked", { invokerName: "Member", invokerID: 2, invokerUID: "uid", message: "Poke" }],
+  ["clientEnter", { id: 2, nickname: "Member", uid: "uid", channelID: 1n, type: 1, serverGroups: [] }],
+  ["clientLeave", { id: 2, reasonID: 4 }],
+  ["clientMoved", { id: 2, targetChannelID: 2n }],
+  ["clientUpdated", { info: { id: 2, inputMuted: true } }],
+  ["kicked", "Removed"],
+];
+
+for (const [name, payload] of retiredEvents) {
+  test(`a retired SDK client's ${name} event cannot reach its replacement session`, () => {
+    const f = fixture();
+    const replacement = new SdkStub();
+    f.state.client = replacement;
+    f.state.attachClientListeners(replacement);
+    const observed: unknown[] = [];
+    f.client.on(name, data => observed.push(data));
+    f.sdk.emit(name, payload);
+    assert.equal(observed.length, 0);
+    replacement.emit(name, payload);
+    assert.equal(observed.length, 1);
+  });
+}

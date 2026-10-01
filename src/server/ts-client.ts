@@ -236,6 +236,7 @@ export class TSClient extends EventEmitter {
 
   private attachClientListeners(client: TS3FullClient): void {
     client.on("voiceData", (data: VoiceData) => {
+      if (this.client !== client) return;
       this.emit("voiceData", {
         clientId: data.clientId,
         codec: data.codec,
@@ -247,6 +248,7 @@ export class TSClient extends EventEmitter {
     // client welcome sequence. The connect path also reconciles this event
     // stream with a complete client-protocol snapshot.
     client.on("directorySnapshot", (snapshot) => {
+      if (this.client !== client) return;
       this.emit("directorySnapshot", {
         channels: snapshot.channels.slice(),
         clients: snapshot.clients.slice(),
@@ -254,6 +256,7 @@ export class TSClient extends EventEmitter {
     });
 
     client.on("rawNotification", (notification: RawNotification) => {
+      if (this.client !== client) return;
       this.emit("rawNotification", {
         name: notification.name,
         params: { ...notification.params },
@@ -261,10 +264,12 @@ export class TSClient extends EventEmitter {
     });
 
     client.on("textMessage", (msg) => {
+      if (this.client !== client) return;
       this.emit("textMessage", toTSChatMessage(msg));
     });
 
     client.on("poked", (event) => {
+      if (this.client !== client) return;
       this.emit("poked", event);
     });
 
@@ -286,10 +291,12 @@ export class TSClient extends EventEmitter {
     });
 
     client.on("clientEnter", (info) => {
+      if (this.client !== client) return;
       this.emit("clientEnter", info);
     });
 
     client.on("clientLeave", (info) => {
+      if (this.client !== client) return;
       // 仅记录本客户端的踢出(4)/踢出并封禁(5)退出原因，供 kicked 事件区分普通踢出与封禁
       if (info.id === this.clientId && (info.reasonID === 4 || info.reasonID === 5)) this.selfLeaveReasonId = info.reasonID;
       this.emit("clientLeave", info);
@@ -302,17 +309,20 @@ export class TSClient extends EventEmitter {
     // this listener the reason was dropped, so the browser degraded to a generic
     // "connection failed" right after the transport went away.
     client.on("kicked", (reasonMsg) => {
+      if (this.client !== client) return;
       const reasonId = this.selfLeaveReasonId;
       this.selfLeaveReasonId = null;
       this.emit("kicked", normalizeTeamSpeakKickedReason(reasonMsg, reasonId));
     });
 
     client.on("clientMoved", (info) => {
+      if (this.client !== client) return;
       if (info.id === this.clientId && info.targetChannelID !== 0n) this.preferredChannelId = info.targetChannelID;
       this.emit("clientMoved", info);
     });
 
     client.on("clientUpdated", (event) => {
+      if (this.client !== client) return;
       this.emit("clientUpdated", event.info);
     });
   }

@@ -8,6 +8,7 @@ import pino from "pino";
 import { VoiceBridge } from "./voice-bridge.js";
 import { JoinTicketStore } from "./join-ticket.js";
 import { OpusEncoder } from "./opus-codec.js";
+import { normalizeTeamSpeakKickedReason } from "../errors.js";
 import type { TSClient, TSClientAvatar, TSDirectorySnapshot } from "./ts-client.js";
 import type { AudioFlowStats } from "./audio-stats.js";
 import type { WebRtcAudioSession } from "./webrtc-audio.js";
@@ -67,6 +68,7 @@ async function fixture(t: TestContext, overrides: {
   const entries = (bridge as unknown as { entries: Map<string, {
     id: string; ws: WebSocket; audio: AudioFlowStats; webrtc: WebRtcAudioSession | null;
     isAlive: boolean; avatarCache: Map<string, string | null>;
+    members: Map<number, { id: number; uid: string }>; eventLog: unknown[];
   }> }).entries;
   return { bridge, sdk, socket, messages, entries, wss };
 }
@@ -191,3 +193,49 @@ test("an interrupted SDK connection invalidates its pending avatar results", { t
   assert.equal(f.entry.avatarCache.size, 0);
   assert.deepEqual(f.calls, [2]);
 });
+
+test("late directory callbacks cannot refill a session while its peer is closing", { timeout: 5_000 }, async t => {
+  const f = await fixture(t);
+  const entry = [...f.entries.values()][0]!;
+  const onEnter = f.sdk.listeners("clientEnter")[0]!;
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  entry.webrtc = { close: () => pending, getStats: () => ({}) } as unknown as WebRtcAudioSession;
+  const closing = f.bridge.terminateSession(entry.id);
+  try {
+    onEnter({ id: 9, uid: "", nickname: "Late", channelID: 1n, type: 1, serverGroups: [] });
+    assert.equal(entry.members.has(9), false);
+  } finally {
+    release();
+    await closing;
+  }
+});
+
+test("directory snapshots during reconnect backoff cannot leak members into the next connection", { timeout: 5_000 }, async t => {
+  const f = await fixture(t);
+  const entry = [...f.entries.values()][0]!;
+  const reconnected = new Promise<void>(resolve => {
+    f.socket.on("message", (data, binary) => { if (!binary && JSON.parse(data.toString()).type === "reconnected") resolve(); });
+  });
+  f.sdk.emit("disconnected");
+  f.sdk.emit("directorySnapshot", { channels: [], clients: [{ id: 9, uid: "", nickname: "Stale", channelID: 1n, type: 1, serverGroups: [] }] });
+  await reconnected;
+  assert.equal(entry.members.has(9), false);
+});
+
+for (const order of ["kick-first", "disconnect-first"] as const) {
+  test(`a kick remains terminal when notifications arrive ${order}`, { timeout: 5_000 }, async t => {
+    const f = await fixture(t);
+    const kick = normalizeTeamSpeakKickedReason("Removed by operator", 4);
+    if (order === "disconnect-first") f.sdk.emit("disconnected");
+    f.sdk.emit("kicked", kick);
+    if (order === "kick-first") f.sdk.emit("disconnected");
+    await nextTurn();
+    assert.equal(f.bridge.getActiveCount(), 0);
+    if (f.socket.readyState !== WebSocket.CLOSED) await once(f.socket, "close");
+    const failures = f.messages.filter(message => !message.binary).map(message => JSON.parse(message.data.toString())).filter(message => message.type === "connectionFailed");
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0].code, "KICKED");
+    assert.match(failures[0].detail, /Removed by operator/);
+  });
+}

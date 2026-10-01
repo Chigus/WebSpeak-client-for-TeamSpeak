@@ -11,6 +11,7 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 | `src/server/voice-bridge.ts` | `/ws/voice`, admission, connection/reconnection orchestration and voice transport assembly |
 | `src/server/voice-commands.ts`, `directory-view.ts`, `audio-stats.ts` | Command execution, public directory projection and diagnostic snapshots |
 | `src/server/member-avatars.ts` | Generation-bound optional avatar downloads, bounded sequential batches, cached images and timer cleanup |
+| `src/server/session-events.ts` | Session-owned SDK subscriptions, directory projection, self/channel state, chat mapping and avatar coordination |
 | `src/server/screen-share-coordinator.ts` | Server/channel-scoped sharing membership and browser/native signaling |
 | `src/shared/` | Browser-safe wire types and runtime parsers shared by both endpoints |
 | `src/shared/admin-inputs.ts`, `admin-responses.ts` | Shared admin request types and runtime-checked response projections |
@@ -41,6 +42,8 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 4. Register TeamSpeak event listeners before connecting: directory and membership events may arrive during the handshake.
 
 Channel and member data come from SDK directory snapshots and client-protocol commands, followed by realtime notifications. WebQuery and its API key are not required. `DirectorySynchronizer` reconciles snapshots with membership events.
+
+`SessionEventCoordinator` subscribes before SDK connection and closes before waiting for peer shutdown. Remove only its own listeners and guard captured callbacks as well as registered ones. Directory events are accepted during authentication, synchronization and the live connection, but not reconnect backoff. SDK adapter listeners must reject events from a replaced client before mutating state or forwarding them. A kick remains terminal if the disconnect notification already started recovery.
 
 Avatar downloads belong to the connected directory generation. Reset them on SDK interruption and close them before awaiting session teardown. Old success or failure results cannot refill caches, publish images, start another download, or unlock newer work. `isAlive` is only the WebSocket heartbeat acknowledgement flag; it is not a lifecycle predicate. Keep avatar failure optional, the 50-member batch limit and 250 ms continuation delay.
 
