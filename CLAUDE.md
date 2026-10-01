@@ -22,6 +22,7 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 | `web/src/voice/screen-share.ts` | Per-session screen capture, peer negotiation, cleanup and diagnostics |
 | `web/src/voice/remote-playback.ts` | Per-speaker compatibility decoding, bounded scheduling, volume and resource cleanup |
 | `web/src/voice/microphone-test.ts` | Cancellable recording tests, recorder deadline and playback URL ownership |
+| `web/src/voice/audio-sink.ts` | Serialized device routing per audio endpoint, with stale-operation guards |
 | `web/src/platform/` | Browser mounting and cancellable Android gateway readiness handshake |
 | `web/src/services/`, `web/src/i18n/`, `web/src/skins/` | Browser persistence, identity import, skin packages and translations |
 | `web/src/services/admin-api.ts` | Admin HTTP transport, response validation, current CSRF and authentication-expiry notification, including skin uploads and backup downloads |
@@ -55,6 +56,10 @@ Preserve bounded audio buffering and stale-playback recovery. Audio counters sta
 Remote playback owns each speaker's decoder, gain and source nodes as one resource set. Member departure, decoder failure and session teardown release that set; queued callbacks must not touch its replacement. Preserve the 80 ms playback window and three-frame decoder queue threshold unless audio validation justifies changing them.
 
 Microphone recording tests own their recorder, timeout and object URL, while the capture layer owns the microphone stream. A normal stop may publish its final recording; replacement and session teardown discard late results and revoke the old URL. Stopping a test while connected must preserve room capture. Test cancellation and stale permission failures must not change a newer test's state.
+
+Device and noise-suppression changes share one configuration operation. Persist only the last successful settings; stale failures cannot roll back a newer choice. Acquiring a replacement microphone must preserve the current WebRTC peer and compatibility PCM capture until the replacement is ready. Capture callbacks are invalidated when their graph stops, separately from permission-request generations. Closing settings also releases standalone device-preview capture when no recording was started.
+
+Serialize `setSinkId` on each audio context or media element, since an in-flight browser sink change cannot be cancelled. Bind subsequent work to the original endpoint and current operation; session teardown invalidates queued changes and device enumeration results. If one output endpoint rejects after another changed, attempt to restore the last committed output.
 
 `src/server/opus-codec.ts` loads the native `@discordjs/opus` implementation for server deployments and `opusscript` for the Android bundle. Dispose codec and media resources at the end of their owning session.
 
