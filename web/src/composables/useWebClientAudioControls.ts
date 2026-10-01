@@ -150,7 +150,9 @@ export function useWebClientAudioControls({
           ? "accompanimentNoAudio"
           : accompanimentErrorCode.value === "unsupported"
             ? "accompanimentUnsupported"
-            : "accompanimentPermissionDenied";
+            : accompanimentErrorCode.value === "audio"
+              ? "accompanimentAudioFailed"
+              : "accompanimentPermissionDenied";
       showToast(t(messageKey));
     }
   }

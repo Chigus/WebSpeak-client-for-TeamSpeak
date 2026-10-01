@@ -3,6 +3,7 @@ import { before, after, beforeEach, afterEach, test } from "node:test";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
+import { effectScope, ref } from "vue";
 
 // Exercise the actual composable and shared wire parser. Only browser/network
 // boundaries are simulated; these tests make no claim about real audio quality.
@@ -77,6 +78,8 @@ class AudioContextStub extends EventTarget {
   static processors = [];
   static sources = [];
   static gains = [];
+  static mediaSources = [];
+  static destinations = [];
   state = "running";
   currentTime = 0;
   sampleRate = 48000;
@@ -84,11 +87,17 @@ class AudioContextStub extends EventTarget {
   constructor() { super(); AudioContextStub.instances.push(this); }
   async setSinkId(id) { this.sinkId = id; }
   close() { this.state = "closed"; return Promise.resolve(); }
-  createMediaStreamSource() {
+  createMediaStreamSource(stream) {
     if (this.state === "closed") throw new Error("Audio context closed");
-    return new AudioNodeStub();
+    const node = Object.assign(new AudioNodeStub(), { stream });
+    AudioContextStub.mediaSources.push(node);
+    return node;
   }
-  createMediaStreamDestination() { return Object.assign(new AudioNodeStub(), { stream: microphoneStream() }); }
+  createMediaStreamDestination() {
+    const node = Object.assign(new AudioNodeStub(), { stream: microphoneStream() });
+    AudioContextStub.destinations.push(node);
+    return node;
+  }
   createGain() { const node = new AudioNodeStub(); AudioContextStub.gains.push(node); return node; }
   createBuffer(channels, frames, sampleRate) { return { duration: frames / sampleRate, copyToChannel() {} }; }
   createBufferSource() { const node = new AudioSourceStub(); AudioContextStub.sources.push(node); return node; }
@@ -140,6 +149,8 @@ class TestAudioElement extends EventTarget {
 
 let vite;
 let useVoiceWebSocket;
+let useWebClientAudioControls;
+let webClientTranslations;
 let voice;
 const savedGlobals = new Map();
 function replaceGlobal(name, value) {
@@ -158,6 +169,8 @@ before(async () => {
     appType: "custom",
   });
   ({ useVoiceWebSocket } = await vite.ssrLoadModule("/src/composables/useVoiceWebSocket.ts"));
+  ({ useWebClientAudioControls } = await vite.ssrLoadModule("/src/composables/useWebClientAudioControls.ts"));
+  ({ webClientTranslations } = await vite.ssrLoadModule("/src/i18n/web-client.ts"));
 });
 
 beforeEach(() => {
@@ -167,6 +180,8 @@ beforeEach(() => {
   AudioContextStub.instances.length = 0;
   AudioContextStub.sources.length = 0;
   AudioContextStub.gains.length = 0;
+  AudioContextStub.mediaSources.length = 0;
+  AudioContextStub.destinations.length = 0;
   AudioDecoderStub.instances.length = 0;
   AudioDecoderStub.failConfigure = false;
   AudioSourceStub.failStart = false;
@@ -353,8 +368,10 @@ test("stopping accompaniment while constraints are pending cancels the capture",
   const pending = voice.startAccompaniment();
   await nextTurn();
   await voice.stopAccompaniment();
+  const stateAtStop = stream.track.readyState;
   constraints.resolve();
   await pending;
+  assert.equal(stateAtStop, "ended", "cancellation must release capture before constraints settle");
   assert.equal(stream.track.readyState, "ended");
   assert.equal(voice.accompanimentActive.value, false);
 });
@@ -371,6 +388,255 @@ test("an old accompaniment ended event cannot stop the replacement track", async
   await nextTurn();
   assert.equal(current.track.readyState, "live");
   assert.equal(voice.accompanimentActive.value, true);
+});
+
+test("accompaniment allocation failure preserves the live microphone sender", async t => {
+  const { socket, peer } = await connectWebRtc();
+  const originalTrack = peer.sender.track;
+  const candidate = microphoneStream();
+  navigator.mediaDevices.getDisplayMedia = async () => candidate;
+  const context = AudioContextStub.instances.at(-1);
+  const createSource = context.createMediaStreamSource.bind(context);
+  t.mock.method(context, "createMediaStreamSource", stream => {
+    if (stream === candidate) throw new Error("Cannot allocate accompaniment source");
+    return createSource(stream);
+  });
+  await assert.rejects(voice.startAccompaniment(), /Cannot allocate/);
+  assert.equal(originalTrack.readyState, "live");
+  assert.equal(peer.sender.track, originalTrack);
+  assert.equal(candidate.track.readyState, "ended");
+  assert.equal(voice.accompanimentActive.value, false);
+  assert.equal(socket.messages.some(message => message.type === "setAccompanimentActive" && message.payload.active), false);
+});
+
+test("failed accompaniment replacement keeps the previous capture and disconnects the candidate node", async t => {
+  const { peer } = await connectWebRtc();
+  const current = microphoneStream();
+  navigator.mediaDevices.getDisplayMedia = async () => current;
+  await voice.startAccompaniment();
+  const originalTrack = peer.sender.track;
+  const candidate = microphoneStream();
+  const failedNode = new AudioNodeStub();
+  failedNode.connect = () => { throw new Error("Cannot connect accompaniment source"); };
+  navigator.mediaDevices.getDisplayMedia = async () => candidate;
+  const context = AudioContextStub.instances.at(-1);
+  const createSource = context.createMediaStreamSource.bind(context);
+  t.mock.method(context, "createMediaStreamSource", stream => stream === candidate ? failedNode : createSource(stream));
+  await assert.rejects(voice.startAccompaniment(), /Cannot connect/);
+  assert.equal(current.track.readyState, "live");
+  assert.equal(voice.accompanimentActive.value, true);
+  assert.equal(originalTrack.readyState, "live");
+  assert.equal(candidate.track.readyState, "ended");
+  assert.equal(failedNode.disconnects, 1);
+});
+
+test("starting and stopping accompaniment never ends the microphone sender track", async () => {
+  const { peer } = await connectWebRtc();
+  const originalTrack = peer.sender.track;
+  const stream = microphoneStream();
+  navigator.mediaDevices.getDisplayMedia = async () => stream;
+  await voice.startAccompaniment();
+  assert.equal(originalTrack.readyState, "live");
+  assert.equal(peer.sender.track, originalTrack);
+  await voice.stopAccompaniment();
+  assert.equal(originalTrack.readyState, "live");
+  assert.equal(peer.sender.track, originalTrack);
+  assert.equal(stream.track.readyState, "ended");
+});
+
+test("stopping accompaniment succeeds even when another output cannot be allocated", async t => {
+  const { peer } = await connectWebRtc();
+  const stream = microphoneStream();
+  navigator.mediaDevices.getDisplayMedia = async () => stream;
+  await voice.startAccompaniment();
+  const originalTrack = peer.sender.track;
+  t.mock.method(AudioContextStub.instances.at(-1), "createMediaStreamDestination", () => { throw new Error("No output available"); });
+  await voice.stopAccompaniment();
+  assert.equal(originalTrack.readyState, "live");
+  assert.equal(peer.sender.track, originalTrack);
+  assert.equal(stream.track.readyState, "ended");
+});
+
+test("disconnect releases pending accompaniment without waiting for constraints", async () => {
+  await connectWebRtc();
+  const constraints = deferred();
+  const stream = microphoneStream();
+  stream.track.applyConstraints = () => constraints.promise;
+  navigator.mediaDevices.getDisplayMedia = async () => stream;
+  const pending = voice.startAccompaniment();
+  await nextTurn();
+  voice.disconnect();
+  const stateAtDisconnect = stream.track.readyState;
+  constraints.resolve();
+  await pending;
+  assert.equal(stateAtDisconnect, "ended");
+  assert.equal(voice.accompanimentActive.value, false);
+});
+
+test("a newer accompaniment request immediately releases an older pending candidate", async () => {
+  await connectWebRtc();
+  const constraints = deferred();
+  const old = microphoneStream();
+  old.track.applyConstraints = () => constraints.promise;
+  navigator.mediaDevices.getDisplayMedia = async () => old;
+  const pending = voice.startAccompaniment();
+  await nextTurn();
+  const current = microphoneStream();
+  navigator.mediaDevices.getDisplayMedia = async () => current;
+  await voice.startAccompaniment();
+  const oldStateAtReplacement = old.track.readyState;
+  constraints.resolve();
+  await pending;
+  assert.equal(oldStateAtReplacement, "ended");
+  assert.equal(current.track.readyState, "live");
+  assert.equal(voice.accompanimentActive.value, true);
+});
+
+test("capture ended during accompaniment preparation is never announced as active", async () => {
+  const { socket } = await connectWebRtc();
+  const constraints = deferred();
+  const stream = microphoneStream();
+  stream.track.applyConstraints = () => constraints.promise;
+  navigator.mediaDevices.getDisplayMedia = async () => stream;
+  const pending = voice.startAccompaniment();
+  await nextTurn();
+  stream.track.readyState = "ended";
+  stream.track.dispatchEvent(new Event("ended"));
+  constraints.resolve();
+  await pending;
+  assert.equal(voice.accompanimentActive.value, false);
+  assert.equal(socket.messages.some(message => message.type === "setAccompanimentActive" && message.payload.active), false);
+});
+
+test("an optional content hint failure does not abandon or fail accompaniment capture", async () => {
+  await connectWebRtc();
+  const stream = microphoneStream();
+  Object.defineProperty(stream.track, "contentHint", { set() { throw new Error("Hint unavailable"); } });
+  navigator.mediaDevices.getDisplayMedia = async () => stream;
+  await voice.startAccompaniment();
+  assert.equal(voice.accompanimentActive.value, true);
+  await voice.stopAccompaniment();
+  assert.equal(stream.track.readyState, "ended");
+});
+
+test("failed initial WebRTC input allocation releases partial nodes before PCM fallback", async t => {
+  const createGain = AudioContextStub.prototype.createGain;
+  let gainCalls = 0;
+  t.mock.method(AudioContextStub.prototype, "createGain", function () {
+    if (++gainCalls === 3) throw new Error("Mixed input gain unavailable");
+    return createGain.call(this);
+  });
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1, webrtcAvailable: true });
+  await nextTurn();
+  assert.equal(TestPeer.instances[0].connectionState, "closed");
+  assert.equal(AudioContextStub.destinations[1].stream.track.readyState, "ended");
+  assert.ok(AudioContextStub.mediaSources[1].disconnects > 0);
+  assert.equal(voice.state.microphoneErrorCode, "");
+  assert.equal(voice.state.audioNoticeCode, "WEBRTC_FALLBACK");
+});
+
+test("a failing mix-node disconnect cannot prevent peer and microphone cleanup", async t => {
+  const microphone = microphoneStream();
+  navigator.mediaDevices.getUserMedia = async () => microphone;
+  const { peer } = await connectWebRtc();
+  const outputTrack = peer.sender.track;
+  t.mock.method(AudioContextStub.mediaSources[1], "disconnect", () => { throw new Error("Node already unavailable"); }, { times: 1 });
+  assert.doesNotThrow(() => voice.disconnect());
+  assert.equal(peer.connectionState, "closed");
+  assert.equal(outputTrack.readyState, "ended");
+  assert.equal(microphone.track.readyState, "ended");
+});
+
+test("audio setup failure shows a distinct accompaniment message in every language", async t => {
+  await connectWebRtc();
+  navigator.mediaDevices.getDisplayMedia = async () => microphoneStream();
+  t.mock.method(AudioContextStub.instances.at(-1), "createMediaStreamSource", () => { throw new Error("Source unavailable"); });
+  const scope = effectScope();
+  t.after(() => scope.stop());
+  for (const language of ["zh", "en", "de", "ru", "ja"]) {
+    const messages = [];
+    const translations = webClientTranslations[language];
+    const controls = scope.run(() => useWebClientAudioControls({ ...voice, settingsOpen: ref(false),
+      localizedMessage: value => value, showToast: message => messages.push(message), t: key => translations[key] }));
+    await controls.toggleAccompaniment();
+    assert.equal(voice.accompanimentErrorCode.value, "audio");
+    assert.equal(messages.at(-1), translations.accompanimentAudioFailed);
+    assert.ok(messages.at(-1));
+    assert.notEqual(messages.at(-1), translations.accompanimentPermissionDenied);
+  }
+});
+
+test("accompaniment keeps display processing off and preserves microphone mute and gain", async () => {
+  const { peer, socket } = await connectWebRtc();
+  const originalTrack = peer.sender.track;
+  const micGain = AudioContextStub.gains.at(-1);
+  voice.setInputVolume(0.4);
+  const audio = microphoneStream();
+  const video = displayStream();
+  audio.track.contentHint = "";
+  let applied, requested;
+  audio.track.applyConstraints = async value => { applied = value; throw new Error("Optional constraints unavailable"); };
+  navigator.mediaDevices.getSupportedConstraints = () => ({ restrictOwnAudio: true });
+  navigator.mediaDevices.getDisplayMedia = async options => {
+    requested = options;
+    return { getTracks: () => [audio.track, video.track], getAudioTracks: () => [audio.track], getVideoTracks: () => [video.track] };
+  };
+  await voice.startAccompaniment();
+  assert.deepEqual(applied, { autoGainControl: false, echoCancellation: false, noiseSuppression: false });
+  assert.deepEqual(requested.audio, { ...applied, restrictOwnAudio: true });
+  assert.equal(requested.selfBrowserSurface, "exclude");
+  assert.equal(requested.systemAudio, "include");
+  assert.equal(requested.windowAudio, "window");
+  assert.equal(audio.track.contentHint, "music");
+  assert.equal(video.track.readyState, "ended");
+  assert.equal(micGain.gain.value, 0.4);
+  voice.setMicrophoneMuted(true);
+  assert.equal(micGain.gain.value, 0);
+  assert.equal(audio.track.readyState, "live");
+  voice.setInputVolume(0.7);
+  assert.equal(micGain.gain.value, 0);
+  voice.setMicrophoneMuted(false);
+  assert.equal(micGain.gain.value, 0.7);
+  audio.track.readyState = "ended";
+  audio.track.dispatchEvent(new Event("ended"));
+  assert.equal(voice.accompanimentActive.value, false);
+  assert.equal(peer.sender.track, originalTrack);
+  assert.equal(originalTrack.readyState, "live");
+  assert.deepEqual(socket.messages.filter(message => message.type === "setAccompanimentActive").map(message => message.payload.active), [true, false]);
+});
+
+test("an old accompaniment permission rejection cannot change a successful replacement", async () => {
+  await connectWebRtc();
+  const permission = deferred();
+  navigator.mediaDevices.getDisplayMedia = () => permission.promise;
+  const old = voice.startAccompaniment();
+  const stream = microphoneStream();
+  navigator.mediaDevices.getDisplayMedia = async () => stream;
+  await voice.startAccompaniment();
+  permission.reject(new DOMException("Old permission denied", "NotAllowedError"));
+  await old;
+  assert.equal(voice.accompanimentActive.value, true);
+  assert.equal(voice.accompanimentErrorCode.value, "");
+  assert.equal(stream.track.readyState, "live");
+});
+
+test("a failed source selection preserves active accompaniment and disconnect clears its error", async () => {
+  const { peer } = await connectWebRtc();
+  const stream = microphoneStream();
+  navigator.mediaDevices.getDisplayMedia = async () => stream;
+  await voice.startAccompaniment();
+  const rejected = displayStream();
+  navigator.mediaDevices.getDisplayMedia = async () => rejected;
+  await assert.rejects(voice.startAccompaniment(), /no audio/);
+  assert.equal(voice.accompanimentErrorCode.value, "noAudio");
+  assert.equal(rejected.track.readyState, "ended");
+  assert.equal(stream.track.readyState, "live");
+  assert.equal(peer.sender.track.readyState, "live");
+  assert.equal(voice.accompanimentActive.value, true);
+  voice.disconnect();
+  assert.equal(voice.accompanimentActive.value, false);
+  assert.equal(voice.accompanimentErrorCode.value, "");
 });
 
 test("a rejected old WebRTC answer cannot force the new peer into fallback", async () => {

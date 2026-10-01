@@ -27,6 +27,8 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 | `web/src/voice/microphone-test.ts` | Cancellable recording tests, recorder deadline and playback URL ownership |
 | `web/src/voice/microphone-capture.ts` | Prepared microphone processing graphs, per-context worklet loading, optional RNNoise and independent PCM activation/cleanup |
 | `web/src/voice/audio-sink.ts` | Serialized device routing per audio endpoint, with stale-operation guards |
+| `web/src/voice/accompaniment.ts` | Generation-bound display-audio capture, immediate pending-capture cancellation, ended listeners and committed activity |
+| `web/src/voice/webrtc-input.ts` | Stable WebRTC sender output, microphone gain and transactional accompaniment-source attachment |
 | `web/src/platform/` | Browser mounting and cancellable Android gateway readiness handshake |
 | `web/src/services/`, `web/src/i18n/`, `web/src/skins/` | Browser persistence, identity import, skin packages and translations |
 | `web/src/services/admin-api.ts`, `admin-requests.ts` | Admin HTTP validation and cancellation, session-bound CSRF and per-feature request ownership, including skin uploads and backup downloads |
@@ -56,6 +58,10 @@ Invalidate session audio before awaiting peer closure. Each codec and track must
 Late socket messages and media permission/negotiation results must not mutate a replacement session. Screen-sharing ownership is scoped to both the TeamSpeak target and channel; another member moving channels must not stop the current user's share. Preserve these invariants when extracting the remaining audio responsibilities.
 
 WebRTC offers, answers, playback callbacks and accompaniment capture belong to the session and peer that started them. Invalidate pending negotiation on stop, reconnect or teardown before awaiting resource closure. A stale peer must not publish errors, counters or audio into its successor. Negotiation and track setup failures must restore compatibility capture without misreporting a microphone failure.
+
+Accompaniment changes keep the WebRTC sender output alive. Prepare and connect the new source before replacing the old one; a failure preserves the current microphone and accompaniment. The input mixer owns its nodes and output track, never the externally owned capture streams. Release partial allocations and continue cleanup if an individual node fails. Application audio bypasses microphone gain/denoising and retains its source level.
+
+The accompaniment controller owns both active and pending captures. Stop, disconnect and replacement immediately release candidates already returned by the browser, even while optional constraints are pending. Late permissions are stopped on arrival; ended or stale candidates cannot be published. Register ended listeners during preparation and publish activity only after attachment succeeds. Optional content hints and processing constraints may fail without losing capture; distinguish audio attachment errors from permission errors in all five languages.
 
 ## Audio and screen sharing
 

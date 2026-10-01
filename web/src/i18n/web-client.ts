@@ -118,6 +118,7 @@ export const webClientTranslations: Record<string, Record<string, string>> = {
     accompanimentNeedsWebRtc: "伴奏功能需要启用 WebRTC",
     accompanimentNoAudio: "所选来源没有可共享音频，请重新选择并勾选共享音频",
     accompanimentPermissionDenied: "无法获取伴奏音频，请允许屏幕共享并勾选共享音频",
+    accompanimentAudioFailed: "无法接入伴奏音频，请重新选择音频来源或稍后重试",
     accompanimentUnsupported: "当前浏览器不支持伴奏共享",
     screenShare: "屏幕共享",
     screenShareTitle: "屏幕共享",
@@ -504,6 +505,7 @@ export const webClientTranslations: Record<string, Record<string, string>> = {
     accompanimentNeedsWebRtc: "Accompaniment requires WebRTC",
     accompanimentNoAudio: "The selected source has no shareable audio. Select it again and enable audio sharing",
     accompanimentPermissionDenied: "Could not access accompaniment audio. Allow screen sharing and enable audio sharing",
+    accompanimentAudioFailed: "Could not add accompaniment audio. Select the audio source again or try later",
     accompanimentUnsupported: "This browser does not support accompaniment sharing",
     screenShare: "Screen sharing",
     screenShareTitle: "Screen sharing",
@@ -893,6 +895,7 @@ webClientTranslations.de = {
   accompanimentNeedsWebRtc: "Die Begleitungsfunktion benötigt WebRTC.",
   accompanimentNoAudio: "Die ausgewählte Quelle enthält kein teilbares Audio. Wähle sie erneut und aktiviere die Audiofreigabe.",
   accompanimentPermissionDenied: "Begleitungs-Audio konnte nicht abgerufen werden. Erlaube die Bildschirmfreigabe und aktiviere die Audiofreigabe.",
+  accompanimentAudioFailed: "Begleitungs-Audio konnte nicht hinzugefügt werden. Wähle die Audioquelle erneut oder versuche es später.",
   accompanimentUnsupported: "Dieser Browser unterstützt das Teilen von Begleitung nicht.",
   startScreenShare: "Bildschirm teilen",
   screenShareStarting: "Live-Stream wird gestartet",
@@ -1156,6 +1159,7 @@ webClientTranslations.de = {
 
 webClientTranslations.ru = {
   ...webClientTranslations.en,
+  accompanimentAudioFailed: "Не удалось подключить звук сопровождения. Выберите источник звука заново или повторите попытку позже.",
   themeSystem: "Системная тема",
   themeLight: "Светлая тема",
   themeDark: "Тёмная тема",
@@ -1329,6 +1333,7 @@ webClientTranslations.ru = {
 
 webClientTranslations.ja = {
   ...webClientTranslations.en,
+  accompanimentAudioFailed: "伴奏音声を追加できませんでした。音声ソースを選び直すか、後でもう一度お試しください。",
   themeSystem: "システム設定",
   themeLight: "ライトテーマ",
   themeDark: "ダークテーマ",
