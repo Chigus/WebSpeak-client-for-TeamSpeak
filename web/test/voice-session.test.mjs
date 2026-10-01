@@ -99,6 +99,7 @@ class AudioContextStub extends EventTarget {
     return node;
   }
   createGain() { const node = new AudioNodeStub(); AudioContextStub.gains.push(node); return node; }
+  createAnalyser() { throw new Error("Analyser unavailable"); }
   createBuffer(channels, frames, sampleRate) { return { duration: frames / sampleRate, copyToChannel() {} }; }
   createBufferSource() { const node = new AudioSourceStub(); AudioContextStub.sources.push(node); return node; }
   createScriptProcessor() { const node = new AudioNodeStub(); AudioContextStub.processors.push(node); return node; }
@@ -248,6 +249,25 @@ async function connectWebRtc() {
   await nextTurn();
   assert.ok(socket.messages.some(message => message.type === "webrtcOffer"));
   return { socket, peer: TestPeer.instances.at(-1) };
+}
+
+function enableMicrophoneMeter(t) {
+  const analysers = [];
+  const intervals = [];
+  const cleared = [];
+  t.mock.method(AudioContextStub.prototype, "createAnalyser", () => {
+    const analyser = Object.assign(new AudioNodeStub(), { fftSize: 512, level: 0.1, reads: 0,
+      getFloatTimeDomainData(samples) { this.reads++; samples.fill(this.level); } });
+    analysers.push(analyser);
+    return analyser;
+  });
+  t.mock.method(globalThis, "setInterval", (callback, delay) => {
+    const timer = { callback, delay };
+    intervals.push(timer);
+    return timer;
+  });
+  t.mock.method(globalThis, "clearInterval", timer => { cleared.push(timer); });
+  return { analysers, intervals, cleared };
 }
 
 test("late control messages from a replaced socket cannot change the new session", async () => {
@@ -637,6 +657,81 @@ test("a failed source selection preserves active accompaniment and disconnect cl
   voice.disconnect();
   assert.equal(voice.accompanimentActive.value, false);
   assert.equal(voice.accompanimentErrorCode.value, "");
+});
+
+test("an unavailable microphone analyser releases its partial source without failing voice", async () => {
+  const { peer } = await connectWebRtc();
+  assert.equal(AudioContextStub.mediaSources[2].disconnects, 1);
+  assert.notEqual(peer.connectionState, "closed");
+  assert.equal(peer.sender.track.readyState, "live");
+});
+
+test("a failed microphone meter connection releases all prepared meter nodes", async t => {
+  const analyser = new AudioNodeStub();
+  analyser.connect = () => { throw new Error("Meter unavailable"); };
+  t.mock.method(AudioContextStub.prototype, "createAnalyser", () => analyser);
+  const { peer } = await connectWebRtc();
+  assert.equal(AudioContextStub.mediaSources[2].disconnects, 1);
+  assert.equal(analyser.disconnects, 1);
+  assert.equal(AudioContextStub.gains.at(-1).disconnects, 1);
+  assert.equal(peer.sender.track.readyState, "live");
+});
+
+test("a queued old microphone meter tick cannot read or change a replacement session", async t => {
+  const meter = enableMicrophoneMeter(t);
+  await connectWebRtc();
+  const oldTick = meter.intervals[0].callback;
+  await connectWebRtc();
+  const current = meter.analysers.at(-1);
+  oldTick();
+  assert.equal(current.reads, 0);
+  assert.equal(voice.micLevel.value, 0);
+  assert.ok(meter.cleared.includes(meter.intervals[0]));
+});
+
+test("a microphone analyser read failure stops only the meter and clears its level", async t => {
+  const meter = enableMicrophoneMeter(t);
+  const { peer } = await connectWebRtc();
+  meter.intervals[0].callback();
+  assert.ok(voice.micLevel.value > 0);
+  meter.analysers[0].getFloatTimeDomainData = () => { throw new Error("Analyser closed"); };
+  assert.doesNotThrow(() => meter.intervals[0].callback());
+  assert.equal(voice.micLevel.value, 0);
+  assert.ok(meter.cleared.includes(meter.intervals[0]));
+  assert.equal(meter.analysers[0].disconnects, 1);
+  assert.equal(AudioContextStub.mediaSources[2].disconnects, 1);
+  assert.equal(AudioContextStub.gains.at(-1).disconnects, 1);
+  assert.notEqual(peer.connectionState, "closed");
+  assert.equal(peer.sender.track.readyState, "live");
+});
+
+test("a meter disconnect failure cannot interrupt the remaining session cleanup", async t => {
+  const meter = enableMicrophoneMeter(t);
+  const microphone = microphoneStream();
+  navigator.mediaDevices.getUserMedia = async () => microphone;
+  const { peer } = await connectWebRtc();
+  t.mock.method(AudioContextStub.mediaSources[2], "disconnect", () => { throw new Error("Meter already closed"); }, { times: 1 });
+  assert.doesNotThrow(() => voice.disconnect());
+  assert.equal(peer.connectionState, "closed");
+  assert.equal(microphone.track.readyState, "ended");
+  assert.equal(meter.analysers[0].disconnects, 1);
+  assert.equal(AudioContextStub.gains.at(-1).disconnects, 1);
+});
+
+test("microphone metering preserves its cadence and bounded level and stops on disconnect", async t => {
+  const meter = enableMicrophoneMeter(t);
+  await connectWebRtc();
+  assert.equal(meter.intervals[0].delay, 50);
+  meter.intervals[0].callback();
+  assert.ok(Math.abs(voice.micLevel.value - 0.6) < 0.00001);
+  meter.analysers[0].level = 0.8;
+  meter.intervals[0].callback();
+  assert.equal(voice.micLevel.value, 1);
+  voice.disconnect();
+  assert.equal(voice.micLevel.value, 0);
+  const reads = meter.analysers[0].reads;
+  meter.intervals[0].callback();
+  assert.equal(meter.analysers[0].reads, reads);
 });
 
 test("a rejected old WebRTC answer cannot force the new peer into fallback", async () => {

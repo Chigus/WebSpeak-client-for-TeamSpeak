@@ -5,6 +5,7 @@ export type { MicrophoneProcessingSettings } from "../voice/microphone-capture.j
 import { createAudioSinkRouter } from "../voice/audio-sink.js";
 import { createAccompaniment, type AccompanimentErrorCode } from "../voice/accompaniment.js";
 import { createWebRtcInput, type WebRtcInput } from "../voice/webrtc-input.js";
+import { createMicrophoneMeter, type MicrophoneMeter } from "../voice/microphone-meter.js";
 import { createScreenShareController } from "../voice/screen-share.js";
 export type { ScreenShareOutputSettings, ScreenShareCaptureStats, ScreenSharePeerStats, ScreenShareWebRtcStats } from "../voice/screen-share.js";
 import { parseServerMessage } from "../../../src/shared/server-messages.js";
@@ -277,10 +278,7 @@ export function useVoiceWebSocket() {
     isOpen: () => ws.value?.readyState === WebSocket.OPEN,
     send: message => ws.value?.send(JSON.stringify(message)),
   });
-  let webrtcMicMonitorSource: MediaStreamAudioSourceNode | null = null;
-  let webrtcMicMonitorAnalyser: AnalyserNode | null = null;
-  let webrtcMicMonitorGain: GainNode | null = null;
-  let webrtcMicMonitorTimer: ReturnType<typeof setInterval> | null = null;
+  let webrtcMicrophoneMeter: MicrophoneMeter | null = null;
   const inputDevices = reactive<AudioInputDevice[]>([]);
   const outputDevices = reactive<AudioOutputDevice[]>([]);
   const selectedInputDeviceId = ref(typeof localStorage !== "undefined" ? localStorage.getItem("webspeak:input-device") ?? "" : "");
@@ -964,45 +962,19 @@ export function useVoiceWebSocket() {
   }
 
   function startWebRtcMicMonitor(ctx: AudioContext, stream: MediaStream, track: MediaStreamTrack): void {
-    stopWebRtcMicMonitor(false);
-    try {
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
-      const silent = ctx.createGain();
-      silent.gain.value = 0;
-      source.connect(analyser);
-      analyser.connect(silent);
-      silent.connect(ctx.destination);
-      const samples = new Float32Array(analyser.fftSize);
-      webrtcMicMonitorSource = source;
-      webrtcMicMonitorAnalyser = analyser;
-      webrtcMicMonitorGain = silent;
-      webrtcMicMonitorTimer = setInterval(() => {
-        if (!webrtcMicMonitorAnalyser) return;
-        webrtcMicMonitorAnalyser.getFloatTimeDomainData(samples);
-        let sum = 0;
-        for (const sample of samples) sum += sample * sample;
-        const rms = Math.sqrt(sum / samples.length);
-        micLevel.value = Math.min(1, rms * 6);
-        if (!microphoneMuted.value && track.enabled && rms >= voxThreshold.value) markSpeaking(state.tsClientId);
-        else if (state.tsClientId) clearSpeaking(state.tsClientId);
-      }, 50);
-    } catch {
-      stopWebRtcMicMonitor(false);
-    }
+    stopWebRtcMicMonitor();
+    webrtcMicrophoneMeter = createMicrophoneMeter(ctx, stream, rms => {
+      micLevel.value = rms === null ? 0 : Math.min(1, rms * 6);
+      if (rms !== null && !microphoneMuted.value && track.enabled && rms >= voxThreshold.value) markSpeaking(state.tsClientId);
+      else if (state.tsClientId) clearSpeaking(state.tsClientId);
+    });
   }
 
-  function stopWebRtcMicMonitor(resetLevel = true): void {
-    if (webrtcMicMonitorTimer) clearInterval(webrtcMicMonitorTimer);
-    webrtcMicMonitorTimer = null;
-    webrtcMicMonitorSource?.disconnect();
-    webrtcMicMonitorAnalyser?.disconnect();
-    webrtcMicMonitorGain?.disconnect();
-    webrtcMicMonitorSource = null;
-    webrtcMicMonitorAnalyser = null;
-    webrtcMicMonitorGain = null;
-    if (resetLevel) micLevel.value = 0;
+  function stopWebRtcMicMonitor(): void {
+    const meter = webrtcMicrophoneMeter;
+    webrtcMicrophoneMeter = null;
+    meter?.dispose();
+    micLevel.value = 0;
   }
 
   function stopCaptureGraph(): void {

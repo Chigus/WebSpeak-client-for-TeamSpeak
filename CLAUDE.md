@@ -29,6 +29,7 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 | `web/src/voice/audio-sink.ts` | Serialized device routing per audio endpoint, with stale-operation guards |
 | `web/src/voice/accompaniment.ts` | Generation-bound display-audio capture, immediate pending-capture cancellation, ended listeners and committed activity |
 | `web/src/voice/webrtc-input.ts` | Stable WebRTC sender output, microphone gain and transactional accompaniment-source attachment |
+| `web/src/voice/microphone-meter.ts` | Optional per-peer level sampling, owned analysis nodes and timer, partial-failure cleanup and stale-tick rejection |
 | `web/src/platform/` | Browser mounting and cancellable Android gateway readiness handshake |
 | `web/src/services/`, `web/src/i18n/`, `web/src/skins/` | Browser persistence, identity import, skin packages and translations |
 | `web/src/services/admin-api.ts`, `admin-requests.ts` | Admin HTTP validation and cancellation, session-bound CSRF and per-feature request ownership, including skin uploads and backup downloads |
@@ -62,6 +63,8 @@ WebRTC offers, answers, playback callbacks and accompaniment capture belong to t
 Accompaniment changes keep the WebRTC sender output alive. Prepare and connect the new source before replacing the old one; a failure preserves the current microphone and accompaniment. The input mixer owns its nodes and output track, never the externally owned capture streams. Release partial allocations and continue cleanup if an individual node fails. Application audio bypasses microphone gain/denoising and retains its source level.
 
 The accompaniment controller owns both active and pending captures. Stop, disconnect and replacement immediately release candidates already returned by the browser, even while optional constraints are pending. Late permissions are stopped on arrival; ended or stale candidates cannot be published. Register ended listeners during preparation and publish activity only after attachment succeeds. Optional content hints and processing constraints may fail without losing capture; distinguish audio attachment errors from permission errors in all five languages.
+
+Microphone metering is optional and must not interrupt voice. Its nodes and timer belong to one meter instance; a queued old tick cannot read the next session's analyser or publish a level. Allocation, connection and read failures release all meter resources and clear level/speaking presentation, while preserving the capture stream and peer. Keep the 512-sample analyser and 50 ms cadence unless audio validation justifies changing them.
 
 ## Audio and screen sharing
 
