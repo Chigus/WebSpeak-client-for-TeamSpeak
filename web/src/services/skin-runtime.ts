@@ -3,6 +3,7 @@ import type { InstalledSkin } from "./skin-pack.js";
 import { applyTheme, getBuiltinSkinCss, getStoredTheme, isDarkTheme } from "./theme.js";
 import { scopeBuiltinThemeForCustomSkin } from "./skin-cascade.js";
 import { getBundledSkinPackageUrl, isPublicSkinEnabled } from "./skin-catalog.js";
+import { createSkinOperation, type SkinLoadOptions } from "./skin-operation.js";
 
 export const ACTIVE_SKIN_KEY = "webspeak:active-skin";
 export const BUILTIN_LIGHT_SKIN = "builtin.light";
@@ -12,13 +13,16 @@ const CUSTOM_BASE_STYLE_ID = "webspeak-active-custom-skin-base";
 
 let activeAssetUrls: string[] = [];
 let criticalControlObserver: MutationObserver | null = null;
+let pendingActivation: ReturnType<typeof createSkinOperation> | null = null;
 
 export function getStoredSkinId(): string | null {
-  return typeof localStorage === "undefined" ? null : localStorage.getItem(ACTIVE_SKIN_KEY);
+  try { return typeof localStorage === "undefined" ? null : localStorage.getItem(ACTIVE_SKIN_KEY); }
+  catch { return null; }
 }
 
 export function storeSkinId(id: string): void {
-  if (typeof localStorage !== "undefined") localStorage.setItem(ACTIVE_SKIN_KEY, id);
+  try { if (typeof localStorage !== "undefined") localStorage.setItem(ACTIVE_SKIN_KEY, id); }
+  catch { /* Storage is optional; the current page can still use the skin. */ }
 }
 
 export async function activateStoredSkin(): Promise<InstalledSkin | null> {
@@ -29,9 +33,25 @@ export async function activateStoredSkin(): Promise<InstalledSkin | null> {
   return activateSkin(selectedId);
 }
 
-export async function activateSkin(id: string, expectedVersion?: string, appVersion = "0.2.5-preview"): Promise<InstalledSkin | null> {
+export async function activateSkin(id: string, expectedVersion?: string, appVersion = "0.2.5-preview", options: SkinLoadOptions = {}): Promise<InstalledSkin | null> {
+  // An already retired page must not cancel a newer page's activation.
+  options.signal?.throwIfAborted();
+  pendingActivation?.cancel();
+  const operation = createSkinOperation(options);
+  pendingActivation = operation;
+  try {
+    return await prepareAndActivate(id, expectedVersion, appVersion, operation);
+  } finally {
+    operation.finish();
+    if (pendingActivation === operation) pendingActivation = null;
+  }
+}
+
+async function prepareAndActivate(id: string, expectedVersion: string | undefined, appVersion: string,
+  operation: ReturnType<typeof createSkinOperation>): Promise<InstalledSkin | null> {
+  operation.check();
   if (id === BUILTIN_LIGHT_SKIN || id === BUILTIN_DARK_SKIN) {
-    clearCustomSkinStyle();
+    removeCustomSkinStyle();
     applyTheme(id === BUILTIN_DARK_SKIN ? "dark" : "light");
     markCoreControls();
     storeSkinId(id);
@@ -42,30 +62,34 @@ export async function activateSkin(id: string, expectedVersion?: string, appVers
     return fallBackToBuiltin();
   }
 
-  let skin = await getInstalledSkin(id);
+  let skin = await operation.wait(getInstalledSkin(id));
   if (!skin || (expectedVersion && skin.version !== expectedVersion)) {
     try {
       const packageUrl = getBundledSkinPackageUrl(id) ?? `/api/skins/${encodeURIComponent(id)}/package`;
-      const response = await fetch(packageUrl, { cache: "no-cache" });
+      const response = await operation.wait(fetch(packageUrl, { cache: "no-cache", signal: operation.signal }));
       if (!response.ok) throw new Error("Skin package is no longer available.");
-      const archive = await response.blob();
+      const archive = await operation.wait(response.blob());
       const file = new File([archive], `${id}.wskin`, { type: "application/octet-stream" });
-      const { importSkinPack } = await import("./skin-pack.js");
-      const downloaded = await importSkinPack(file);
+      const { importSkinPack } = await operation.wait(import("./skin-pack.js"));
+      const downloaded = await operation.wait(importSkinPack(file));
       if (downloaded.id !== id) throw new Error("Skin package ID does not match its catalog entry.");
       if (expectedVersion && downloaded.version !== expectedVersion) throw new Error("Skin package version does not match its catalog entry.");
       skin = downloaded;
-      await saveInstalledSkin(downloaded).catch(() => undefined);
+      await operation.wait(saveInstalledSkin(downloaded, operation.signal).catch(() => undefined));
     } catch {
+      operation.check();
       if (!skin) return fallBackToBuiltin();
     }
   }
 
   if (!isVersionCompatible(appVersion, skin.minAppVersion)) return fallBackToBuiltin();
 
+  let candidateUrls: string[] = [];
   try {
-    const { resolveSkinCssAssets } = await import("./skin-pack.js");
+    const { resolveSkinCssAssets } = await operation.wait(import("./skin-pack.js"));
     const compiled = resolveSkinCssAssets(skin.css, skin.assets);
+    candidateUrls = compiled.objectUrls;
+    operation.check();
     // A community skin is a complete appearance choice, not an overlay on the
     // previously selected day/night skin. Keep the document theme (used by the
     // independent admin appearance) but give unstyled public parts a light,
@@ -94,23 +118,32 @@ export async function activateSkin(id: string, expectedVersion?: string, appVers
     style.textContent = compiled.css;
     const previousAssetUrls = activeAssetUrls;
     activeAssetUrls = compiled.objectUrls;
+    candidateUrls = [];
     previousAssetUrls.forEach((url) => URL.revokeObjectURL(url));
     storeSkinId(id);
     return skin;
   } catch {
+    candidateUrls.forEach((url) => URL.revokeObjectURL(url));
+    operation.check();
     return fallBackToBuiltin();
   }
 }
 
 function fallBackToBuiltin(): null {
   const fallback = isDarkTheme(getStoredTheme()) ? BUILTIN_DARK_SKIN : BUILTIN_LIGHT_SKIN;
-  clearCustomSkinStyle();
+  removeCustomSkinStyle();
   applyTheme(fallback === BUILTIN_DARK_SKIN ? "dark" : "light");
   storeSkinId(fallback);
   return null;
 }
 
 export function clearCustomSkinStyle(): void {
+  pendingActivation?.cancel();
+  pendingActivation = null;
+  removeCustomSkinStyle();
+}
+
+function removeCustomSkinStyle(): void {
   document.getElementById(CUSTOM_STYLE_ID)?.remove();
   document.getElementById(CUSTOM_BASE_STYLE_ID)?.remove();
   activeAssetUrls.forEach((url) => URL.revokeObjectURL(url));

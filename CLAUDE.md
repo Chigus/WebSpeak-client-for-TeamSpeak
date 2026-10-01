@@ -38,6 +38,7 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 | `web/src/voice/audio-diagnostics.ts`, `web/src/composables/useWebClientPerformance.ts` | Session-owned diagnostic probes and compatibility counters, browser statistics, comparable sample scopes and cancellable UI polling |
 | `web/src/platform/` | Browser mounting and cancellable Android gateway readiness handshake |
 | `web/src/services/`, `web/src/i18n/`, `web/src/skins/` | Browser persistence, identity import, skin packages and translations |
+| `web/src/composables/usePublicSkin.ts`, `web/src/services/skin-operation.ts` | Shared public-page skin initialization and selection, page ownership, cancellation and bounded loading |
 | `web/src/services/admin-api.ts`, `admin-requests.ts` | Admin HTTP validation and cancellation, session-bound CSRF and per-feature request ownership, including skin uploads and backup downloads |
 | `web/src/composables/useAdminServerSettings.ts`, `useAdminOperations.ts`, `useAdminSkins.ts` | Admin form merging, probes, operational actions and skin state; the page owns authentication, routing and overview |
 | `web/src/composables/useAdminI18n.ts`, `web/src/i18n/admin.ts` | Admin formatting and error/status mappings; all five languages explicitly implement the same translation keys |
@@ -178,6 +179,12 @@ Platform startup owns its message listener, polling interval and deadline, inclu
 Routes load their page modules on demand. Document-level page styles must be gated by `html[data-ws-route]` because loaded CSS remains after navigation. The admin stylesheet is independent of public skins. Component extraction must retain `data-ws-part` hooks and account for Vue scoped styles across component boundaries.
 
 The identity dialog retains page-owned CSS with narrowly targeted `:deep` selectors so the existing declaration order and specificity remain intact. Shared button rules target its dedicated classes across the component boundary. Its close button is positioned within the modal. Public skin-contract tests include Vue files recursively under `components/web-client`; keep new public parts documented.
+
+Public skin activation is last-choice-owned across both public pages. Retire previous runtime work before preparing a replacement, and reject results after page disposal, a newer choice or local-data reset. Check ownership before modifying document styles, selected content, asset URLs or stored preferences. An already aborted caller must not cancel a newer page's activation. Release compiled candidate URLs on failed installation.
+
+Skin initialization has an 8-second total deadline covering preference reads, directory fetch and body, package loading and activation. Network stages also have bounded standalone operations. A timeout reveals a usable built-in palette and retires late work; retain the explicit skin choice for a later retry. Normal initialization still respects the enabled instance default unless the visitor made a deliberate choice. Home and demo use the same controller; do not restore duplicate unguarded refresh paths.
+
+Skin cache writes and preference persistence accept the owning AbortSignal, including while waiting for IndexedDB to open and during its write transaction. Report storage success at transaction completion. Merge preferences within one transaction so concurrent unrelated settings are preserved. Cancellation of optional persistence must never block page use.
 
 Validate admin responses before applying them to page state. Network and protocol failures must preserve unsaved input; a failed logout must not be presented as a successful logout. Keep secret keep/replace/remove actions intact and do not persist credentials in UI error messages or diagnostic logs.
 

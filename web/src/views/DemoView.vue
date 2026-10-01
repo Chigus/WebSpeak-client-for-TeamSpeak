@@ -32,15 +32,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef } from "vue";
+import { computed, onMounted, ref } from "vue";
 import Icon from "../components/Icon.vue";
 import LanguageSwitcher from "../components/LanguageSwitcher.vue";
 import SkinSwitcher, { type SkinOption } from "../components/SkinSwitcher.vue";
-import { listInstalledSkins, loadLocalPreferences, saveLocalPreferences } from "../services/local-persistence.js";
-import { BUILTIN_ILLUSIA_SKIN_ID, getPublicDefaultSkinId, isPublicSkinEnabled, listPublicSkins, type SkinCatalogEntry } from "../services/skin-catalog.js";
-import { activateSkin, BUILTIN_DARK_SKIN, BUILTIN_LIGHT_SKIN, getStoredSkinId } from "../services/skin-runtime.js";
-import type { InstalledSkin } from "../services/skin-pack.js";
-import { getStoredTheme, isDarkTheme } from "../services/theme.js";
+import { saveLocalPreferences } from "../services/local-persistence.js";
+import { BUILTIN_ILLUSIA_SKIN_ID, isPublicSkinEnabled } from "../services/skin-catalog.js";
+import { BUILTIN_DARK_SKIN, BUILTIN_LIGHT_SKIN } from "../services/skin-runtime.js";
+import { usePublicSkin } from "../composables/usePublicSkin.js";
 
 type Language = "zh" | "en" | "de" | "ru" | "ja";
 const illusiaSkinLabels: Record<Language, string> = { zh: "ILLUSIA 风", en: "ILLUSIA style", de: "ILLUSIA-Stil", ru: "Стиль ILLUSIA", ja: "ILLUSIA スタイル" };
@@ -49,12 +48,8 @@ type Tab = "channel" | "server";
 const storedLanguage = localStorage.getItem("webspeak:language");
 const language = ref<Language>(storedLanguage === "en" || storedLanguage === "de" || storedLanguage === "ru" || storedLanguage === "ja" ? storedLanguage : "zh");
 const baseCopy = computed(() => language.value === "zh" ? zh : language.value === "de" ? de : language.value === "ru" ? ru : language.value === "ja" ? ja : en);
-const activeSkin = shallowRef<InstalledSkin | null>(null);
-const storedSkinId = getStoredSkinId();
-const activeSkinId = ref(storedSkinId ?? (isDarkTheme(getStoredTheme()) ? BUILTIN_DARK_SKIN : BUILTIN_LIGHT_SKIN));
-const skinReady = ref(storedSkinId === BUILTIN_LIGHT_SKIN || storedSkinId === BUILTIN_DARK_SKIN);
-const installedSkins = ref<InstalledSkin[]>([]);
-const catalogSkins = ref<SkinCatalogEntry[]>([]);
+const { activeSkin, activeSkinId, skinReady, installedSkins, catalogSkins,
+  select: onSkinChange, initialize: initializeSkin } = usePublicSkin();
 const skinOptions = computed<SkinOption[]>(() => [
   ...catalogSkins.value.map((skin) => ({
     value: skin.id,
@@ -103,46 +98,7 @@ const selectedChannel = computed(() => channels.find((channel) => channel.id ===
 const visibleMessages = computed(() => activeTab.value === "channel" ? messages.value : []);
 
 function persistLanguage() { localStorage.setItem("webspeak:language", language.value); void saveLocalPreferences({ schemaVersion: 1, language: language.value }); }
-async function onSkinChange(skinId: string) {
-  localStorage.setItem("webspeak:skin-choice", skinId);
-  const catalogSkin = catalogSkins.value.find((skin) => skin.id === skinId);
-  activeSkin.value = await activateSkin(skinId, catalogSkin?.version);
-  activeSkinId.value = getStoredSkinId() ?? skinId;
-  void saveLocalPreferences({ schemaVersion: 1, skinId: activeSkinId.value });
-}
-onMounted(async () => {
-  const catalogPromise = listPublicSkins().catch(() => []);
-  try {
-    const [preferences, installed, available] = await Promise.all([loadLocalPreferences(), listInstalledSkins(), catalogPromise]);
-    installedSkins.value = installed;
-    catalogSkins.value = available;
-    // Only a deliberate choice should override the instance default. The active
-    // skin and local preference also contain automatically applied defaults.
-    const savedSkinId = localStorage.getItem("webspeak:skin-choice");
-    const selectedId = savedSkinId && isPublicSkinEnabled(savedSkinId) ? savedSkinId : getPublicDefaultSkinId();
-    const selectedSkin = available.find((skin) => skin.id === selectedId);
-    activeSkinId.value = selectedId;
-    activeSkin.value = await activateSkin(selectedId, selectedSkin?.version);
-    activeSkinId.value = getStoredSkinId() ?? selectedId;
-  } catch {
-    activeSkin.value = null;
-    activeSkinId.value = isDarkTheme(getStoredTheme()) ? BUILTIN_DARK_SKIN : BUILTIN_LIGHT_SKIN;
-    await activateSkin(activeSkinId.value).catch(() => undefined);
-  } finally {
-    skinReady.value = true;
-  }
-
-  void catalogPromise.then(async (available) => {
-    catalogSkins.value = available;
-    const selected = available.find((skin) => skin.id === activeSkinId.value);
-    const installed = installedSkins.value.find((skin) => skin.id === activeSkinId.value);
-    if (!selected || !installed || installed.version === selected.version) return;
-    activeSkin.value = await activateSkin(selected.id, selected.version);
-    if (getStoredSkinId() !== selected.id) return;
-    activeSkinId.value = getStoredSkinId() ?? selected.id;
-    installedSkins.value = await listInstalledSkins();
-  }).catch(() => undefined);
-});
+onMounted(() => { void initializeSkin(); });
 function selectChannel(id: string) { selectedChannelId.value = id; activeTab.value = "channel"; }
 function toggleSpeaking() { speakingId.value = speakingId.value ? "" : selectedChannel.value.members[0]?.id ?? ""; }
 function messageText(message: DemoMessage): string { return language.value === "zh" ? message.zhText ?? message.text : language.value === "ru" ? message.ruText ?? message.enText ?? message.text : language.value === "ja" ? message.jaText ?? message.enText ?? message.text : message.enText ?? message.text; }

@@ -389,6 +389,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } fr
 import Icon from "../components/Icon.vue";
 import WebClientHeader from "../components/web-client/WebClientHeader.vue";
 import IdentityImportDialog from "../components/web-client/IdentityImportDialog.vue";
+import { usePublicSkin } from "../composables/usePublicSkin.js";
 import { useWebClientIdentity } from "../composables/useWebClientIdentity.js";
 import LanguageSwitcher from "../components/LanguageSwitcher.vue";
 import SkinSwitcher, { type SkinOption } from "../components/SkinSwitcher.vue";
@@ -404,10 +405,10 @@ import { useWebClientI18n } from "../composables/useWebClientI18n.js";
 import { useWebClientPublicConfig } from "../composables/useWebClientPublicConfig.js";
 import { useWebClientServerHistory } from "../composables/useWebClientServerHistory.js";
 import { getInitialLanguage, type Language } from "../i18n/web-client.js";
-import { clearLocalData as clearStoredLocalData, isLocalPersistenceAvailable, listInstalledSkins, loadLocalPreferences, loadStoredIdentity, removeStoredIdentity, saveLocalPreferences, saveStoredIdentity } from "../services/local-persistence.js";
+import { clearLocalData as clearStoredLocalData, isLocalPersistenceAvailable, loadLocalPreferences, loadStoredIdentity, removeStoredIdentity, saveLocalPreferences, saveStoredIdentity } from "../services/local-persistence.js";
 import type { InstalledSkin, SkinHomeCopy } from "../services/skin-pack.js";
-import { getPublicDefaultSkinId, isPublicSkinEnabled, listPublicSkins, type SkinCatalogEntry } from "../services/skin-catalog.js";
-import { activateSkin, BUILTIN_DARK_SKIN, BUILTIN_LIGHT_SKIN, clearCustomSkinStyle, getStoredSkinId } from "../services/skin-runtime.js";
+import { isPublicSkinEnabled } from "../services/skin-catalog.js";
+import { BUILTIN_DARK_SKIN, BUILTIN_LIGHT_SKIN } from "../services/skin-runtime.js";
 import { applyTheme, getStoredTheme, isDarkTheme, saveTheme, type ThemeMode } from "../services/theme.js";
 import { DEFAULT_TEAM_SPEAK_PORT, splitTeamSpeakTarget } from "../services/teamspeak-target.js";
 
@@ -585,11 +586,8 @@ function resolveSkinMode(theme: ThemeMode): SkinMode {
 const themeMode = ref<SkinMode>(resolveSkinMode(getStoredTheme()));
 applyTheme(themeMode.value);
 if (localStorage.getItem("webspeak:theme") === "system") saveTheme(themeMode.value);
-const storedSkinId = getStoredSkinId();
-const activeSkinId = ref(storedSkinId ?? (themeMode.value === "dark" ? BUILTIN_DARK_SKIN : BUILTIN_LIGHT_SKIN));
-const skinReady = ref(storedSkinId === BUILTIN_LIGHT_SKIN || storedSkinId === BUILTIN_DARK_SKIN);
-const installedSkins = ref<InstalledSkin[]>([]);
-const catalogSkins = ref<SkinCatalogEntry[]>([]);
+const publicSkin = usePublicSkin({ activeSkin, themeMode, appVersion: () => appVersion.value });
+const { activeSkinId, skinReady, installedSkins, catalogSkins, select: onSkinChange, initialize: initializeSkin } = publicSkin;
 const skinOptions = computed<SkinOption[]>(() => [
   ...catalogSkins.value.map((skin) => ({
     value: skin.id,
@@ -683,75 +681,6 @@ function initialServerTarget() {
 function persistLanguage() {
   localStorage.setItem("webspeak:language", language.value);
   void saveLocalPreferences({ schemaVersion: 1, language: language.value });
-}
-
-async function onSkinChange(skinId: string) {
-  localStorage.setItem("webspeak:skin-choice", skinId);
-  activeSkinId.value = skinId;
-  const catalogSkin = catalogSkins.value.find((skin) => skin.id === skinId);
-  activeSkin.value = await activateSkin(skinId, catalogSkin?.version, appVersion.value);
-  activeSkinId.value = getStoredSkinId() ?? skinId;
-  if (skinId === BUILTIN_LIGHT_SKIN) themeMode.value = "light";
-  else if (skinId === BUILTIN_DARK_SKIN) themeMode.value = "dark";
-  else themeMode.value = resolveSkinMode(getStoredTheme());
-  void saveLocalPreferences({ schemaVersion: 1, theme: themeMode.value, skinId: activeSkinId.value });
-}
-
-async function initializeSkin(): Promise<void> {
-  const catalogPromise = listPublicSkins().catch(() => []);
-  try {
-    const [preferences, skins, availableSkins] = await Promise.all([loadLocalPreferences(), listInstalledSkins(), catalogPromise]);
-    installedSkins.value = skins;
-    catalogSkins.value = availableSkins;
-    if (!localStorage.getItem("webspeak:theme")) {
-      if (preferences.theme === "system" || preferences.theme === "light" || preferences.theme === "dark") {
-        themeMode.value = resolveSkinMode(preferences.theme);
-      }
-      saveTheme(themeMode.value);
-    }
-    // Only a deliberate choice should override the instance default. The active
-    // skin and local preference also contain automatically applied defaults.
-    const savedSkinId = localStorage.getItem("webspeak:skin-choice");
-    const preferredSkinId = savedSkinId && isPublicSkinEnabled(savedSkinId)
-      ? savedSkinId
-      : getPublicDefaultSkinId();
-    const preferredSkin = availableSkins.find((skin) => skin.id === preferredSkinId);
-    activeSkinId.value = preferredSkinId;
-    // Apply the locally cached package (or fetch it if absent) before revealing
-    // the page. The network catalog/version check must not block the first paint.
-    activeSkin.value = await activateSkin(preferredSkinId, preferredSkin?.version, appVersion.value);
-    activeSkinId.value = getStoredSkinId() ?? preferredSkinId;
-    if (activeSkinId.value === BUILTIN_LIGHT_SKIN) themeMode.value = "light";
-    else if (activeSkinId.value === BUILTIN_DARK_SKIN) themeMode.value = "dark";
-    else themeMode.value = resolveSkinMode(getStoredTheme());
-    void saveLocalPreferences({ schemaVersion: 1, theme: themeMode.value, skinId: activeSkinId.value });
-  } catch {
-    // Storage or package loading can fail on restricted browsers. Do not leave
-    // the application hidden, and restore a usable built-in palette instead.
-    activeSkin.value = null;
-    activeSkinId.value = themeMode.value === "dark" ? BUILTIN_DARK_SKIN : BUILTIN_LIGHT_SKIN;
-    try {
-      await activateSkin(activeSkinId.value, undefined, appVersion.value);
-    } catch {
-      applyTheme(themeMode.value);
-    }
-  } finally {
-    // The active skin's CSS and asset URLs are installed before this becomes
-    // visible, so the built-in day/night palette is never shown in between.
-    skinReady.value = true;
-  }
-
-  void catalogPromise.then(async (availableSkins) => {
-    catalogSkins.value = availableSkins;
-    const selectedSkin = availableSkins.find((skin) => skin.id === activeSkinId.value);
-    const installedSkin = installedSkins.value.find((skin) => skin.id === activeSkinId.value);
-    if (!selectedSkin || !installedSkin || installedSkin.version === selectedSkin.version) return;
-    const updatedSkin = await activateSkin(selectedSkin.id, selectedSkin.version, appVersion.value);
-    if (getStoredSkinId() !== selectedSkin.id) return;
-    activeSkin.value = updatedSkin;
-    activeSkinId.value = getStoredSkinId() ?? selectedSkin.id;
-    installedSkins.value = await listInstalledSkins();
-  }).catch(() => undefined);
 }
 
 const screenShareIndicatorBars = [5, 10, 7, 12, 8, 10];
@@ -1032,15 +961,10 @@ function doShare() {
 async function clearBrowserData(): Promise<void> {
   if (!window.confirm(t("clearLocalDataConfirm"))) return;
   resetIdentityOperations();
+  publicSkin.cancel();
   await clearStoredLocalData();
   for (const key of ["webspeak:nickname", "webspeak:language", "webspeak:theme", "webspeak:active-skin", "webspeak:skin-choice", "webspeak:input-device", "webspeak:output-device", "webspeak:remember-identity"]) localStorage.removeItem(key);
-  clearCustomSkinStyle();
-  activeSkin.value = null;
-  installedSkins.value = [];
-  catalogSkins.value = await listPublicSkins();
-  themeMode.value = resolveSkinMode("system");
-  applyTheme(themeMode.value);
-  activeSkinId.value = themeMode.value === "dark" ? BUILTIN_DARK_SKIN : BUILTIN_LIGHT_SKIN;
+  await publicSkin.reset();
   identityMaterial.value = "";
   rememberIdentity.value = false;
   clearServerHistory();

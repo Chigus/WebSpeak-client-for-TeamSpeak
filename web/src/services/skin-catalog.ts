@@ -1,4 +1,5 @@
 import type { SkinCatalogEntry } from "../../../src/shared/skin-catalog.js";
+import { createSkinOperation, type SkinLoadOptions } from "./skin-operation.js";
 export type { SkinCatalogEntry } from "../../../src/shared/skin-catalog.js";
 
 export const BUILTIN_ILLUSIA_SKIN_ID = "community.illusia-voice";
@@ -47,6 +48,7 @@ const BUILTIN_ILLUSIA_PACKAGE_URL = "/skins/illusia-voice.wskin";
 let publicDirectoryLoaded = false;
 let publicEnabledSkinIds = new Set<string>(BUILTIN_SKIN_CATALOG.map((skin) => skin.id));
 let publicDefaultSkinId = "builtin.light";
+let pendingDirectory: ReturnType<typeof createSkinOperation> | null = null;
 
 export function getPublicDefaultSkinId(): string {
   return isPublicSkinEnabled(publicDefaultSkinId) ? publicDefaultSkinId : "builtin.light";
@@ -61,15 +63,16 @@ export function getBundledSkinPackageUrl(id: string): string | null {
   return id === BUILTIN_ILLUSIA_SKIN_ID ? BUILTIN_ILLUSIA_PACKAGE_URL : null;
 }
 
-export async function listPublicSkins(): Promise<SkinCatalogEntry[]> {
-  publicDirectoryLoaded = false;
-  publicEnabledSkinIds = new Set(BUILTIN_SKIN_CATALOG.map((skin) => skin.id));
-  publicDefaultSkinId = "builtin.light";
+export async function listPublicSkins(options: SkinLoadOptions = {}): Promise<SkinCatalogEntry[]> {
+  options.signal?.throwIfAborted();
+  pendingDirectory?.cancel();
+  const operation = createSkinOperation(options);
+  pendingDirectory = operation;
   try {
-    const response = await fetch("/api/skins", { headers: { accept: "application/json" }, cache: "no-cache" });
-    if (!response.ok) return BUILTIN_SKIN_CATALOG;
-    const payload: unknown = await response.json();
-    if (!payload || typeof payload !== "object" || !Array.isArray((payload as { skins?: unknown }).skins)) return BUILTIN_SKIN_CATALOG;
+    const response = await operation.wait(fetch("/api/skins", { headers: { accept: "application/json" }, cache: "no-cache", signal: operation.signal }));
+    if (!response.ok) throw new Error("Skin directory unavailable");
+    const payload: unknown = await operation.wait(response.json());
+    if (!payload || typeof payload !== "object" || !Array.isArray((payload as { skins?: unknown }).skins)) throw new Error("Invalid skin directory");
     const directorySkins = (payload as { skins: unknown[] }).skins.flatMap((value) => {
       if (!value || typeof value !== "object") return [];
       const skin = value as Record<string, unknown>;
@@ -98,9 +101,13 @@ export async function listPublicSkins(): Promise<SkinCatalogEntry[]> {
     publicDefaultSkinId = typeof requestedDefault === "string" && publicEnabledSkinIds.has(requestedDefault) ? requestedDefault : "builtin.light";
     return [...BUILTIN_SKIN_CATALOG, ...directorySkins.filter((skin) => skin.enabled)];
   } catch {
+    operation.check();
     publicDirectoryLoaded = false;
     publicEnabledSkinIds = new Set(BUILTIN_SKIN_CATALOG.map((skin) => skin.id));
     publicDefaultSkinId = "builtin.light";
     return BUILTIN_SKIN_CATALOG;
+  } finally {
+    operation.finish();
+    if (pendingDirectory === operation) pendingDirectory = null;
   }
 }

@@ -82,12 +82,22 @@ function openDatabase(): Promise<IDBDatabase> {
   return databasePromise!;
 }
 
-async function request<T>(storeName: string, mode: IDBTransactionMode, action: (store: IDBObjectStore, resolve: (value: T) => void, reject: (reason?: unknown) => void) => void): Promise<T> {
+async function request<T>(storeName: string, mode: IDBTransactionMode, action: (store: IDBObjectStore, resolve: (value: T) => void, reject: (reason?: unknown) => void) => void, signal?: AbortSignal): Promise<T> {
+  signal?.throwIfAborted();
   const database = await openDatabase();
+  signal?.throwIfAborted();
   return new Promise<T>((resolve, reject) => {
     const transaction = database.transaction(storeName, mode);
-    action(transaction.objectStore(storeName), resolve, reject);
-    transaction.onerror = () => reject(transaction.error ?? new Error("Local storage transaction failed"));
+    let result: T;
+    const abort = () => { try { transaction.abort(); } catch { /* Already completed. */ } };
+    const cleanup = () => signal?.removeEventListener("abort", abort);
+    const fail = (error: unknown) => { cleanup(); reject(error); };
+    transaction.oncomplete = () => { cleanup(); resolve(result); };
+    transaction.onerror = () => fail(transaction.error ?? new Error("Local storage transaction failed"));
+    transaction.onabort = () => fail(signal?.reason ?? transaction.error ?? new Error("Local storage transaction aborted"));
+    signal?.addEventListener("abort", abort, { once: true });
+    try { action(transaction.objectStore(storeName), value => { result = value; }, fail); }
+    catch (error) { abort(); fail(error); }
   });
 }
 
@@ -150,19 +160,20 @@ export async function loadLocalPreferences(): Promise<LocalPreferences> {
   }
 }
 
-export async function saveLocalPreferences(preferences: LocalPreferences): Promise<void> {
+export async function saveLocalPreferences(preferences: LocalPreferences, signal?: AbortSignal): Promise<void> {
   try {
-    const existing = await loadLocalPreferences();
     await request("preferences", "readwrite", (store, resolve, reject) => {
-      const put = store.put({
-        ...existing,
-        ...preferences,
-        volumesByUid: { ...existing.volumesByUid, ...preferences.volumesByUid },
-        id: PREFERENCES_KEY,
-      });
-      put.onsuccess = () => resolve(undefined);
-      put.onerror = () => reject(put.error);
-    });
+      // Read and merge in one transaction so unrelated concurrent settings survive.
+      const get = store.get(PREFERENCES_KEY);
+      get.onerror = () => reject(get.error);
+      get.onsuccess = () => {
+        const existing = get.result?.schemaVersion === 1 ? get.result as LocalPreferences : {} as Partial<LocalPreferences>;
+        const put = store.put({ ...existing, ...preferences,
+          volumesByUid: { ...existing.volumesByUid, ...preferences.volumesByUid }, id: PREFERENCES_KEY });
+        put.onsuccess = () => resolve(undefined);
+        put.onerror = () => reject(put.error);
+      };
+    }, signal);
   } catch {
     // Local preference persistence is optional and never blocks joining.
   }
@@ -193,12 +204,12 @@ export async function getInstalledSkin(id: string): Promise<InstalledSkin | null
   }
 }
 
-export async function saveInstalledSkin(skin: InstalledSkin): Promise<void> {
+export async function saveInstalledSkin(skin: InstalledSkin, signal?: AbortSignal): Promise<void> {
   await request("skins", "readwrite", (store, resolve, reject) => {
     const put = store.put(skin);
     put.onsuccess = () => resolve(undefined);
     put.onerror = () => reject(put.error);
-  });
+  }, signal);
 }
 
 export async function removeInstalledSkin(id: string): Promise<void> {

@@ -19,7 +19,9 @@ export function getBuiltinSkinCss(theme: Exclude<ThemeMode, "system">): string {
 }
 
 export function getStoredTheme(): ThemeMode {
-  const value = typeof localStorage === "undefined" ? "" : localStorage.getItem(THEME_KEY);
+  let value: string | null = null;
+  try { value = typeof localStorage === "undefined" ? null : localStorage.getItem(THEME_KEY); }
+  catch { /* A restricted browser still has a usable system theme. */ }
   return value === "light" || value === "dark" || value === "system" ? value : "system";
 }
 
