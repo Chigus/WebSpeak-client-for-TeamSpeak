@@ -86,6 +86,7 @@ export class TSClient extends EventEmitter {
   private readonly identity: Identity;
   private clientId = 0;
   private connected = false;
+  private connectionGeneration = 0;
   private preferredChannelId = 0n;
   private accelerationClient: AccelerationRelayClient | null = null;
   // Reason id of the most recent self leave, kept so the SDK `kicked` event can
@@ -100,6 +101,7 @@ export class TSClient extends EventEmitter {
   }
 
   async connect(): Promise<void> {
+    this.connectionGeneration++;
     this.selfLeaveReasonId = null;
     if (!this.adapter || !this.client) {
       let transportTarget = this.options.target;
@@ -197,9 +199,13 @@ export class TSClient extends EventEmitter {
    * keep its generated initial avatar.
    */
   async getClientAvatar(clientId: number, expectedUid = ""): Promise<TSClientAvatar | null> {
-    if (!this.client || !this.connected) throw new Error("TeamSpeak session is not ready");
+    const client = this.client;
+    if (!client || !this.connected) throw new Error("TeamSpeak session is not ready");
     if (!Number.isInteger(clientId) || clientId <= 0 || clientId > 65535) throw new Error("Invalid TeamSpeak client id");
-    const rows = await this.client.execCommandWithResponse(`clientinfo clid=${clientId}`, 5_000);
+    const generation = this.connectionGeneration;
+    const isCurrent = () => this.client === client && this.connected && this.connectionGeneration === generation;
+    const rows = await client.execCommandWithResponse(`clientinfo clid=${clientId}`, 5_000);
+    if (!isCurrent()) return null;
     const info = rows.find((row) => {
       if (expectedUid && row.client_unique_identifier !== expectedUid) return false;
       return typeof row.client_flag_avatar === "string" && typeof row.client_base64HashClientUID === "string";
@@ -209,7 +215,8 @@ export class TSClient extends EventEmitter {
     const avatarFileKey = info.client_base64HashClientUID?.trim() ?? "";
     if (!cacheKey || !/^[A-Za-z0-9+/=_-]{8,256}$/.test(avatarFileKey)) return null;
 
-    const transfer = await this.client.fileTransferInitDownload(0n, `/avatar_${avatarFileKey}`, "");
+    const transfer = await client.fileTransferInitDownload(0n, `/avatar_${avatarFileKey}`, "");
+    if (!isCurrent()) return null;
     const size = Number(transfer.size);
     if (!Number.isSafeInteger(size) || size <= 0 || size > MAX_CLIENT_AVATAR_BYTES) return null;
 
@@ -220,7 +227,8 @@ export class TSClient extends EventEmitter {
         callback();
       },
     });
-    await this.client.downloadFileData(this.options.target.host, transfer, destination);
+    await client.downloadFileData(this.options.target.host, transfer, destination);
+    if (!isCurrent()) return null;
     const data = Buffer.concat(chunks);
     if (data.length === 0 || data.length > MAX_CLIENT_AVATAR_BYTES) return null;
     return { cacheKey, data };
@@ -261,6 +269,8 @@ export class TSClient extends EventEmitter {
     });
 
     client.on("disconnected", (err) => {
+      if (this.client !== client) return;
+      this.connectionGeneration++;
       if (err) {
         const normalized = normalizeTeamSpeakError(err);
         this.logger.warn({
@@ -395,6 +405,7 @@ export class TSClient extends EventEmitter {
   }
 
   async disconnect(): Promise<void> {
+    this.connectionGeneration++;
     this.connected = false;
     this.selfLeaveReasonId = null;
     try {

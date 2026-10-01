@@ -44,6 +44,8 @@ Channel and member data come from SDK directory snapshots and client-protocol co
 
 Avatar downloads belong to the connected directory generation. Reset them on SDK interruption and close them before awaiting session teardown. Old success or failure results cannot refill caches, publish images, start another download, or unlock newer work. `isAlive` is only the WebSocket heartbeat acknowledgement flag; it is not a lifecycle predicate. Keep avatar failure optional, the 50-member batch limit and 250 ms continuation delay.
 
+The SDK avatar method captures its client and connection generation across metadata, transfer initialization and download. Recheck both after each await, including reconnects that reuse the same SDK object; never continue an old transfer through a replacement `this.client`. A retired SDK client's disconnect event must not clear the current connection.
+
 Session teardown must remain safe when requested more than once or when sockets and codec resources are already closed. Reconnection is governed by `reconnect-policy.ts`; preserve terminal error handling, bounded retries and the previous-channel fallback.
 
 Invalidate session audio before awaiting peer closure. Each codec and track must be released independently so one disposal failure cannot abandon the remaining resources. WebRTC close callers share one completion promise, including a peer-close rejection. Preserve WebSocketServer's close listener: it owns removal from the server's client set and allows shutdown to finish.
