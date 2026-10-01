@@ -19,6 +19,7 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 | `src/relay.ts` and `src/server/acceleration-relay.ts` | Standalone relay and gateway-side relay transport |
 | `web/src/views/` and `web/src/composables/` | Vue pages, connection state, audio controls, chat and screen sharing |
 | `web/src/voice/screen-share.ts` | Per-session screen capture, peer negotiation, cleanup and diagnostics |
+| `web/src/platform/` | Browser mounting and cancellable Android gateway readiness handshake |
 | `web/src/services/`, `web/src/i18n/`, `web/src/skins/` | Browser persistence, identity import, skin packages and translations |
 | `src/mobile/`, `mobile/`, `web/android/` | Android loopback gateway, asset packaging and Capacitor container |
 
@@ -34,6 +35,8 @@ Channel and member data come from SDK directory snapshots and client-protocol co
 Session teardown must remain safe when requested more than once or when sockets and codec resources are already closed. Reconnection is governed by `reconnect-policy.ts`; preserve terminal error handling, bounded retries and the previous-channel fallback.
 
 Late socket messages and media permission/negotiation results must not mutate a replacement session. Screen-sharing ownership is scoped to both the TeamSpeak target and channel; another member moving channels must not stop the current user's share. Preserve these invariants when extracting the remaining audio responsibilities.
+
+WebRTC offers, answers, playback callbacks and accompaniment capture belong to the session and peer that started them. Invalidate pending negotiation on stop, reconnect or teardown before awaiting resource closure. A stale peer must not publish errors, counters or audio into its successor. Negotiation and track setup failures must restore compatibility capture without misreporting a microphone failure.
 
 ## Audio and screen sharing
 
@@ -89,6 +92,8 @@ Tests requiring a real TeamSpeak server, browser media devices or Android hardwa
 The Android app starts an embedded Node.js gateway on `127.0.0.1:3040` and opens it in the WebView. This preview disables gateway WebRTC voice and the admin console, while reusing the compatibility voice path. Its dependencies and runtime differ from server deployments.
 
 See `mobile/README.md` for build steps and recorded limitations. The embedded Node.js version, SDK compatibility, real-device connections, background audio and native screen sharing require their own validation. Do not present these capabilities as production-ready based on desktop tests.
+
+Platform startup owns its message listener, polling interval and deadline, including slow listener registration. Release them on success, failure, timeout and page exit. The retry button repeats the readiness handshake; it does not restart the embedded Node.js runtime.
 
 ## Repository maintenance
 

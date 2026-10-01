@@ -242,6 +242,9 @@ export function useVoiceWebSocket() {
   let webrtcPlaybackStream: MediaStream | null = null;
   let webrtcPlaybackRetryCleanup: (() => void) | null = null;
   let webrtcNegotiationPromise: Promise<void> | null = null;
+  let webrtcGeneration = 0;
+  let webrtcAnswerTimer: number | null = null;
+  let cancelIceGathering: (() => void) | null = null;
   let webrtcFallbackStarted = false;
   const webrtcActive = ref(false);
   const identityMaterial = ref("");
@@ -269,6 +272,8 @@ export function useVoiceWebSocket() {
   const accompanimentSupported = ref(typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getDisplayMedia));
   const accompanimentErrorCode = ref<"" | "unsupported" | "needsWebRtc" | "noAudio" | "permission">("");
   let accompanimentStream: MediaStream | null = null;
+  let accompanimentGeneration = 0;
+  let accompanimentEndedCleanup: (() => void) | null = null;
   const screenShare = createScreenShareController({
     isOpen: () => ws.value?.readyState === WebSocket.OPEN,
     send: message => ws.value?.send(JSON.stringify(message)),
@@ -513,12 +518,15 @@ export function useVoiceWebSocket() {
     if (audioCtx && audioCtx.state === "suspended") {
       try { await audioCtx.resume(); } catch { /* a user gesture is still required */ }
     }
+    if (webrtcOutputElement !== output) return;
     try {
       await output.play();
+      if (webrtcOutputElement !== output) return;
       webrtcPlaybackRetryCleanup?.();
       clearAudioNotice("PLAYBACK_BLOCKED");
       syncAudioContextNotice();
     } catch {
+      if (webrtcOutputElement !== output) return;
       // Mobile and privacy-focused browsers can require a gesture even for a
       // MediaStream. Keep retrying after the next real interaction, but tell the
       // user why the remote audio is missing instead of staying silent.
@@ -812,6 +820,7 @@ export function useVoiceWebSocket() {
     webrtcMixMicSource?.disconnect();
     webrtcMixMicGain?.disconnect();
     webrtcMixDestination?.disconnect();
+    webrtcMixDestination?.stream.getTracks().forEach(track => track.stop());
     webrtcMixAccompanimentSource = null;
     webrtcMixMicSource = null;
     webrtcMixMicGain = null;
@@ -819,6 +828,9 @@ export function useVoiceWebSocket() {
   }
 
   function releaseAccompanimentStream(): void {
+    accompanimentGeneration++;
+    accompanimentEndedCleanup?.();
+    accompanimentEndedCleanup = null;
     accompanimentStream?.getTracks().forEach((track) => track.stop());
     accompanimentStream = null;
     accompanimentActive.value = false;
@@ -877,6 +889,11 @@ export function useVoiceWebSocket() {
       accompanimentErrorCode.value = "needsWebRtc";
       throw new Error("伴奏功能需要启用 WebRTC");
     }
+    const generation = ++accompanimentGeneration;
+    const peer = webrtcPeer;
+    const sequence = connectionSequence;
+    const isCurrent = (): boolean => generation === accompanimentGeneration
+      && sequence === connectionSequence && webrtcPeer === peer && webrtcActive.value;
 
     const captureProcessingConstraints: MediaTrackConstraints = {
       // Display/application audio must not pass through browser voice
@@ -902,9 +919,14 @@ export function useVoiceWebSocket() {
     try {
       nextStream = await navigator.mediaDevices.getDisplayMedia(options);
     } catch (error) {
+      if (!isCurrent()) return;
       if (error instanceof DOMException && error.name === "AbortError") return;
       accompanimentErrorCode.value = "permission";
       throw error;
+    }
+    if (!isCurrent()) {
+      nextStream.getTracks().forEach(track => track.stop());
+      return;
     }
     const audioTrack = nextStream.getAudioTracks()[0];
     nextStream.getVideoTracks().forEach((track) => track.stop());
@@ -924,16 +946,26 @@ export function useVoiceWebSocket() {
       // processing constraints. The capture can still proceed without
       // introducing a WebSpeak-side gain stage.
     }
+    if (!isCurrent()) {
+      nextStream.getTracks().forEach(track => track.stop());
+      return;
+    }
     if ("contentHint" in audioTrack) audioTrack.contentHint = "music";
 
+    accompanimentEndedCleanup?.();
     accompanimentStream?.getTracks().forEach((track) => track.stop());
     accompanimentStream = nextStream;
     accompanimentActive.value = true;
     sendCmd("setAccompanimentActive", { active: true });
-    audioTrack.addEventListener("ended", () => { void stopAccompaniment(); }, { once: true });
+    const onEnded = (): void => {
+      if (accompanimentStream === nextStream) void stopAccompaniment().catch(() => undefined);
+    };
+    audioTrack.addEventListener("ended", onEnded, { once: true });
+    accompanimentEndedCleanup = () => audioTrack.removeEventListener("ended", onEnded);
     try {
       await replaceWebRtcAudioTrack();
     } catch (error) {
+      if (!isCurrent() || accompanimentStream !== nextStream) return;
       releaseAccompanimentStream();
       sendCmd("setAccompanimentActive", { active: false });
       stopWebRtcMix();
@@ -952,21 +984,39 @@ export function useVoiceWebSocket() {
 
   async function startWebRtcTransport(sequence: number, socket: WebSocket): Promise<void> {
     if (typeof RTCPeerConnection === "undefined") throw new Error("当前浏览器不支持 WebRTC");
-    await ensureMicrophone();
-    if (sequence !== connectionSequence || socket.readyState !== WebSocket.OPEN || !micStream) return;
+    stopWebRtcTransport();
+    const generation = webrtcGeneration;
+    const isCurrent = (): boolean => generation === webrtcGeneration && sequence === connectionSequence
+      && ws.value === socket && socket.readyState === WebSocket.OPEN && state.connected;
+    try { await ensureMicrophone(); } catch (error) {
+      if (isCurrent()) throw error;
+      return;
+    }
+    if (!isCurrent() || !micStream) return;
     const microphoneTrack = micStream.getAudioTracks()[0];
     if (!microphoneTrack) throw new Error("没有可用的麦克风音轨");
 
     stopCaptureGraph();
-    const peer = new RTCPeerConnection({ iceServers: [] });
-    webrtcPeer = peer;
     webrtcFallbackStarted = false;
-    microphoneTrack.enabled = !microphoneMuted.value;
-    const mixedStream = createWebRtcMixStream();
-    const mixedTrack = mixedStream.getAudioTracks()[0];
-    if (!mixedTrack) throw new Error("混合音频轨道创建失败");
-    peer.addTrack(mixedTrack, mixedStream);
+    let peer: RTCPeerConnection;
+    try { peer = new RTCPeerConnection({ iceServers: [] }); } catch {
+      await fallbackFromWebRtc(sequence, socket, "WEBRTC_NEGOTIATION_FAILED");
+      return;
+    }
+    webrtcPeer = peer;
+    const isCurrentPeer = (): boolean => isCurrent() && webrtcPeer === peer;
+    try {
+      microphoneTrack.enabled = !microphoneMuted.value;
+      const mixedStream = createWebRtcMixStream();
+      const mixedTrack = mixedStream.getAudioTracks()[0];
+      if (!mixedTrack) throw new Error("混合音频轨道创建失败");
+      peer.addTrack(mixedTrack, mixedStream);
+    } catch {
+      await fallbackFromWebRtc(sequence, socket, "WEBRTC_NEGOTIATION_FAILED");
+      return;
+    }
     peer.ontrack = (event) => {
+      if (!isCurrentPeer()) return;
       const stream = event.streams[0] ?? new MediaStream([event.track]);
       // Use the browser's native WebRTC media output. Routing the remote
       // track through AudioContext made playback depend on autoplay policy:
@@ -997,15 +1047,17 @@ export function useVoiceWebSocket() {
     };
     startWebRtcMicMonitor(getAudioCtx(), micStream, microphoneTrack);
     peer.onconnectionstatechange = () => {
-      if (peer.connectionState === "failed") void fallbackFromWebRtc(sequence, socket, "WEBRTC_CONNECTION_FAILED");
+      if (isCurrentPeer() && peer.connectionState === "failed") void fallbackFromWebRtc(sequence, socket, "WEBRTC_CONNECTION_FAILED");
     };
 
     const negotiation = (async () => {
       webrtcActive.value = true;
       const offer = await peer.createOffer();
+      if (!isCurrentPeer()) return;
       await peer.setLocalDescription(offer);
+      if (!isCurrentPeer()) return;
       await waitForIceGathering(peer);
-      if (sequence !== connectionSequence || webrtcPeer !== peer || socket.readyState !== WebSocket.OPEN) return;
+      if (!isCurrentPeer()) return;
       const description = peer.localDescription;
       if (!description) throw new Error("WebRTC offer was not created");
       socket.send(JSON.stringify({ type: "webrtcOffer", payload: {
@@ -1013,16 +1065,16 @@ export function useVoiceWebSocket() {
         muted: microphoneMuted.value,
         accompanimentActive: accompanimentActive.value,
       } }));
-      window.setTimeout(() => {
-        if (webrtcPeer === peer && !peer.remoteDescription) void fallbackFromWebRtc(sequence, socket, "WEBRTC_ANSWER_TIMEOUT");
+      webrtcAnswerTimer = window.setTimeout(() => {
+        webrtcAnswerTimer = null;
+        if (isCurrentPeer() && !peer.remoteDescription) void fallbackFromWebRtc(sequence, socket, "WEBRTC_ANSWER_TIMEOUT");
       }, 8_000);
     })();
     webrtcNegotiationPromise = negotiation;
     try {
       await negotiation;
     } catch (error) {
-      if (webrtcPeer === peer) await fallbackFromWebRtc(sequence, socket, "WEBRTC_NEGOTIATION_FAILED");
-      throw error;
+      if (isCurrentPeer()) await fallbackFromWebRtc(sequence, socket, "WEBRTC_NEGOTIATION_FAILED");
     } finally {
       if (webrtcNegotiationPromise === negotiation) webrtcNegotiationPromise = null;
     }
@@ -1037,29 +1089,39 @@ export function useVoiceWebSocket() {
         settled = true;
         window.clearTimeout(timer);
         peer.removeEventListener("icegatheringstatechange", onStateChange);
+        if (cancelIceGathering === finish) cancelIceGathering = null;
         resolve();
       };
       const onStateChange = () => {
         if (peer.iceGatheringState === "complete") finish();
       };
       const timer = window.setTimeout(finish, 5_000);
+      cancelIceGathering = finish;
       peer.addEventListener("icegatheringstatechange", onStateChange);
     });
   }
 
   async function applyWebRtcAnswer(description: unknown): Promise<void> {
-    if (!webrtcPeer || !isSessionDescription(description, "answer")) return;
+    const peer = webrtcPeer;
+    const socket = ws.value;
+    const sequence = connectionSequence;
+    if (!peer || !socket || !isSessionDescription(description, "answer")) return;
+    const isCurrent = (): boolean => webrtcPeer === peer && ws.value === socket
+      && sequence === connectionSequence && socket.readyState === WebSocket.OPEN && state.connected;
     try {
-      await webrtcPeer.setRemoteDescription(description);
+      await peer.setRemoteDescription(description);
+      if (!isCurrent()) return;
+      if (webrtcAnswerTimer !== null) window.clearTimeout(webrtcAnswerTimer);
+      webrtcAnswerTimer = null;
       webrtcActive.value = true;
       syncWebRtcMemberVolumes();
     } catch {
-      if (lastConnection && ws.value) await fallbackFromWebRtc(connectionSequence, ws.value, "WEBRTC_ANSWER_REJECTED");
+      if (isCurrent()) await fallbackFromWebRtc(sequence, socket, "WEBRTC_ANSWER_REJECTED");
     }
   }
 
   async function fallbackFromWebRtc(sequence: number, socket: WebSocket, reasonCode = "WEBRTC_UNAVAILABLE"): Promise<void> {
-    if (sequence !== connectionSequence || webrtcFallbackStarted) return;
+    if (sequence !== connectionSequence || ws.value !== socket || !state.connected || webrtcFallbackStarted) return;
     webrtcFallbackStarted = true;
     webrtcActive.value = false;
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "webrtcStop" }));
@@ -1075,15 +1137,23 @@ export function useVoiceWebSocket() {
   }
 
   function stopWebRtcTransport(): void {
+    webrtcGeneration++;
     const peer = webrtcPeer;
     webrtcPeer = null;
+    if (webrtcAnswerTimer !== null) window.clearTimeout(webrtcAnswerTimer);
+    webrtcAnswerTimer = null;
+    cancelIceGathering?.();
     webrtcActive.value = false;
     webrtcNegotiationPromise = null;
     releaseAccompanimentStream();
     stopWebRtcMix();
     stopWebRtcMicMonitor();
     stopWebRtcPlayback();
-    if (peer) void peer.close();
+    if (peer) {
+      peer.ontrack = null;
+      peer.onconnectionstatechange = null;
+      peer.close();
+    }
   }
 
   function stopWebRtcPlayback(): void {

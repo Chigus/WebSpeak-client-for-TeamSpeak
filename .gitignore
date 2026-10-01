@@ -12,5 +12,11 @@ data/
 config.json
 *.log
 .env
-webspeak-update.tar.gz
+# Local deployment/download artifacts (see docs/LOCAL_ARTIFACTS.zh-CN.md).
+/release-artifacts/
+/webspeak-deploy*.tar.gz
+/webspeak-update*.tar.gz
+/teamspeak6-server-linux-amd64.tar.xz
+/.local-opus-hook.cjs
+/界面参考/stitch_teamspeak_web_interface.zip
 claude.pem
