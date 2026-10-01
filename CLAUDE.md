@@ -8,13 +8,17 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 | --- | --- |
 | `src/index.ts` | Gateway startup, SQLite, master secret, admin service and shutdown; also supports relay mode |
 | `src/server/server.ts` | HTTP or HTTPS, public configuration, skins, join tickets, admin routes and static frontend |
-| `src/server/voice-bridge.ts` | `/ws/voice`, session orchestration, control commands, voice and screen-sharing signaling |
+| `src/server/voice-bridge.ts` | `/ws/voice`, admission, connection/reconnection orchestration and voice transport assembly |
+| `src/server/voice-commands.ts`, `directory-view.ts`, `audio-stats.ts` | Command execution, public directory projection and diagnostic snapshots |
+| `src/server/screen-share-coordinator.ts` | Server/channel-scoped sharing membership and browser/native signaling |
+| `src/shared/` | Browser-safe wire types and runtime parsers shared by both endpoints |
 | `src/server/ts-client.ts` and `teamspeak-adapter.ts` | SDK integration, TS3/TS6 negotiation, identity, chat, voice and client events |
 | `src/server/session-manager.ts` and `directory-sync.ts` | Connection state, teardown, admission limits and directory reconciliation |
 | `src/server/webrtc-audio.ts` and `opus-codec.ts` | WebRTC audio mixing and platform-specific Opus codecs |
 | `src/admin/`, `src/security/`, `src/persistence/` | Administration, access policies, credentials and persistent settings |
 | `src/relay.ts` and `src/server/acceleration-relay.ts` | Standalone relay and gateway-side relay transport |
 | `web/src/views/` and `web/src/composables/` | Vue pages, connection state, audio controls, chat and screen sharing |
+| `web/src/voice/screen-share.ts` | Per-session screen capture, peer negotiation, cleanup and diagnostics |
 | `web/src/services/`, `web/src/i18n/`, `web/src/skins/` | Browser persistence, identity import, skin packages and translations |
 | `src/mobile/`, `mobile/`, `web/android/` | Android loopback gateway, asset packaging and Capacitor container |
 
@@ -28,6 +32,8 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 Channel and member data come from SDK directory snapshots and client-protocol commands, followed by realtime notifications. WebQuery and its API key are not required. `DirectorySynchronizer` reconciles snapshots with membership events.
 
 Session teardown must remain safe when requested more than once or when sockets and codec resources are already closed. Reconnection is governed by `reconnect-policy.ts`; preserve terminal error handling, bounded retries and the previous-channel fallback.
+
+Late socket messages and media permission/negotiation results must not mutate a replacement session. Screen-sharing ownership is scoped to both the TeamSpeak target and channel; another member moving channels must not stop the current user's share. Preserve these invariants when extracting the remaining audio responsibilities.
 
 ## Audio and screen sharing
 
