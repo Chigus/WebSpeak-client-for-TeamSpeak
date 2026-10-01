@@ -181,6 +181,8 @@ Routes load their page modules on demand. Document-level page styles must be gat
 
 The identity dialog retains page-owned CSS with narrowly targeted `:deep` selectors so the existing declaration order and specificity remain intact. Shared button rules target its dedicated classes across the component boundary. Its close button is positioned within the modal. Public skin-contract tests include Vue files recursively under `components/web-client`; keep new public parts documented.
 
+The public join form uses explicit named field models and emits page actions. The chat panel receives a presentation subset of the single page-owned chat controller; keep its list ref bound to the rendered scroller so tab changes and new messages retain automatic scrolling. Form grid columns must allow shrinking, and narrow identity/relay controls must wrap without clipping translated text.
+
 Admin presentation components receive stable feature controllers; do not instantiate duplicate controllers in children. The welcome-language model remains page-owned and the skin file input belongs to its presentation component. Feature CSS crosses these boundaries with `:deep`, while shell and language-control selectors retain their existing scope. On narrow screens the brand and logout occupy the first row and all four navigation links share a separate row with at least 44 px high targets.
 
 Keep each repair batch tied to its current plan item. Combine related fixes before running the full verification command; use focused checks during diagnosis and repeat the full suite only when subsequent changes or failures warrant it.

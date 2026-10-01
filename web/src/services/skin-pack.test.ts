@@ -194,8 +194,8 @@ test("the activity artwork layer floats above room content without intercepting 
   assert.match(css, /\.voice-activity-artwork\s*\{\s*position: absolute;\s*z-index: 2;\s*inset: -26px 0 -48px;[^}]*pointer-events: none;/);
   assert.match(css, /\.voice-activity-artwork\s*\{[^}]*transform: perspective\(1100px\) rotateY\(-2\.5deg\) translateZ\(22px\)/);
   assert.match(css, /\.app-shell \.member-panel::before\s*\{\s*content: "";\s*position: absolute;\s*z-index: 1;\s*left: -28px;\s*bottom: 18px;\s*width: min\(430px, calc\(100vw - 24px\)\);\s*aspect-ratio: 3 \/ 2;[^}]*perspective\(1100px\) rotateY\(-8deg\)/);
-  assert.match(css, /\.app-shell \.chat-empty\[data-ws-state="messages-empty"\]\s*\{[^}]*min-height: 210px;\s*padding: 126px 12px 10px;/);
-  assert.match(css, /\.app-shell \.chat-panel \.section-heading,[\s\S]*?\.app-shell \.chat-panel \.message-composer\s*\{\s*position: relative;\s*z-index: 3;/);
+  assert.match(css, /:deep\(\.app-shell \.chat-empty\[data-ws-state="messages-empty"\]\)\s*\{[^}]*min-height: 210px;\s*padding: 126px 12px 10px;/);
+  assert.match(css, /:deep\(\.app-shell \.chat-panel \.section-heading\),[\s\S]*?:deep\(\.app-shell \.chat-panel \.message-composer\)\s*\{\s*position: relative;\s*z-index: 3;/);
   assert.match(css, /\.screen-share-player\s*\{[^}]*background: var\(--surface-1\)/);
   assert.match(css, /\.screen-share-player-exit\s*\{[^}]*z-index: 3;/);
   assert.match(css, /\.screen-share-player-stage\s*\{[^}]*var\(--accent\)[^}]*var\(--surface-2\)/);
@@ -205,7 +205,7 @@ test("the activity artwork layer floats above room content without intercepting 
 
 test("channel empty state removes its bubble ornament and keeps the text-channel label", async () => {
   const [view, chat] = await Promise.all([
-    readFile(new URL("../views/WebClient.vue", import.meta.url), "utf8"),
+    readFile(new URL("../components/web-client/ChatPanel.vue", import.meta.url), "utf8"),
     readFile(new URL("../composables/useWebClientChat.ts", import.meta.url), "utf8"),
   ]);
   assert.doesNotMatch(view, /data-ws-state="messages-empty"><div class="chat-empty-icon"/);
@@ -215,7 +215,7 @@ test("channel empty state removes its bubble ornament and keeps the text-channel
 
 test("homepage motion and room content spacing preserve the ILLUSIA layout", async () => {
   const css = await readFile(new URL("../styles/web-client.css", import.meta.url), "utf8");
-  assert.ok(css.includes('.join-page *:not([data-ws-part="home.join-card"])'));
+  assert.ok(css.includes('.join-page :deep(*:not([data-ws-part="home.join-card"]))'));
   assert.ok(css.includes("animation: none !important"));
   assert.doesNotMatch(css, /\.join-page \*, \.join-page \*::before, \.join-page \*::after\s*\{\s*animation: none !important/);
   assert.ok(css.includes("padding: 0 clamp(12px, 1.4vw, 22px);"), "homepage header contents keep an inset from their container edge");

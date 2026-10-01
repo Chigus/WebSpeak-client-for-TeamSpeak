@@ -46,45 +46,21 @@
           <div v-if="!serverConfigLoading && !initialized" class="notice warning-notice" data-ws-part="home.notice" data-ws-state="unconfigured"><span class="notice-symbol">i</span><span>{{ t('notConfigured') }} <a href="/admin">{{ t('configureNow') }}</a></span></div>
           <div v-if="!localPersistenceAvailable" class="notice warning-notice" data-ws-part="home.notice" data-ws-state="storage-warning"><span class="notice-symbol">i</span><span>{{ t('localPersistenceUnavailable') }}</span></div>
 
-          <form v-if="initialized" class="join-form" data-ws-part="home.form" @submit.prevent="doConnect">
-            <div v-if="accessMode === 'open'" class="field-grid target-fields" data-ws-part="home.server-target">
-              <label class="field-label" data-ws-part="home.field-label" for="server-address"><span>{{ t('serverAddress') }}</span><div class="field-wrap" data-ws-part="home.field"><Icon name="server" :size="17" /><input id="server-address" v-model="serverHost" autocomplete="url" :placeholder="t('serverAddressPlaceholder')" /></div></label>
-              <label class="field-label" data-ws-part="home.field-label" for="server-port"><span>{{ t('serverPort') }}</span><div class="field-wrap" data-ws-part="home.field"><Icon name="hash" :size="17" /><input id="server-port" v-model="serverPort" inputmode="numeric" type="text" maxlength="5" :placeholder="t('serverPortPlaceholder')" /></div></label>
-            </div>
-            <div v-if="openTargetPrefillBlocked" class="notice warning-notice" data-ws-part="home.notice" data-ws-state="target-prefill-blocked"><span class="notice-symbol">i</span><span>{{ t('openTargetDefaultNotPrefilled') }}</span></div>
-            <div v-if="accelerationAvailable" class="acceleration-choice" data-ws-part="home.relay-choice"><div class="acceleration-copy" data-ws-part="home.relay-choice.copy"><strong>{{ t('relayAcceleration') }}</strong><small>{{ t('relayAccelerationHint') }}</small></div><select v-model="accelerationRelayId" :aria-label="t('relayAcceleration')"><option value="">{{ t('directConnection') }}</option><option v-for="relay in accelerationRelays" :key="relay.id" :value="relay.id">{{ relay.name }}</option></select></div>
-            <div v-if="accessMode === 'open' && (favoriteServers.length || recentServers.length)" class="local-servers" data-ws-part="home.server-history">
-              <div v-if="favoriteServers.length" class="local-server-group" data-ws-part="home.server-history.group" data-ws-state="favorite"><span>{{ t('favoriteServers') }}</span><button v-for="favorite in favoriteServers" :key="favorite.id" type="button" @click="selectLocalServer(favorite.address, favorite.nickname)">{{ favorite.label }}</button></div>
-              <div v-if="recentServers.length" class="local-server-group" data-ws-part="home.server-history.group" data-ws-state="recent"><span>{{ t('recentServers') }}</span><button v-for="recent in recentServers" :key="recent.id" type="button" @click="selectLocalServer(recent.address, recent.nickname)">{{ recent.address }}</button></div>
-            </div>
-            <button v-if="accessMode === 'open' && serverHost.trim()" type="button" class="favorite-toggle" data-ws-part="home.favorite-toggle" @click="toggleFavorite">{{ isFavorite ? t('removeFavorite') : t('saveFavorite') }}</button>
-
-            <template v-if="accessMode === 'open'">
-              <label class="field-label" data-ws-part="home.field-label" for="server-password">{{ t('serverPassword') }} <span>{{ t('optional') }}</span></label>
-              <div class="field-wrap" data-ws-part="home.field"><Icon name="lock" :size="17" /><input id="server-password" v-model="serverPassword" type="password" autocomplete="off" :placeholder="t('optionalPassword')" /></div>
-            </template>
-
-            <label class="field-label" data-ws-part="home.field-label" for="nickname">{{ t('nickname') }}</label>
-            <div class="field-wrap" data-ws-part="home.field">
-              <Icon name="users" :size="17" />
-              <input id="nickname" v-model="nickname" autocomplete="nickname" maxlength="30" :placeholder="t('nicknamePlaceholder')" autofocus />
-            </div>
-
-            <label class="field-label" data-ws-part="home.field-label" for="channel">{{ t('targetChannel') }} <span>{{ t('optional') }}</span></label>
-            <div class="field-wrap" data-ws-part="home.field">
-              <Icon name="hash" :size="17" />
-              <input id="channel" v-model="channel" :placeholder="t('emptyDefault')" @keyup.enter="doConnect" />
-            </div>
-
-            <details class="identity-options" data-ws-part="home.identity"><summary>{{ t('identityOptions') }}</summary><div class="identity-controls"><label class="remember-identity"><input v-model="rememberIdentity" type="checkbox" /><span><strong>{{ t('rememberIdentity') }}</strong><small>{{ t('rememberIdentityHint') }}</small></span></label><div class="identity-actions" data-ws-part="home.identity-actions"><button type="button" class="identity-action-button" data-ws-part="home.identity-import.open" @click="openIdentityImport">{{ t('identityImport') }}</button><button type="button" class="identity-action-button" data-ws-part="home.identity-export.button" :disabled="identityExportBusy || !rememberIdentity || !identityMaterial" @click="exportIdentity">{{ t('identityExport') }}</button></div></div></details><p v-if="rememberIdentity" class="identity-warning">{{ t('rememberIdentityConcurrentWarning') }}</p>
-
-            <button class="primary-button connect-button" data-ws-part="home.connect" :disabled="!canJoin || serverConfigLoading || !identityReady || voiceState.connecting" type="submit">
-              <span v-if="voiceState.connecting" class="button-spinner"></span>
-              <span>{{ voiceState.connecting ? t('connecting') : t('enterVoice') }}</span>
-              <Icon v-if="!voiceState.connecting" name="chevron-right" :size="17" />
-            </button>
-            <button v-if="voiceState.connecting" type="button" class="cancel-connect-button" @click="doDisconnect">{{ t('cancel') }}</button>
-          </form>
+          <JoinForm v-if="initialized"
+            v-model:server-host="serverHost" v-model:server-port="serverPort"
+            v-model:server-password="serverPassword" v-model:nickname="nickname"
+            v-model:channel="channel" v-model:remember-identity="rememberIdentity"
+            v-model:acceleration-relay-id="accelerationRelayId"
+            :access-mode="accessMode" :open-target-prefill-blocked="openTargetPrefillBlocked"
+            :acceleration-relays="accelerationRelays" :favorite-servers="favoriteServers"
+            :recent-servers="recentServers" :is-favorite="isFavorite"
+            :identity-export-busy="identityExportBusy" :has-identity="Boolean(identityMaterial)"
+            :connecting="voiceState.connecting"
+            :join-disabled="!canJoin || serverConfigLoading || !identityReady || voiceState.connecting"
+            :t="t" @connect="doConnect" @disconnect="doDisconnect"
+            @select-server="selectLocalServer" @toggle-favorite="toggleFavorite"
+            @import-identity="openIdentityImport" @export-identity="exportIdentity"
+          />
           <div class="join-meta" data-ws-part="home.security-note"><Icon name="lock" :size="14" /> {{ t('connectionAuthorized') }}</div>
         </div>
       </main>
@@ -221,33 +197,10 @@
               </div>
             </section>
 
-            <section :class="['chat-panel', { 'mobile-section-hidden': mobileSection !== 'chat' }]" data-ws-part="voice.chat">
-              <div class="chat-tabs" data-ws-part="voice.chat.tabs" role="tablist" :aria-label="t('chatTabs')">
-                <button type="button" data-ws-part="voice.chat.tab" :data-ws-state="chatTab === 'channel' ? 'active' : 'idle'" :class="{ active: chatTab === 'channel' }" @click="chatTab = 'channel'"><Icon name="hash" :size="15" /> {{ currentChannelName }}</button>
-                <button type="button" data-ws-part="voice.chat.tab" :data-ws-state="chatTab === 'server' ? 'active' : 'idle'" :class="{ active: chatTab === 'server' }" @click="chatTab = 'server'"><Icon name="server" :size="15" /> {{ t('serverChat') }}</button>
-                <button v-for="conversation in privateConversations" :key="conversation.key" type="button" data-ws-part="voice.chat.tab" :data-ws-state="chatTab === 'private' && privateConversationKey === conversation.key ? 'active' : 'idle'" :class="{ active: chatTab === 'private' && privateConversationKey === conversation.key }" @click="openConversation(conversation)"><Icon name="message" :size="15" /> {{ conversation.name }}</button>
-                <button type="button" data-ws-part="voice.chat.tab" :data-ws-state="chatTab === 'events' ? 'active' : 'idle'" :class="{ active: chatTab === 'events' }" @click="chatTab = 'events'"><Icon name="bell" :size="15" /> {{ t('eventLog') }}</button>
-              </div>
-              <div class="section-heading chat-heading" data-ws-part="voice.chat.heading"><div><span class="section-kicker">{{ chatTabLabel }}</span><h2><Icon :name="chatTab === 'server' ? 'server' : chatTab === 'events' ? 'bell' : chatTab === 'private' ? 'message' : 'hash'" :size="20" /> {{ chatTitle }}</h2></div><span class="section-counter">{{ chatTab === 'events' ? t('eventCount', { count: serverEvents.length }) : t('messageCount', { count: visibleChatMessages.length }) }}</span></div>
-              <div ref="chatListEl" class="message-list" data-ws-part="voice.chat.messages">
-                <div v-if="chatTab === 'events'">
-                  <article v-for="event in serverEvents" :key="event.id" class="event-row" data-ws-part="voice.chat.event"><time>{{ formatTime(event.timestamp) }}</time><span>{{ event.message }}</span></article>
-                  <div v-if="!serverEvents.length" class="chat-empty" data-ws-part="voice.chat.empty" data-ws-state="events-empty"><div class="chat-empty-icon"><Icon name="bell" :size="24" /></div><strong>{{ t('noEvents') }}</strong><span>{{ t('noEventsLead') }}</span></div>
-                </div>
-                <div v-else-if="!visibleChatMessages.length" class="chat-empty" data-ws-part="voice.chat.empty" data-ws-state="messages-empty"><strong>{{ chatTab === 'private' ? t('privateChatStart') : t('chatStart') }}</strong><span>{{ chatTab === 'private' ? t('privateChatStartLead') : t('chatStartLead') }}</span></div>
-                <template v-for="message in visibleChatMessages" :key="message.id">
-                  <article v-if="chatTab !== 'events'" :class="['message-row', { mine: message.isSelf }]" data-ws-part="voice.chat.message" :data-ws-state="message.isSelf ? 'mine' : 'other'">
-                <div class="message-avatar" data-ws-part="voice.chat.message-avatar" :style="avatarStyle(message.invokerName, message.isSelf, messageAvatar(message))">{{ messageAvatar(message) ? '' : avatarInitial(message.invokerName) }}</div>
-                  <div class="message-body" data-ws-part="voice.chat.message-body"><div class="message-meta"><strong>{{ message.isSelf ? t('you') : message.invokerName }}</strong><time>{{ formatTime(message.timestamp) }}</time></div><div class="message-bubble" data-ws-part="voice.chat.message-bubble">{{ message.message }}</div></div>
-                  </article>
-                </template>
-              </div>
-               <form v-if="chatTab !== 'events'" class="message-composer" data-ws-part="voice.chat.composer" @submit.prevent="submitMessage">
-                 <input v-model="messageDraft" maxlength="500" :placeholder="chatPlaceholder" :aria-label="t('send')" />
-                 <button class="send-button" type="submit" :disabled="!canSendChat || !messageDraft.trim()" :title="t('send')"><Icon name="send" :size="18" /></button>
-               </form>
-               <p v-if="chatStatus" class="chat-status" data-ws-part="voice.chat.status" role="status">{{ chatStatus }}</p>
-             </section>
+            <ChatPanel :model="chat" :t="t" :current-channel-name="currentChannelName"
+              :mobile-hidden="mobileSection !== 'chat'" :server-events="serverEvents"
+              :avatar-style="avatarStyle" :avatar-initial="avatarInitial"
+              :message-avatar="messageAvatar" :format-time="formatTime" />
           </div>
         </div>
 
@@ -387,6 +340,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from "vue";
 import Icon from "../components/Icon.vue";
+import JoinForm from "../components/web-client/JoinForm.vue";
+import ChatPanel from "../components/web-client/ChatPanel.vue";
 import WebClientHeader from "../components/web-client/WebClientHeader.vue";
 import IdentityImportDialog from "../components/web-client/IdentityImportDialog.vue";
 import { usePublicSkin } from "../composables/usePublicSkin.js";
@@ -573,7 +528,6 @@ const {
   visitorTotal,
   accelerationRelays,
   openTargetPrefillBlocked,
-  accelerationAvailable,
   serverConfigLoading,
   localizedWelcomeText,
   loadPublicConfig,
@@ -781,22 +735,7 @@ const {
   showToast,
   t,
 });
-const {
-  tab: chatTab,
-  privateConversationKey,
-  canSend: canSendChat,
-  status: chatStatus,
-  messageDraft,
-  listElement: chatListEl,
-  conversations: privateConversations,
-  visibleMessages: visibleChatMessages,
-  tabLabel: chatTabLabel,
-  title: chatTitle,
-  placeholder: chatPlaceholder,
-  openPrivateChat,
-  openConversation,
-  submitMessage,
-} = useWebClientChat({
+const chat = useWebClientChat({
   messages: chatMessages,
   members,
   currentChannel,
@@ -815,6 +754,7 @@ const {
   notifyPrivateMessage: () => playNotification("private"),
   t,
 });
+const { tab: chatTab, openPrivateChat } = chat;
 const {
   canJoin,
   currentServerTarget,
