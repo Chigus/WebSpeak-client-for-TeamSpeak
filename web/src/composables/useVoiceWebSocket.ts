@@ -4,12 +4,13 @@ import { createMicrophoneCaptureFactory, type MicrophoneCapture, type Microphone
 export type { MicrophoneProcessingSettings } from "../voice/microphone-capture.js";
 import { createAudioSinkRouter } from "../voice/audio-sink.js";
 import { createAccompaniment, type AccompanimentErrorCode } from "../voice/accompaniment.js";
-import { createWebRtcInput, type WebRtcInput } from "../voice/webrtc-input.js";
-import { createMicrophoneMeter, type MicrophoneMeter } from "../voice/microphone-meter.js";
+import { createWebRtcTransport } from "../voice/webrtc-transport.js";
+import { createVoiceConnection } from "../voice/connection.js";
+import { createVoiceCommands } from "../voice/commands.js";
+import type { SinkAudioElement } from "../voice/webrtc-playback.js";
 import { createScreenShareController } from "../voice/screen-share.js";
 export type { ScreenShareOutputSettings, ScreenShareCaptureStats, ScreenSharePeerStats, ScreenShareWebRtcStats } from "../voice/screen-share.js";
 import { parseServerMessage } from "../../../src/shared/server-messages.js";
-import { isSessionDescription, type WebRtcClientMessage } from "../../../src/shared/webrtc.js";
 import type { ClientCommandPayloads, ClientCommandType } from "../../../src/shared/client-commands.js";
 export type { ScreenShareStreamDescription as ScreenShareStream, ScreenShareViewerDescription as ScreenShareViewer, ScreenSharePeerSignal as ScreenShareSignal } from "../../../src/shared/screen-share.js";
 import type { ChannelMember, ChannelInfo, ChatMessage, ServerEvent, VoiceAudioBridgeStats } from "../../../src/shared/voice-models.js";
@@ -53,10 +54,6 @@ export interface AudioOutputDevice {
 export type AudioPermission = "unknown" | "granted" | "denied";
 
 type SinkAudioContext = AudioContext & {
-  setSinkId?: (sinkId: string) => Promise<void>;
-};
-
-type SinkAudioElement = HTMLAudioElement & {
   setSinkId?: (sinkId: string) => Promise<void>;
 };
 
@@ -216,10 +213,6 @@ class CancelledMediaOperation extends Error {
   constructor() { super("媒体操作已取消"); this.name = "AbortError"; }
 }
 
-function sendWebRtcMessage(socket: WebSocket, message: WebRtcClientMessage): void {
-  socket.send(JSON.stringify(message));
-}
-
 export function useVoiceWebSocket() {
   const ws = shallowRef<WebSocket | null>(null);
   const state = reactive<VoiceState>({ connected: false, connecting: false, reconnecting: false, reconnectAttempt: 0, reconnectFailed: false, tsClientId: 0, error: "", errorCode: "", microphoneError: "", microphoneErrorCode: "", audioNotice: "", audioNoticeCode: "", channelSwitchedChannelId: "" });
@@ -228,25 +221,35 @@ export function useVoiceWebSocket() {
   const chatMessages = reactive<ChatMessage[]>([]);
   const serverEvents = reactive<ServerEvent[]>([]);
   const pokeNotifications = reactive<{ id: string; invokerId: number; invokerUid: string; invokerName: string; message: string; timestamp: number }[]>([]);
-  let connectionSequence = 0;
+  const voiceConnection = createVoiceConnection({
+    onSocket: socket => { ws.value = socket; },
+    onMessage: handleMessage,
+    onAudio: handleAudioFrame,
+    onClose(event) {
+      releaseSessionResources();
+      state.connected = false;
+      state.connecting = false;
+      state.reconnecting = false;
+      if (event.code !== 1000 && !state.reconnectFailed && !state.errorCode) {
+        state.errorCode = closeErrorCode(event.code, event.reason);
+        state.error = closeReason(event.code, event.reason);
+      }
+      clearMicrophoneError();
+      clearAudioNotice();
+    },
+    onFailure({ code, detail, cause }) {
+      state.connecting = false;
+      state.errorCode = normalizedClientErrorCode(code, "REQUEST_FAILED");
+      state.error = cause instanceof Error ? cause.message : joinTicketReason(state.errorCode, detail);
+    },
+  });
+  const commands = createVoiceCommands({ socket: () => ws.value, generation: () => voiceConnection.generation });
   let lastConnection: { target: string; channel: string; nickname: string; serverPassword: string; identity?: string; rememberIdentity: boolean; accelerated: boolean; accelerationRelayId: string } | null = null;
   let audioStatusProbeSequence = 0;
   const pendingAudioStatusProbes = new Map<string, { resolve: (stats: VoiceAudioBridgeStats | null) => void; timer: ReturnType<typeof setTimeout> }>();
-  let commandSequence = 0;
-  const pendingCommands = new Map<string, { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
-  let webrtcPeer: RTCPeerConnection | null = null;
   let fallbackAudioFramesReceived = 0;
   let fallbackAudioFramesDropped = 0;
   let fallbackAudioDecodeErrors = 0;
-  let webrtcOutputElement: SinkAudioElement | null = null;
-  let webrtcPlaybackStream: MediaStream | null = null;
-  let webrtcPlaybackRetryCleanup: (() => void) | null = null;
-  let webrtcNegotiationPromise: Promise<void> | null = null;
-  let webrtcGeneration = 0;
-  let webrtcAnswerTimer: number | null = null;
-  let cancelIceGathering: (() => void) | null = null;
-  let webrtcFallbackStarted = false;
-  const webrtcActive = ref(false);
   const identityMaterial = ref("");
   const storedVolumesByUid = reactive<Record<string, number>>({});
   let microphoneStartPromise: Promise<void> | null = null;
@@ -263,14 +266,13 @@ export function useVoiceWebSocket() {
   const accompanimentActive = ref(false);
   const accompanimentSupported = ref(typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getDisplayMedia));
   const accompanimentErrorCode = ref<AccompanimentErrorCode>("");
-  let webrtcInput: WebRtcInput | null = null;
   const accompaniment = createAccompaniment({
     isSupported: () => accompanimentSupported.value,
-    getTarget: () => webrtcActive.value && webrtcPeer && micStream ? webrtcInput : null,
+    getTarget: () => webrtc.active && webrtc.peer && micStream ? webrtc.input : null,
     onActive(active) {
       const changed = accompanimentActive.value !== active;
       accompanimentActive.value = active;
-      if (changed && webrtcActive.value) sendCmd("setAccompanimentActive", { active });
+      if (changed && webrtc.active) sendCmd("setAccompanimentActive", { active });
     },
     onError: code => { accompanimentErrorCode.value = code; },
   });
@@ -278,7 +280,6 @@ export function useVoiceWebSocket() {
     isOpen: () => ws.value?.readyState === WebSocket.OPEN,
     send: message => ws.value?.send(JSON.stringify(message)),
   });
-  let webrtcMicrophoneMeter: MicrophoneMeter | null = null;
   const inputDevices = reactive<AudioInputDevice[]>([]);
   const outputDevices = reactive<AudioOutputDevice[]>([]);
   const selectedInputDeviceId = ref(typeof localStorage !== "undefined" ? localStorage.getItem("webspeak:input-device") ?? "" : "");
@@ -342,6 +343,46 @@ export function useVoiceWebSocket() {
     getVolume: clientId => (volumes[clientId] ?? 1) * effectiveOutputVolume(),
     onDecodeError: () => { fallbackAudioDecodeErrors++; },
     onDrop: () => { fallbackAudioFramesDropped++; },
+  });
+  const webrtc = createWebRtcTransport({
+    prepareMicrophone: async () => {
+      await ensureMicrophone();
+      return micStream ? { context: getAudioCtx(), stream: micStream,
+        processedStream: microphoneCapture?.processedStream ?? micStream } : null;
+    },
+    stopPcm: stopCaptureGraph,
+    muted: () => microphoneMuted.value,
+    inputVolume: () => inputVolume.value,
+    accompanimentActive: () => accompanimentActive.value,
+    releaseAccompaniment: () => accompaniment.stop(),
+    onLevel(rms, track) {
+      micLevel.value = rms === null ? 0 : Math.min(1, rms * 6);
+      if (rms !== null && !microphoneMuted.value && track.enabled && rms >= voxThreshold.value) markSpeaking(state.tsClientId);
+      else if (state.tsClientId) clearSpeaking(state.tsClientId);
+    },
+    onReady: syncWebRtcMemberVolumes,
+    async onFallback(reason, isCurrent) {
+      if (!isCurrent()) return;
+      setAudioNotice("WEBRTC_FALLBACK", `实时语音（WebRTC）不可用（错误代码：${safeClientErrorCode(reason) || "WEBRTC_UNAVAILABLE"}），已切换为兼容传输：延迟与音质可能下降`);
+      try { await startMicrophone(); }
+      catch (error) { if (isCurrent()) setMicrophoneError(error); }
+    },
+    playback: {
+      context: () => audioCtx,
+      volume: effectiveOutputVolume,
+      onEndpoint(output) {
+        if (!selectedOutputDeviceId.value || !output.setSinkId) return;
+        const deviceId = selectedOutputDeviceId.value;
+        const generation = outputDeviceGeneration;
+        void audioSinkRouter.set(output, deviceId, () => generation === outputDeviceGeneration
+          && webrtc.output === output && selectedOutputDeviceId.value === deviceId).catch(() => undefined);
+      },
+      onBlocked(blocked) {
+        if (blocked) setAudioNotice("PLAYBACK_BLOCKED", "浏览器阻止了音频自动播放，暂时听不到其他成员的声音：请点击页面任意位置，或在地址栏允许本站播放声音");
+        else clearAudioNotice("PLAYBACK_BLOCKED");
+      },
+      onPlaying: syncAudioContextNotice,
+    },
   });
 
   async function saveAudioPreferences(): Promise<void> {
@@ -422,7 +463,7 @@ export function useVoiceWebSocket() {
   function applyOutputVolume(): void {
     const level = effectiveOutputVolume();
     remotePlayback.updateVolumes();
-    if (webrtcOutputElement) webrtcOutputElement.volume = level;
+    webrtc.setOutputVolume(level);
   }
 
   function getAudioCtx(): SinkAudioContext {
@@ -493,7 +534,7 @@ export function useVoiceWebSocket() {
 
   async function setAudioSink(ctx: SinkAudioContext, deviceId: string): Promise<void> {
     const generation = outputDeviceGeneration;
-    const output = webrtcOutputElement;
+    const output = webrtc.output;
     const isCurrent = () => generation === outputDeviceGeneration && audioCtx === ctx
       && selectedOutputDeviceId.value === deviceId;
     const mediaSinkSupported = typeof (HTMLMediaElement.prototype as SinkAudioElement).setSinkId === "function";
@@ -504,48 +545,7 @@ export function useVoiceWebSocket() {
     }
     outputDeviceSupported.value = true;
     if (ctx.setSinkId) await audioSinkRouter.set(ctx, deviceId, isCurrent);
-    if (output?.setSinkId) await audioSinkRouter.set(output, deviceId, () => isCurrent() && output === webrtcOutputElement);
-  }
-
-  function installWebRtcPlaybackRetry(): void {
-    if (webrtcPlaybackRetryCleanup) return;
-    const retry = () => { void syncWebRtcPlayback(); };
-    const events: (keyof WindowEventMap)[] = ["pointerdown", "touchstart", "keydown"];
-    for (const event of events) window.addEventListener(event, retry, { passive: true });
-    document.addEventListener("visibilitychange", retry, { passive: true });
-    webrtcPlaybackRetryCleanup = () => {
-      for (const event of events) window.removeEventListener(event, retry);
-      document.removeEventListener("visibilitychange", retry);
-      webrtcPlaybackRetryCleanup = null;
-    };
-  }
-
-  async function syncWebRtcPlayback(): Promise<void> {
-    const output = webrtcOutputElement;
-    if (!output || !webrtcPlaybackStream) return;
-    // Keep WebRTC on the browser's native MediaStream playback path. The
-    // capture AudioContext is intentionally not used as a second output
-    // route: a running-but-silent graph could leave the UI reporting a live
-    // speaker while the actual remote audio element remained muted.
-    output.muted = false;
-    if (audioCtx && audioCtx.state === "suspended") {
-      try { await audioCtx.resume(); } catch { /* a user gesture is still required */ }
-    }
-    if (webrtcOutputElement !== output) return;
-    try {
-      await output.play();
-      if (webrtcOutputElement !== output) return;
-      webrtcPlaybackRetryCleanup?.();
-      clearAudioNotice("PLAYBACK_BLOCKED");
-      syncAudioContextNotice();
-    } catch {
-      if (webrtcOutputElement !== output) return;
-      // Mobile and privacy-focused browsers can require a gesture even for a
-      // MediaStream. Keep retrying after the next real interaction, but tell the
-      // user why the remote audio is missing instead of staying silent.
-      setAudioNotice("PLAYBACK_BLOCKED", "浏览器阻止了音频自动播放，暂时听不到其他成员的声音：请点击页面任意位置，或在地址栏允许本站播放声音");
-      installWebRtcPlaybackRetry();
-    }
+    if (output?.setSinkId) await audioSinkRouter.set(output, deviceId, () => isCurrent() && output === webrtc.output);
   }
 
   function checkSupport(): string | null {
@@ -573,8 +573,8 @@ export function useVoiceWebSocket() {
 
   async function refreshAudioDevices(): Promise<void> {
     const generation = ++deviceListGeneration;
-    const sequence = connectionSequence;
-    const isCurrent = () => generation === deviceListGeneration && sequence === connectionSequence;
+    const sequence = voiceConnection.generation;
+    const isCurrent = () => generation === deviceListGeneration && sequence === voiceConnection.generation;
     if (!navigator.mediaDevices?.enumerateDevices) {
       inputDevices.length = 0;
       outputDevices.length = 0;
@@ -623,7 +623,7 @@ export function useVoiceWebSocket() {
     const socket = ws.value;
     const shouldSend = !microphoneMuted.value
       && !microphoneTestActive.value
-      && !webrtcActive.value
+      && !webrtc.active
       && socket?.readyState === WebSocket.OPEN
       && voxGate(input);
     if (!shouldSend) {
@@ -753,16 +753,6 @@ export function useVoiceWebSocket() {
     return false;
   }
 
-  function stopWebRtcMix(): void {
-    const input = webrtcInput;
-    webrtcInput = null;
-    input?.dispose();
-  }
-
-  function releaseAccompanimentStream(): void {
-    accompaniment.stop();
-  }
-
   async function startAccompaniment(): Promise<void> {
     await accompaniment.start();
   }
@@ -772,209 +762,11 @@ export function useVoiceWebSocket() {
   }
 
   async function startWebRtcTransport(sequence: number, socket: WebSocket): Promise<void> {
-    if (typeof RTCPeerConnection === "undefined") throw new Error("当前浏览器不支持 WebRTC");
-    stopWebRtcTransport();
-    const generation = webrtcGeneration;
-    const isCurrent = (): boolean => generation === webrtcGeneration && sequence === connectionSequence
-      && ws.value === socket && socket.readyState === WebSocket.OPEN && state.connected;
-    try { await ensureMicrophone(); } catch (error) {
-      if (isCurrent()) throw error;
-      return;
-    }
-    if (!isCurrent() || !micStream) return;
-    const microphoneTrack = micStream.getAudioTracks()[0];
-    if (!microphoneTrack) throw new Error("没有可用的麦克风音轨");
-
-    stopCaptureGraph();
-    webrtcFallbackStarted = false;
-    let peer: RTCPeerConnection;
-    try { peer = new RTCPeerConnection({ iceServers: [] }); } catch {
-      await fallbackFromWebRtc(sequence, socket, "WEBRTC_NEGOTIATION_FAILED");
-      return;
-    }
-    webrtcPeer = peer;
-    const isCurrentPeer = (): boolean => isCurrent() && webrtcPeer === peer;
-    try {
-      microphoneTrack.enabled = !microphoneMuted.value;
-      webrtcInput = createWebRtcInput(getAudioCtx(), microphoneCapture?.processedStream ?? micStream,
-        microphoneMuted.value ? 0 : inputVolume.value);
-      const mixedStream = webrtcInput.stream;
-      const mixedTrack = mixedStream.getAudioTracks()[0];
-      if (!mixedTrack) throw new Error("混合音频轨道创建失败");
-      peer.addTrack(mixedTrack, mixedStream);
-    } catch {
-      await fallbackFromWebRtc(sequence, socket, "WEBRTC_NEGOTIATION_FAILED");
-      return;
-    }
-    peer.ontrack = (event) => {
-      if (!isCurrentPeer()) return;
-      const stream = event.streams[0] ?? new MediaStream([event.track]);
-      // Use the browser's native WebRTC media output. Routing the remote
-      // track through AudioContext made playback depend on autoplay policy:
-      // the control channel could report speaking while a suspended context
-      // silently discarded the actual audio. A hidden autoplaying media
-      // element keeps WebRTC's decoder and jitter buffer on the native path.
-      stopWebRtcPlayback();
-      const output = document.createElement("audio") as SinkAudioElement;
-      output.autoplay = true;
-      output.muted = false;
-      output.setAttribute("playsinline", "");
-      output.volume = effectiveOutputVolume();
-      output.setAttribute("aria-hidden", "true");
-      output.tabIndex = -1;
-      output.style.position = "fixed";
-      output.style.width = "1px";
-      output.style.height = "1px";
-      output.style.opacity = "0";
-      output.style.pointerEvents = "none";
-      output.srcObject = stream;
-      document.body.append(output);
-      webrtcOutputElement = output;
-      webrtcPlaybackStream = stream;
-      if (selectedOutputDeviceId.value && typeof output.setSinkId === "function") {
-        const deviceId = selectedOutputDeviceId.value;
-        const generation = outputDeviceGeneration;
-        void audioSinkRouter.set(output, deviceId, () => generation === outputDeviceGeneration
-          && webrtcOutputElement === output && selectedOutputDeviceId.value === deviceId).catch(() => undefined);
-      }
-      void syncWebRtcPlayback();
-    };
-    startWebRtcMicMonitor(getAudioCtx(), micStream, microphoneTrack);
-    peer.onconnectionstatechange = () => {
-      if (isCurrentPeer() && peer.connectionState === "failed") void fallbackFromWebRtc(sequence, socket, "WEBRTC_CONNECTION_FAILED");
-    };
-
-    const negotiation = (async () => {
-      webrtcActive.value = true;
-      const offer = await peer.createOffer();
-      if (!isCurrentPeer()) return;
-      await peer.setLocalDescription(offer);
-      if (!isCurrentPeer()) return;
-      await waitForIceGathering(peer);
-      if (!isCurrentPeer()) return;
-      const description = peer.localDescription;
-      if (!description || description.type !== "offer") throw new Error("WebRTC offer was not created");
-      sendWebRtcMessage(socket, { type: "webrtcOffer", payload: {
-        sdp: { type: description.type, sdp: description.sdp },
-        muted: microphoneMuted.value,
-        accompanimentActive: accompanimentActive.value,
-      } });
-      webrtcAnswerTimer = window.setTimeout(() => {
-        webrtcAnswerTimer = null;
-        if (isCurrentPeer() && !peer.remoteDescription) void fallbackFromWebRtc(sequence, socket, "WEBRTC_ANSWER_TIMEOUT");
-      }, 8_000);
-    })();
-    webrtcNegotiationPromise = negotiation;
-    try {
-      await negotiation;
-    } catch (error) {
-      if (isCurrentPeer()) await fallbackFromWebRtc(sequence, socket, "WEBRTC_NEGOTIATION_FAILED");
-    } finally {
-      if (webrtcNegotiationPromise === negotiation) webrtcNegotiationPromise = null;
-    }
-  }
-
-  async function waitForIceGathering(peer: RTCPeerConnection): Promise<void> {
-    if (peer.iceGatheringState === "complete") return;
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(timer);
-        peer.removeEventListener("icegatheringstatechange", onStateChange);
-        if (cancelIceGathering === finish) cancelIceGathering = null;
-        resolve();
-      };
-      const onStateChange = () => {
-        if (peer.iceGatheringState === "complete") finish();
-      };
-      const timer = window.setTimeout(finish, 5_000);
-      cancelIceGathering = finish;
-      peer.addEventListener("icegatheringstatechange", onStateChange);
+    await webrtc.start({
+      isCurrent: () => sequence === voiceConnection.generation && ws.value === socket
+        && socket.readyState === WebSocket.OPEN && state.connected,
+      send: message => socket.send(JSON.stringify(message)),
     });
-  }
-
-  async function applyWebRtcAnswer(description: unknown): Promise<void> {
-    const peer = webrtcPeer;
-    const socket = ws.value;
-    const sequence = connectionSequence;
-    if (!peer || !socket || !isSessionDescription(description, "answer")) return;
-    const isCurrent = (): boolean => webrtcPeer === peer && ws.value === socket
-      && sequence === connectionSequence && socket.readyState === WebSocket.OPEN && state.connected;
-    try {
-      await peer.setRemoteDescription(description);
-      if (!isCurrent()) return;
-      if (webrtcAnswerTimer !== null) window.clearTimeout(webrtcAnswerTimer);
-      webrtcAnswerTimer = null;
-      webrtcActive.value = true;
-      syncWebRtcMemberVolumes();
-    } catch {
-      if (isCurrent()) await fallbackFromWebRtc(sequence, socket, "WEBRTC_ANSWER_REJECTED");
-    }
-  }
-
-  async function fallbackFromWebRtc(sequence: number, socket: WebSocket, reasonCode = "WEBRTC_UNAVAILABLE"): Promise<void> {
-    if (sequence !== connectionSequence || ws.value !== socket || !state.connected || webrtcFallbackStarted) return;
-    webrtcFallbackStarted = true;
-    webrtcActive.value = false;
-    if (socket.readyState === WebSocket.OPEN) sendWebRtcMessage(socket, { type: "webrtcStop" });
-    stopWebRtcTransport();
-    if (socket.readyState === WebSocket.OPEN && state.connected) {
-      // Degrading to the compatibility transport must be visible: the user is
-      // still connected, but with different latency and audio quality.
-      setAudioNotice("WEBRTC_FALLBACK", `实时语音（WebRTC）不可用（错误代码：${safeClientErrorCode(reasonCode) || "WEBRTC_UNAVAILABLE"}），已切换为兼容传输：延迟与音质可能下降`);
-      try { await startMicrophone(); } catch (error: unknown) {
-        setMicrophoneError(error);
-      }
-    }
-  }
-
-  function stopWebRtcTransport(): void {
-    webrtcGeneration++;
-    const peer = webrtcPeer;
-    webrtcPeer = null;
-    if (webrtcAnswerTimer !== null) window.clearTimeout(webrtcAnswerTimer);
-    webrtcAnswerTimer = null;
-    cancelIceGathering?.();
-    webrtcActive.value = false;
-    webrtcNegotiationPromise = null;
-    releaseAccompanimentStream();
-    stopWebRtcMix();
-    stopWebRtcMicMonitor();
-    stopWebRtcPlayback();
-    if (peer) {
-      peer.ontrack = null;
-      peer.onconnectionstatechange = null;
-      peer.close();
-    }
-  }
-
-  function stopWebRtcPlayback(): void {
-    webrtcPlaybackRetryCleanup?.();
-    webrtcPlaybackStream = null;
-    webrtcOutputElement?.pause();
-    if (webrtcOutputElement) {
-      webrtcOutputElement.srcObject = null;
-      webrtcOutputElement.remove();
-    }
-    webrtcOutputElement = null;
-  }
-
-  function startWebRtcMicMonitor(ctx: AudioContext, stream: MediaStream, track: MediaStreamTrack): void {
-    stopWebRtcMicMonitor();
-    webrtcMicrophoneMeter = createMicrophoneMeter(ctx, stream, rms => {
-      micLevel.value = rms === null ? 0 : Math.min(1, rms * 6);
-      if (rms !== null && !microphoneMuted.value && track.enabled && rms >= voxThreshold.value) markSpeaking(state.tsClientId);
-      else if (state.tsClientId) clearSpeaking(state.tsClientId);
-    });
-  }
-
-  function stopWebRtcMicMonitor(): void {
-    const meter = webrtcMicrophoneMeter;
-    webrtcMicrophoneMeter = null;
-    meter?.dispose();
-    micLevel.value = 0;
   }
 
   function stopCaptureGraph(): void {
@@ -995,8 +787,7 @@ export function useVoiceWebSocket() {
     stopCaptureGraph();
     microphoneCapture?.dispose();
     microphoneCapture = null;
-    releaseAccompanimentStream();
-    stopWebRtcMix();
+    webrtc.releaseInput();
     micStream = null;
     if (closeContext) {
       void audioCtx?.close().catch(() => undefined);
@@ -1020,10 +811,10 @@ export function useVoiceWebSocket() {
   async function reconfigureMicrophone(): Promise<void> {
     const generation = ++inputDeviceGeneration;
     deviceListGeneration++;
-    const sequence = connectionSequence;
+    const sequence = voiceConnection.generation;
     const socket = ws.value;
-    const isCurrent = () => generation === inputDeviceGeneration && sequence === connectionSequence;
-    const shouldRestartWebRtc = webrtcActive.value && Boolean(ws.value);
+    const isCurrent = () => generation === inputDeviceGeneration && sequence === voiceConnection.generation;
+    const shouldRestartWebRtc = webrtc.active && Boolean(ws.value);
     try {
       // Keep the current peer alive until the replacement microphone is ready.
       if (micStream) await startMicrophone();
@@ -1063,8 +854,8 @@ export function useVoiceWebSocket() {
     outputDeviceTouched = true;
     const generation = ++outputDeviceGeneration;
     deviceListGeneration++;
-    const sequence = connectionSequence;
-    const isCurrent = () => generation === outputDeviceGeneration && sequence === connectionSequence;
+    const sequence = voiceConnection.generation;
+    const isCurrent = () => generation === outputDeviceGeneration && sequence === voiceConnection.generation;
     const previousDeviceId = committedOutputDeviceId;
     selectedOutputDeviceId.value = deviceId;
     try {
@@ -1119,7 +910,6 @@ export function useVoiceWebSocket() {
     disconnect(true);
     lastConnection = { target, channel, nickname, serverPassword, ...(identity ? { identity } : {}), rememberIdentity, accelerated, accelerationRelayId };
     identityMaterial.value = identity;
-    const sequence = ++connectionSequence;
     state.error = "";
     state.errorCode = "";
     // Audio diagnostics belong to the previous session, never to the new one.
@@ -1129,82 +919,13 @@ export function useVoiceWebSocket() {
     state.reconnecting = false;
     state.reconnectAttempt = 0;
     state.reconnectFailed = false;
-    void audioPreferencesReady.then(() => {
-      if (sequence !== connectionSequence) return;
-      void openTicketedConnection(sequence, target, channel, nickname, serverPassword, inviteToken, accelerated);
-    });
-  }
-
-  async function openTicketedConnection(sequence: number, target: string, channel: string, nickname: string, serverPassword: string, inviteToken: string, accelerated: boolean): Promise<void> {
-    try {
-      const response = await fetch("/api/join-ticket", {
-        method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ target, nickname, channel, serverPassword, ...(inviteToken ? { invite: inviteToken } : {}), ...(accelerated ? { accelerated: true, ...(lastConnection?.accelerationRelayId ? { accelerationRelayId: lastConnection.accelerationRelayId } : {}) } : {}), ...(lastConnection?.rememberIdentity && lastConnection.identity ? { identity: lastConnection.identity } : {}), ...(lastConnection?.rememberIdentity ? { rememberIdentity: true } : {}) }),
-      });
-      const result = await response.json().catch(() => ({})) as { ticket?: unknown; code?: unknown; detail?: unknown };
-      if (!response.ok || typeof result.ticket !== "string") {
-        const failureCode = normalizedClientErrorCode(result.code);
-        const failure = new Error(joinTicketReason(failureCode, result.detail));
-        Object.assign(failure, { code: failureCode });
-        throw failure;
-      }
-      if (sequence !== connectionSequence) return;
-      openVoiceSocket(sequence, result.ticket);
-    } catch (error: unknown) {
-      if (sequence !== connectionSequence) return;
-      state.connecting = false;
-      const errorRecord = error && typeof error === "object" ? error as { code?: unknown } : {};
-      state.errorCode = normalizedClientErrorCode(errorRecord.code, "REQUEST_FAILED");
-      state.error = error instanceof Error ? error.message : connectionFailureMessage(state.errorCode);
-    }
-  }
-
-  function openVoiceSocket(sequence: number, ticket: string): void {
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const socket = new WebSocket(`${proto}//${location.host}/ws/voice?ticket=${encodeURIComponent(ticket)}`);
-    socket.binaryType = "arraybuffer";
-    ws.value = socket;
-    socket.onopen = () => {
-      if (sequence !== connectionSequence) {
-        socket.close(1000);
-        return;
-      }
-    };
-    socket.onmessage = (event) => {
-      if (sequence !== connectionSequence || ws.value !== socket || socket.readyState !== WebSocket.OPEN) return;
-      if (typeof event.data === "string") {
-        try {
-          handleMessage(JSON.parse(event.data));
-        } catch {
-          // Ignore malformed control frames.
-        }
-      } else {
-        handleAudioFrame(new Uint8Array(event.data));
-      }
-    };
-    socket.onclose = (event) => {
-      if (sequence !== connectionSequence || ws.value !== socket) return;
-      connectionSequence++;
-      ws.value = null;
-      releaseSessionResources();
-      state.connected = false;
-      state.connecting = false;
-      state.reconnecting = false;
-      // Prefer the close code over the generic WebSocket error event. The
-      // gateway uses a dedicated code when a remembered identity is already
-      // active in another browser page.
-      if (event.code !== 1000 && !state.reconnectFailed && !state.errorCode) {
-        state.errorCode = closeErrorCode(event.code, event.reason);
-        state.error = closeReason(event.code, event.reason);
-      }
-      clearMicrophoneError();
-      clearAudioNotice();
-    };
-    socket.onerror = () => {
-      // The following close event contains the actionable close code. Do not
-      // overwrite it with a generic browser WebSocket error first.
-    };
+    voiceConnection.start(JSON.stringify({
+      target, nickname, channel, serverPassword,
+      ...(inviteToken ? { invite: inviteToken } : {}),
+      ...(accelerated ? { accelerated: true, ...(accelerationRelayId ? { accelerationRelayId } : {}) } : {}),
+      ...(rememberIdentity && identity ? { identity } : {}),
+      ...(rememberIdentity ? { rememberIdentity: true } : {}),
+    }), audioPreferencesReady);
   }
 
   function joinTicketReason(code: string, detail?: unknown): string {
@@ -1216,6 +937,7 @@ export function useVoiceWebSocket() {
       ACCELERATION_UNAVAILABLE: "当前中继加速不可用，请关闭加速或联系管理员",
       INVALID_NICKNAME: "请输入有效的昵称",
       INVITE_INVALID: "邀请链接已失效或已被撤销",
+      REQUEST_TIMEOUT: "等待 WebSpeak 网关响应超时，请检查网络后重试",
     };
     const normalized = normalizedClientErrorCode(code);
     return messages[normalized] ?? connectionFailureMessage(normalized, detail);
@@ -1270,15 +992,11 @@ export function useVoiceWebSocket() {
   }
 
   function disconnect(preserveConnection = false): void {
-    connectionSequence++;
     const keepRememberedIdentity = lastConnection?.rememberIdentity === true;
     if (!preserveConnection) lastConnection = null;
-    releaseSessionResources(!preserveConnection);
+    voiceConnection.stop(() => releaseSessionResources(!preserveConnection));
     clearMicrophoneError();
     clearAudioNotice();
-    const socket = ws.value;
-    ws.value = null;
-    if (socket && socket.readyState < WebSocket.CLOSING) socket.close(1000);
     state.connected = false;
     state.connecting = false;
     state.reconnecting = false;
@@ -1304,9 +1022,9 @@ export function useVoiceWebSocket() {
     noiseSuppressionEnabled.value = committedNoiseSuppressionEnabled;
     microphoneTest.dispose();
     clearAudioStatusProbes();
-    rejectPendingCommands(new Error("语音连接已关闭"));
+    commands.clear(new Error("语音连接已关闭"));
     screenShare.stopTransport(sendScreenStop);
-    stopWebRtcTransport();
+    webrtc.stop();
     remotePlayback.clearAll();
     stopMicrophone();
     clearSpeakingState();
@@ -1319,14 +1037,6 @@ export function useVoiceWebSocket() {
       clearTimeout(pending.timer);
       pendingAudioStatusProbes.delete(sequence);
       pending.resolve(null);
-    }
-  }
-
-  function rejectPendingCommands(error: Error): void {
-    for (const [requestId, pending] of pendingCommands) {
-      clearTimeout(pending.timer);
-      pendingCommands.delete(requestId);
-      pending.reject(error);
     }
   }
 
@@ -1367,13 +1077,13 @@ export function useVoiceWebSocket() {
         }
         if (wasReconnecting) {
           const start = msg.webrtcAvailable === true && typeof RTCPeerConnection !== "undefined"
-            ? (ws.value ? startWebRtcTransport(connectionSequence, ws.value) : Promise.resolve())
+            ? (ws.value ? startWebRtcTransport(voiceConnection.generation, ws.value) : Promise.resolve())
             : ensureMicrophone();
           // A failed microphone must not look like a failed connection: record it
           // as an audio diagnostic so the room stays visible with a clear reason.
           start.catch((error: unknown) => { setMicrophoneError(error); });
         } else if (msg.webrtcAvailable === true && typeof RTCPeerConnection !== "undefined" && ws.value) {
-          void startWebRtcTransport(connectionSequence, ws.value).catch((error: unknown) => { setMicrophoneError(error); });
+          void startWebRtcTransport(voiceConnection.generation, ws.value).catch((error: unknown) => { setMicrophoneError(error); });
         } else {
           void ensureMicrophone().catch((error: unknown) => { setMicrophoneError(error); });
         }
@@ -1453,8 +1163,6 @@ export function useVoiceWebSocket() {
         const sequence = typeof msg.sequence === "string" ? msg.sequence : "";
         const pending = pendingAudioStatusProbes.get(sequence);
         if (!pending) break;
-        pendingAudioStatusProbes.delete(sequence);
-        clearTimeout(pending.timer);
         pending.resolve(msg.stats);
         break;
       }
@@ -1502,10 +1210,10 @@ export function useVoiceWebSocket() {
         applyWhisperState(msg.targetIds, msg.active);
         break;
       case "webrtcAnswer":
-        void applyWebRtcAnswer(msg.payload?.sdp);
+        void webrtc.applyAnswer(msg.payload?.sdp);
         break;
       case "webrtcError":
-        if (ws.value) void fallbackFromWebRtc(connectionSequence, ws.value, safeClientErrorCode(msg.code) || "WEBRTC_NEGOTIATION_FAILED");
+        if (ws.value) void webrtc.fallback(safeClientErrorCode(msg.code) || "WEBRTC_NEGOTIATION_FAILED");
         break;
       case "audioError": {
         // The gateway could not encode our microphone audio (for example its Opus
@@ -1523,12 +1231,7 @@ export function useVoiceWebSocket() {
         break;
       case "commandCompleted": {
         const requestId = typeof msg.requestId === "string" ? msg.requestId : "";
-        const pending = requestId ? pendingCommands.get(requestId) : undefined;
-        if (pending) {
-          clearTimeout(pending.timer);
-          pendingCommands.delete(requestId);
-          pending.resolve();
-        }
+        commands.settle(requestId);
         break;
       }
       case "error":
@@ -1536,14 +1239,8 @@ export function useVoiceWebSocket() {
         state.error = protocolErrorMessage(state.errorCode, String(msg.error?.message || msg.message || "操作失败"));
         {
           const requestId = typeof msg.requestId === "string" ? msg.requestId : "";
-          const pending = requestId ? pendingCommands.get(requestId) : undefined;
-          if (pending) {
-            clearTimeout(pending.timer);
-            pendingCommands.delete(requestId);
-            const error = new Error(state.error);
-            Object.assign(error, { code: state.errorCode });
-            pending.reject(error);
-          }
+          const error = Object.assign(new Error(state.error), { code: state.errorCode });
+          commands.settle(requestId, error);
         }
         break;
     }
@@ -1553,7 +1250,7 @@ export function useVoiceWebSocket() {
     // WebRTC carries the realtime downlink after negotiation. Ignore any
     // in-flight fallback WebSocket packets so a transport switch cannot
     // produce duplicate or delayed playback.
-    if (webrtcActive.value) return;
+    if (webrtc.active) return;
     if (data.length < 4) {
       fallbackAudioFramesDropped++;
       return;
@@ -1565,21 +1262,12 @@ export function useVoiceWebSocket() {
     remotePlayback.play(clientId, data.slice(3));
   }
 
-  function sendCmd<K extends ClientCommandType>(type: K, payload: ClientCommandPayloads[K], requestId = ""): void {
-    if (ws.value?.readyState === WebSocket.OPEN) ws.value.send(JSON.stringify({ type, payload, ...(requestId ? { requestId } : {}) }));
+  function sendCmd<K extends ClientCommandType>(type: K, payload: ClientCommandPayloads[K]): void {
+    commands.send(type, payload);
   }
 
   function sendCommandAndWait<K extends ClientCommandType>(type: K, payload: ClientCommandPayloads[K], timeoutMs = 8_000): Promise<void> {
-    if (ws.value?.readyState !== WebSocket.OPEN) return Promise.reject(new Error("语音连接尚未就绪"));
-    const requestId = `command-${Date.now().toString(36)}-${(commandSequence++).toString(36)}`;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        pendingCommands.delete(requestId);
-        reject(new Error("操作超时，请稍后重试"));
-      }, timeoutMs);
-      pendingCommands.set(requestId, { resolve, reject, timer });
-      sendCmd(type, payload, requestId);
-    });
+    return commands.sendAndWait(type, payload, timeoutMs);
   }
 
   function switchChannel(channelId: string, password = ""): void {
@@ -1594,7 +1282,7 @@ export function useVoiceWebSocket() {
   }
 
   async function collectBrowserVoiceAudioStats(): Promise<BrowserVoiceAudioStats | null> {
-    const peer = webrtcPeer;
+    const peer = webrtc.peer;
     if (!peer) return null;
     try {
       const report = await peer.getStats();
@@ -1654,33 +1342,48 @@ export function useVoiceWebSocket() {
 
   function measureVoiceAudioStatus(timeoutMs = 1_800): Promise<VoiceAudioStatusSample | null> {
     const socket = ws.value;
-    if (!socket || socket.readyState !== WebSocket.OPEN) return Promise.resolve(null);
+    if (!socket || socket.readyState !== WebSocket.OPEN || !state.connected) return Promise.resolve(null);
+    const connection = voiceConnection.generation;
+    const peer = webrtc.peer;
+    const isCurrent = () => connection === voiceConnection.generation && ws.value === socket
+      && socket.readyState === WebSocket.OPEN && state.connected && webrtc.peer === peer;
     const sequence = `audio-${Date.now().toString(36)}-${(audioStatusProbeSequence++).toString(36)}`;
     const browserStatsPromise = collectBrowserVoiceAudioStats();
     return new Promise<VoiceAudioStatusSample | null>((resolve) => {
-      const timer = setTimeout(() => {
+      let settled = false;
+      let receivedBridge = false;
+      const finish = (sample: VoiceAudioStatusSample | null): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         pendingAudioStatusProbes.delete(sequence);
-        resolve(null);
-      }, timeoutMs);
+        resolve(sample);
+      };
+      // Keep the deadline and cancellation entry until both sources finish.
+      // A gateway reply must not leave an unbounded browser getStats wait.
+      const timer = setTimeout(() => finish(null), timeoutMs);
       pendingAudioStatusProbes.set(sequence, {
         resolve: (bridge) => {
           if (!bridge) {
-            resolve(null);
+            finish(null);
             return;
           }
+          if (settled || receivedBridge) return;
+          receivedBridge = true;
           void browserStatsPromise.then((browser) => {
-            const peer = webrtcPeer;
+            if (settled) return;
+            if (!isCurrent()) { finish(null); return; }
             const transport = !state.connected
               ? "disconnected"
-              : webrtcActive.value
+              : webrtc.active
                 ? "webrtc"
-                : peer && !webrtcFallbackStarted
+                : peer
                   ? "negotiating"
                   : "websocket";
             const playbackState = peer
-              ? webrtcOutputElement ? webrtcOutputElement.paused ? "paused" : "playing" : "unavailable"
+              ? webrtc.output ? webrtc.output.paused ? "paused" : "playing" : "unavailable"
               : audioCtx ? audioCtx.state === "running" ? "playing" : "paused" : null;
-            resolve({
+            finish({
               sampledAt: performance.now(),
               transport,
               connectionState: peer?.connectionState ?? null,
@@ -1700,7 +1403,8 @@ export function useVoiceWebSocket() {
         },
         timer,
       });
-      sendCmd("audioStatsProbe", { sequence });
+      try { sendCmd("audioStatsProbe", { sequence }); }
+      catch { finish(null); }
     });
   }
 
@@ -1776,8 +1480,8 @@ export function useVoiceWebSocket() {
     voxAttack = 0;
     voxRelease = 0;
     accumLen = 0;
-    if (webrtcActive.value) micStream?.getAudioTracks().forEach((track) => { track.enabled = !muted; });
-    webrtcInput?.setVolume(muted ? 0 : inputVolume.value);
+    if (webrtc.active) micStream?.getAudioTracks().forEach((track) => { track.enabled = !muted; });
+    webrtc.input?.setVolume(muted ? 0 : inputVolume.value);
     sendCmd("setMicrophoneMuted", { muted });
     if (muted && state.tsClientId) clearSpeaking(state.tsClientId);
     void saveAudioPreferences();
@@ -1837,11 +1541,11 @@ export function useVoiceWebSocket() {
       void saveAudioPreferences();
     }
     remotePlayback.updateVolume(clientId);
-    if (webrtcPeer || webrtcActive.value) sendCmd("setMemberVolume", { clientId, volume: normalized });
+    if (webrtc.peer || webrtc.active) sendCmd("setMemberVolume", { clientId, volume: normalized });
   }
 
   function syncWebRtcMemberVolumes(): void {
-    if (!webrtcActive.value || ws.value?.readyState !== WebSocket.OPEN) return;
+    if (!webrtc.active || ws.value?.readyState !== WebSocket.OPEN) return;
     for (const [rawClientId, volume] of Object.entries(volumes)) {
       const clientId = Number(rawClientId);
       if (!Number.isInteger(clientId) || clientId <= 0) continue;
@@ -1852,7 +1556,7 @@ export function useVoiceWebSocket() {
   function setInputVolume(volume: number): void {
     inputVolume.value = Math.max(0, Math.min(1, volume));
     microphoneCapture?.setVolume(inputVolume.value);
-    webrtcInput?.setVolume(microphoneMuted.value ? 0 : inputVolume.value);
+    webrtc.input?.setVolume(microphoneMuted.value ? 0 : inputVolume.value);
     void saveAudioPreferences();
   }
 

@@ -11,6 +11,7 @@ function t(key: string, variables: Record<string, string | number> = {}) {
 }
 
 function localizedMessage(message: string) {
+  if (message === "等待 WebSpeak 网关响应超时，请检查网络后重试") return t("joinRequestTimeout");
   if (language.value === "zh") return message;
   const localizedExact: Record<string, string> = language.value === "ru" ? {
     "该服务器需要密码，请输入密码后重试": "Для этого сервера требуется пароль. Введите его и повторите попытку",

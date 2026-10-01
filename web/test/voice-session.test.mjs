@@ -151,6 +151,7 @@ class TestAudioElement extends EventTarget {
 let vite;
 let useVoiceWebSocket;
 let useWebClientAudioControls;
+let useWebClientI18n;
 let webClientTranslations;
 let voice;
 const savedGlobals = new Map();
@@ -171,6 +172,7 @@ before(async () => {
   });
   ({ useVoiceWebSocket } = await vite.ssrLoadModule("/src/composables/useVoiceWebSocket.ts"));
   ({ useWebClientAudioControls } = await vite.ssrLoadModule("/src/composables/useWebClientAudioControls.ts"));
+  ({ useWebClientI18n } = await vite.ssrLoadModule("/src/composables/useWebClientI18n.ts"));
   ({ webClientTranslations } = await vite.ssrLoadModule("/src/i18n/web-client.ts"));
 });
 
@@ -269,6 +271,232 @@ function enableMicrophoneMeter(t) {
   t.mock.method(globalThis, "clearInterval", timer => { cleared.push(timer); });
   return { analysers, intervals, cleared };
 }
+
+function controlRequestTimers(t) {
+  const active = new Set();
+  const scheduled = [];
+  const set = globalThis.setTimeout;
+  const clear = globalThis.clearTimeout;
+  t.mock.method(globalThis, "setTimeout", (callback, delay, ...args) => {
+    if (delay !== 8_000 && delay !== 15_000) return set(callback, delay, ...args);
+    const timer = { delay, callback };
+    active.add(timer);
+    scheduled.push(timer);
+    return timer;
+  });
+  t.mock.method(globalThis, "clearTimeout", timer => {
+    if (scheduled.includes(timer)) active.delete(timer);
+    else clear(timer);
+  });
+  return { active, scheduled, fire(timer) { assert.ok(timer, "a request deadline must exist"); active.delete(timer); timer.callback(); } };
+}
+
+test("a command send failure rejects immediately and releases its deadline", async t => {
+  const socket = await connect();
+  const timers = controlRequestTimers(t);
+  socket.send = () => { throw new Error("Socket cannot send"); };
+  await assert.rejects(voice.moveClient(2, "1"), /Socket cannot send/);
+  assert.equal(timers.active.size, 0);
+});
+
+test("confirmed and rejected commands release deadlines and preserve server error codes", async t => {
+  const socket = await connect();
+  const timers = controlRequestTimers(t);
+  const moved = voice.moveClient(2, "1");
+  const request = socket.messages.at(-1);
+  assert.equal(request.type, "moveClient");
+  socket.receive({ type: "commandCompleted", requestId: request.requestId });
+  socket.receive({ type: "commandCompleted", requestId: request.requestId });
+  await moved;
+  assert.equal(timers.active.size, 0);
+  const rejected = assert.rejects(voice.moveClient(3, "1"), { code: "PERMISSION_DENIED" });
+  socket.receive({ type: "error", requestId: socket.messages.at(-1).requestId,
+    error: { code: "PERMISSION_DENIED", message: "Permission denied" } });
+  await rejected;
+  assert.equal(timers.active.size, 0);
+});
+
+test("command timeout and disconnect settle once without touching replacement commands", async t => {
+  const old = await connect();
+  const oldMessage = old.onmessage;
+  const timers = controlRequestTimers(t);
+  const expired = assert.rejects(voice.moveClient(2, "1"), /操作超时/);
+  const expiredRequest = old.messages.at(-1);
+  timers.fire(timers.scheduled.at(-1));
+  await expired;
+  old.receive({ type: "commandCompleted", requestId: expiredRequest.requestId });
+  const closed = assert.rejects(voice.moveClient(3, "1"), /语音连接已关闭/);
+  const oldRequest = old.messages.at(-1);
+  const oldTimer = timers.scheduled.at(-1);
+  const current = await connect();
+  await closed;
+  assert.equal(timers.active.size, 0);
+  let completed = false;
+  const moved = voice.moveClient(4, "2").then(() => { completed = true; });
+  const currentRequest = current.messages.at(-1);
+  oldTimer.callback();
+  oldMessage({ data: JSON.stringify({ type: "commandCompleted", requestId: currentRequest.requestId }) });
+  current.receive({ type: "commandCompleted", requestId: oldRequest.requestId });
+  await nextTurn();
+  assert.equal(completed, false);
+  assert.equal(timers.active.size, 1);
+  current.receive({ type: "commandCompleted", requestId: currentRequest.requestId });
+  await moved;
+  assert.equal(timers.active.size, 0);
+});
+
+test("disconnect immediately aborts a pending join request and releases its deadline", async t => {
+  const timers = controlRequestTimers(t);
+  const response = deferred();
+  let signal;
+  globalThis.fetch = (_, options) => { signal = options.signal; return response.promise; };
+  voice.connect("voice.example:9987", "", "Visitor");
+  await nextTurn();
+  voice.disconnect();
+  assert.equal(signal?.aborted, true);
+  assert.equal(timers.active.size, 0);
+  response.reject(new Error("Late network failure"));
+  await nextTurn();
+  assert.equal(voice.state.errorCode, "");
+  assert.equal(voice.state.connecting, false);
+});
+
+test("a replaced join request cannot read an old body or alter the new target", async t => {
+  const timers = controlRequestTimers(t);
+  const response = deferred();
+  const requests = [];
+  globalThis.fetch = (_, options) => {
+    requests.push(options);
+    return requests.length === 1 ? response.promise : Promise.resolve({ ok: true, json: async () => ({ ticket: "new-ticket" }) });
+  };
+  voice.connect("old.example:9987", "", "Old");
+  await nextTurn();
+  voice.connect("new.example:9987", "2", "New", "password", "identity", true, "invite", true, "relay");
+  await nextTurn();
+  assert.equal(requests[0].signal?.aborted, true);
+  assert.deepEqual(JSON.parse(requests[1].body), { target: "new.example:9987", channel: "2", nickname: "New", serverPassword: "password", identity: "identity", rememberIdentity: true, invite: "invite", accelerated: true, accelerationRelayId: "relay" });
+  let oldBodyReads = 0;
+  response.resolve({ ok: true, json: async () => { oldBodyReads++; return { ticket: "old-ticket" }; } });
+  await nextTurn();
+  assert.equal(oldBodyReads, 0);
+  assert.equal(TestSocket.instances.length, 1);
+  assert.match(voice.ws.value.url, /ticket=new-ticket$/);
+  assert.equal(timers.active.size, 0);
+});
+
+for (const phase of ["request", "body"]) {
+  test(`the join deadline covers a hanging ${phase} and rejects its late result`, async t => {
+    const timers = controlRequestTimers(t);
+    const pending = deferred();
+    let signal;
+    globalThis.fetch = (_, options) => {
+      signal = options.signal;
+      return phase === "request" ? pending.promise : Promise.resolve({ ok: true, json: () => pending.promise });
+    };
+    voice.connect("voice.example:9987", "", "Visitor");
+    await nextTurn();
+    assert.equal(voice.state.connecting, true);
+    timers.fire(timers.scheduled.at(-1));
+    assert.equal(signal.aborted, true);
+    assert.equal(voice.state.connecting, false);
+    assert.equal(voice.state.errorCode, "REQUEST_TIMEOUT");
+    assert.equal(timers.active.size, 0);
+    pending.resolve(phase === "request" ? { ok: true, json: async () => ({ ticket: "late-ticket" }) } : { ticket: "late-ticket" });
+    await nextTurn();
+    assert.equal(TestSocket.instances.length, 0);
+    assert.equal(voice.state.errorCode, "REQUEST_TIMEOUT");
+  });
+}
+
+test("cancelling response-body parsing cannot report a failure in the replacement session", async t => {
+  const timers = controlRequestTimers(t);
+  const body = deferred();
+  let signal;
+  globalThis.fetch = async (_, options) => { signal = options.signal; return { ok: true, json: () => body.promise }; };
+  voice.connect("old.example:9987", "", "Old");
+  await nextTurn();
+  const oldSignal = signal;
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ ticket: "new-ticket" }) });
+  const current = await connect();
+  assert.equal(oldSignal?.aborted, true);
+  body.reject(new Error("Old body failed"));
+  await nextTurn();
+  assert.equal(voice.ws.value, current);
+  assert.equal(voice.state.errorCode, "");
+  assert.equal(timers.active.size, 0);
+});
+
+test("a rejected join request preserves its public error and clears its deadline", async t => {
+  const timers = controlRequestTimers(t);
+  globalThis.fetch = async () => ({ ok: false, json: async () => ({ code: "INVITE_INVALID" }) });
+  voice.connect("voice.example:9987", "", "Visitor");
+  await nextTurn();
+  assert.equal(voice.state.errorCode, "INVITE_INVALID");
+  assert.equal(voice.state.connecting, false);
+  assert.equal(TestSocket.instances.length, 0);
+  assert.equal(timers.active.size, 0);
+});
+
+test("join timeouts explain the gateway wait in all five languages", async t => {
+  const timers = controlRequestTimers(t);
+  globalThis.fetch = () => new Promise(() => {});
+  voice.connect("voice.example:9987", "", "Visitor");
+  await nextTurn();
+  timers.fire(timers.scheduled.at(-1));
+  for (const language of ["zh", "en", "de", "ru", "ja"]) {
+    const expected = webClientTranslations[language].joinRequestTimeout;
+    assert.ok(expected, `${language} explicitly translates the request timeout`);
+    assert.equal(useWebClientI18n(ref(language)).localizedMessage(voice.state.error), expected);
+  }
+});
+
+test("a queued old join deadline cannot abort the replacement request", async t => {
+  const timers = controlRequestTimers(t);
+  const signals = [];
+  const pending = deferred();
+  globalThis.fetch = (_, options) => { signals.push(options.signal); return pending.promise; };
+  voice.connect("old.example:9987", "", "Old");
+  await nextTurn();
+  const oldTimer = timers.scheduled.at(-1);
+  voice.connect("new.example:9987", "", "New");
+  await nextTurn();
+  oldTimer.callback();
+  assert.equal(signals[0].aborted, true);
+  assert.equal(signals[1].aborted, false);
+  assert.equal(voice.state.connecting, true);
+  assert.equal(voice.state.errorCode, "");
+  assert.equal(timers.active.size, 1);
+  pending.resolve({ ok: true, json: async () => ({ ticket: "current-ticket" }) });
+  await nextTurn();
+  assert.equal(TestSocket.instances.length, 1);
+  assert.equal(timers.active.size, 0);
+});
+
+test("gateway close reasons survive generic errors and stale close callbacks", async () => {
+  const old = await connect();
+  const lateClose = old.onclose;
+  old.onerror({});
+  assert.equal(voice.state.errorCode, "");
+  old.close(4005);
+  assert.equal(voice.state.errorCode, "IDENTITY_IN_USE");
+  const current = await connect();
+  lateClose({ code: 4004, reason: "SERVER_REJECTED" });
+  assert.equal(voice.ws.value, current);
+  assert.equal(voice.state.errorCode, "");
+});
+
+test("a socket close failure cannot leave the session connected or retain socket handlers", async () => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1, members: [{ id: 1, nickname: "Self" }] });
+  await nextTurn();
+  socket.close = () => { throw new Error("Already disposed"); };
+  assert.doesNotThrow(() => voice.disconnect());
+  assert.equal(voice.ws.value, null);
+  assert.equal(voice.state.connected, false);
+  assert.equal(voice.members.length, 0);
+  assert.equal(socket.onmessage, null);
+  assert.equal(socket.onclose, null);
+});
 
 test("late control messages from a replaced socket cannot change the new session", async () => {
   const old = await connect();
@@ -785,6 +1013,220 @@ test("a late playback rejection does not restore notices or retry listeners afte
   assert.equal(audioElements.size, 0);
 });
 
+test("a playback pause failure cannot prevent peer and microphone cleanup", async t => {
+  const microphone = microphoneStream();
+  navigator.mediaDevices.getUserMedia = async () => microphone;
+  const { peer } = await connectWebRtc();
+  peer.ontrack({ streams: [microphoneStream()] });
+  const output = [...audioElements][0];
+  t.mock.method(output, "pause", () => { throw new Error("Playback unavailable"); }, { times: 1 });
+  assert.doesNotThrow(() => voice.disconnect());
+  assert.equal(peer.connectionState, "closed");
+  assert.equal(microphone.track.readyState, "ended");
+  assert.equal(audioElements.size, 0);
+  assert.equal(output.srcObject, null);
+});
+
+test("a peer close failure cannot prevent microphone and session cleanup", async t => {
+  const microphone = microphoneStream();
+  navigator.mediaDevices.getUserMedia = async () => microphone;
+  const { peer } = await connectWebRtc();
+  t.mock.method(peer, "close", () => { throw new Error("Peer unavailable"); }, { times: 1 });
+  assert.doesNotThrow(() => voice.disconnect());
+  assert.equal(microphone.track.readyState, "ended");
+  assert.equal(voice.state.connected, false);
+  assert.equal(voice.ws.value, null);
+  assert.equal(peer.ontrack, null);
+  assert.equal(browserTimers.size, 0);
+});
+
+test("a playback setup failure releases its element and restores compatibility audio", async () => {
+  const { peer, socket } = await connectWebRtc();
+  const output = new TestAudioElement();
+  let removed = false;
+  output.remove = () => { removed = true; audioElements.delete(output); };
+  Object.defineProperty(output, "srcObject", { set(value) { if (value) throw new Error("Playback source unavailable"); } });
+  document.createElement = () => output;
+  assert.doesNotThrow(() => peer.ontrack({ streams: [microphoneStream()] }));
+  await nextTurn();
+  assert.equal(removed, true);
+  assert.equal(peer.connectionState, "closed");
+  assert.equal(voice.state.audioNoticeCode, "WEBRTC_FALLBACK");
+  assert.equal(voice.state.microphoneErrorCode, "");
+  assert.equal(socket.messages.filter(message => message.type === "webrtcStop").length, 1);
+});
+
+test("a queued old playback retry cannot play a replacement session", async t => {
+  let retry;
+  const addListener = window.addEventListener.bind(window);
+  t.mock.method(window, "addEventListener", (type, callback, options) => {
+    if (type === "pointerdown") retry = callback;
+    addListener(type, callback, options);
+  });
+  const first = await connectWebRtc();
+  const blocked = new TestAudioElement();
+  blocked.play = async () => { throw new Error("Gesture required"); };
+  document.createElement = () => blocked;
+  first.peer.ontrack({ streams: [microphoneStream()] });
+  await nextTurn();
+  const oldRetry = retry;
+  assert.equal(typeof oldRetry, "function");
+  const next = await connectWebRtc();
+  const output = new TestAudioElement();
+  let plays = 0;
+  output.play = async () => { plays++; };
+  document.createElement = () => output;
+  next.peer.ontrack({ streams: [microphoneStream()] });
+  await nextTurn();
+  assert.equal(plays, 1);
+  oldRetry();
+  await nextTurn();
+  assert.equal(plays, 1);
+  assert.equal(voice.state.audioNoticeCode, "");
+});
+
+test("overlapping playback retry gestures share one in-flight play attempt", async () => {
+  const { peer } = await connectWebRtc();
+  const output = new TestAudioElement();
+  const playback = deferred();
+  let plays = 0;
+  output.play = () => ++plays === 1 ? Promise.reject(new Error("Gesture required")) : playback.promise;
+  document.createElement = () => output;
+  peer.ontrack({ streams: [microphoneStream()] });
+  await nextTurn();
+  window.dispatchEvent(new Event("pointerdown"));
+  window.dispatchEvent(new Event("keydown"));
+  const attempts = plays;
+  playback.resolve();
+  await nextTurn();
+  assert.equal(attempts, 2);
+  assert.equal(voice.state.audioNoticeCode, "");
+});
+
+test("failed fallback signaling still releases WebRTC and resumes compatibility capture", async t => {
+  t.mock.method(TestPeer.prototype, "createOffer", async () => { throw new Error("Negotiation unavailable"); });
+  const send = TestSocket.prototype.send;
+  t.mock.method(TestSocket.prototype, "send", function (raw) {
+    if (typeof raw === "string" && JSON.parse(raw).type === "webrtcStop") throw new Error("Signal send failed");
+    return send.call(this, raw);
+  });
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1, webrtcAvailable: true });
+  await nextTurn();
+  assert.equal(TestPeer.instances[0].connectionState, "closed");
+  assert.equal(voice.state.microphoneErrorCode, "");
+  assert.equal(voice.state.audioNoticeCode, "WEBRTC_FALLBACK");
+  AudioContextStub.processors.at(-1).onaudioprocess({ inputBuffer: { getChannelData: () => new Float32Array(960).fill(0.2) } });
+  assert.ok(socket.messages.some(message => message instanceof ArrayBuffer && message.byteLength === 1920));
+});
+
+test("an old fallback microphone failure cannot report into a replacement connection", async () => {
+  const { peer } = await connectWebRtc();
+  const permission = deferred();
+  navigator.mediaDevices.getUserMedia = () => permission.promise;
+  peer.connectionState = "failed";
+  peer.onconnectionstatechange();
+  await nextTurn();
+  navigator.mediaDevices.getUserMedia = async () => microphoneStream();
+  await connectWebRtc();
+  permission.reject(new DOMException("Old permission rejected", "NotAllowedError"));
+  await nextTurn();
+  assert.equal(voice.state.microphoneErrorCode, "");
+  assert.equal(voice.state.audioNoticeCode, "");
+});
+
+test("an old answer timeout cannot hide the replacement deadline from cleanup", async t => {
+  const timers = [];
+  const setTimer = window.setTimeout.bind(window);
+  t.mock.method(window, "setTimeout", (callback, ms) => {
+    if (ms === 8000) timers.push(callback);
+    return setTimer(callback, ms);
+  });
+  await connectWebRtc();
+  await connectWebRtc();
+  timers[0]();
+  voice.disconnect();
+  assert.equal(browserTimers.size, 0);
+});
+
+test("disconnect settles an audio probe while browser stats are still pending", async () => {
+  const { peer, socket } = await connectWebRtc();
+  const stats = deferred();
+  peer.getStats = () => stats.promise;
+  let settled = false;
+  const pending = voice.measureVoiceAudioStatus().then(sample => { settled = true; return sample; });
+  const request = socket.messages.find(message => message.type === "audioStatsProbe");
+  socket.receive({ type: "audioStats", sequence: request.payload.sequence, stats: { transport: "webrtc" } });
+  voice.disconnect();
+  await nextTurn();
+  const settledAtDisconnect = settled;
+  stats.resolve(new Map());
+  const result = await pending;
+  assert.equal(settledAtDisconnect, true);
+  assert.equal(result, null);
+});
+
+test("an audio probe keeps its deadline after the gateway replies", async () => {
+  const { peer, socket } = await connectWebRtc();
+  const stats = deferred();
+  peer.getStats = () => stats.promise;
+  let settled = false;
+  const pending = voice.measureVoiceAudioStatus(10).then(sample => { settled = true; return sample; });
+  const request = socket.messages.find(message => message.type === "audioStatsProbe");
+  socket.receive({ type: "audioStats", sequence: request.payload.sequence, stats: { transport: "webrtc" } });
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const settledAtDeadline = settled;
+  stats.resolve(new Map());
+  const result = await pending;
+  assert.equal(settledAtDeadline, true);
+  assert.equal(result, null);
+});
+
+test("an old peer's browser stats cannot be combined with a replacement peer", async () => {
+  const { peer, socket } = await connectWebRtc();
+  const stats = deferred();
+  peer.getStats = () => stats.promise;
+  const pending = voice.measureVoiceAudioStatus();
+  const request = socket.messages.find(message => message.type === "audioStatsProbe");
+  socket.receive({ type: "audioStats", sequence: request.payload.sequence, stats: { transport: "webrtc" } });
+  await voice.setInputDevice("replacement");
+  assert.notEqual(TestPeer.instances.at(-1), peer);
+  stats.resolve(new Map());
+  assert.equal(await pending, null);
+});
+
+test("a failed audio probe send completes without an unhandled diagnostic rejection", async t => {
+  const { socket } = await connectWebRtc();
+  const send = socket.send.bind(socket);
+  t.mock.method(socket, "send", raw => {
+    if (typeof raw === "string" && JSON.parse(raw).type === "audioStatsProbe") throw new Error("Probe send failed");
+    return send(raw);
+  });
+  assert.equal(await voice.measureVoiceAudioStatus(), null);
+});
+
+test("a current audio probe retains browser metrics and accepts missing browser stats", async () => {
+  const { peer, socket } = await connectWebRtc();
+  peer.getStats = async () => new Map([
+    ["out", { type: "outbound-rtp", kind: "audio", bytesSent: 100, packetsSent: 10 }],
+    ["remote", { type: "remote-inbound-rtp", kind: "audio", packetsLost: 2, roundTripTime: 0.05 }],
+  ]);
+  const pending = voice.measureVoiceAudioStatus();
+  const request = socket.messages.find(message => message.type === "audioStatsProbe");
+  socket.receive({ type: "audioStats", sequence: request.payload.sequence, stats: { transport: "webrtc", tsSendFrames: 12 } });
+  const sample = await pending;
+  assert.equal(sample.transport, "webrtc");
+  assert.equal(sample.bridge.tsSendFrames, 12);
+  assert.equal(sample.browser.outboundPackets, 10);
+  assert.equal(sample.browser.outboundBytes, 100);
+  assert.equal(sample.browser.outboundRttMs, 50);
+  peer.getStats = async () => { throw new Error("Stats unavailable"); };
+  const missing = voice.measureVoiceAudioStatus();
+  const nextRequest = socket.messages.filter(message => message.type === "audioStatsProbe").at(-1);
+  socket.receive({ type: "audioStats", sequence: nextRequest.payload.sequence, stats: { transport: "webrtc" } });
+  assert.equal((await missing).browser, null);
+});
+
 test("disconnect clears the WebRTC answer deadline immediately", async () => {
   await connectWebRtc();
   assert.ok(browserTimers.size > 0);
@@ -986,8 +1428,9 @@ test("decoded audio stays within the 80 ms playback window and recovers after ov
 
 test("old socket audio cannot create a decoder in a replacement session", async () => {
   const old = await connect();
+  const lateAudio = old.onmessage;
   const current = await connect();
-  receiveAudio(old);
+  lateAudio({ data: new Uint8Array([4, 0, 7, 1, 2, 3]).buffer });
   assert.equal(AudioDecoderStub.instances.length, 0);
   receiveAudio(current);
   assert.equal(AudioDecoderStub.instances.length, 1);

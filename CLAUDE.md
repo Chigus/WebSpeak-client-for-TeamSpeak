@@ -30,6 +30,8 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 | `web/src/voice/accompaniment.ts` | Generation-bound display-audio capture, immediate pending-capture cancellation, ended listeners and committed activity |
 | `web/src/voice/webrtc-input.ts` | Stable WebRTC sender output, microphone gain and transactional accompaniment-source attachment |
 | `web/src/voice/microphone-meter.ts` | Optional per-peer level sampling, owned analysis nodes and timer, partial-failure cleanup and stale-tick rejection |
+| `web/src/voice/webrtc-transport.ts`, `webrtc-playback.ts` | Per-attempt peer negotiation, input/meter ownership, compatibility fallback and independently owned playback elements and retries |
+| `web/src/voice/connection.ts`, `commands.ts` | Cancellable ticket acquisition, socket and connection generations, plus per-command acknowledgement deadlines and cleanup |
 | `web/src/platform/` | Browser mounting and cancellable Android gateway readiness handshake |
 | `web/src/services/`, `web/src/i18n/`, `web/src/skins/` | Browser persistence, identity import, skin packages and translations |
 | `web/src/services/admin-api.ts`, `admin-requests.ts` | Admin HTTP validation and cancellation, session-bound CSRF and per-feature request ownership, including skin uploads and backup downloads |
@@ -59,6 +61,16 @@ Invalidate session audio before awaiting peer closure. Each codec and track must
 Late socket messages and media permission/negotiation results must not mutate a replacement session. Screen-sharing ownership is scoped to both the TeamSpeak target and channel; another member moving channels must not stop the current user's share. Preserve these invariants when extracting the remaining audio responsibilities.
 
 WebRTC offers, answers, playback callbacks and accompaniment capture belong to the session and peer that started them. Invalidate pending negotiation on stop, reconnect or teardown before awaiting resource closure. A stale peer must not publish errors, counters or audio into its successor. Negotiation and track setup failures must restore compatibility capture without misreporting a microphone failure.
+
+The WebRTC transport owns its peer, input mixer, meter, ICE wait and answer deadline. The capture layer retains ownership of the original microphone and PCM graph; releasing input during microphone preparation must not invalidate the preparing transport. Failed stop signaling cannot prevent local cleanup or compatibility fallback. A fallback permission failure must still belong to the connection and transport generation that initiated it.
+
+Each remote WebRTC audio element owns its in-flight play attempt and retry listeners. Coalesce overlapping gestures, guard captured callbacks against replacement and release partial element setup. Pause, listener removal, source clearing or peer closure failures must not interrupt release of other resources.
+
+Ticket acquisition has a 15-second browser deadline covering preference readiness, fetch and response-body reading. Disconnect and replacement abort the owning request immediately; stale success, rejection and deadline callbacks cannot open a socket or update a newer connection. This is separate from the gateway's TeamSpeak handshake policy. Browser cancellation does not undo a server-side invite consumption or ticket issuance. Preserve the gateway close code over generic WebSocket errors, detach retired handlers, and tolerate socket-close failures.
+
+Every acknowledged command owns its original socket, connection generation and deadline. Success, server rejection, synchronous send failure, timeout and disconnect all use one idempotent completion path; release the registration and timer immediately. Fire-and-forget commands keep the existing shared wire contract.
+
+Audio diagnostic probes retain their cancellation entry and deadline until both gateway and browser statistics finish. Bind the result to the original socket, connection generation and peer; disconnect settles pending consumers immediately, and a late browser getStats result cannot mix with a replacement peer. A probe send failure returns no sample.
 
 Accompaniment changes keep the WebRTC sender output alive. Prepare and connect the new source before replacing the old one; a failure preserves the current microphone and accompaniment. The input mixer owns its nodes and output track, never the externally owned capture streams. Release partial allocations and continue cleanup if an individual node fails. Application audio bypasses microphone gain/denoising and retains its source level.
 
