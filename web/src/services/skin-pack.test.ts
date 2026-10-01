@@ -77,10 +77,16 @@ test("community skins use a scoped light fallback instead of inheriting the nigh
   assert.match(scoped, /:where\(\.ws-skin-root\[data-ws-skin="community\.illusia-voice"\]\) \.settings-content/);
 });
 
-test("all public skin parts are documented and the admin console is outside skin scope", async () => {
-  const componentRoot = new URL("../components/web-client/", import.meta.url);
+async function componentSources(directory: string): Promise<string> {
+  const componentRoot = new URL(directory, import.meta.url);
   const componentFiles = (await readdir(componentRoot, { recursive: true })).filter(path => path.endsWith(".vue"));
-  const components = (await Promise.all(componentFiles.map(path => readFile(new URL(path.replaceAll("\\", "/"), componentRoot), "utf8")))).join("\n");
+  return (await Promise.all(componentFiles.map(path => readFile(new URL(path.replaceAll("\\", "/"), componentRoot), "utf8")))).join("\n");
+}
+
+test("all public skin parts are documented and the admin console is outside skin scope", async () => {
+  const [components, adminComponents] = await Promise.all([
+    componentSources("../components/web-client/"), componentSources("../components/admin/"),
+  ]);
   const [webClient, demo, skinSwitcher, languageSwitcher, admin, documentation] = await Promise.all([
     readFile(new URL("../views/WebClient.vue", import.meta.url), "utf8"),
     readFile(new URL("../views/DemoView.vue", import.meta.url), "utf8"),
@@ -94,7 +100,7 @@ test("all public skin parts are documented and the admin console is outside skin
   assert.match(skinSwitcher, /data-ws-skin-id/);
   assert.match(skinSwitcher, /data-ws-state/);
   assert.match(languageSwitcher, /data-ws-language/);
-  assert.doesNotMatch(admin, /ws-skin-root|data-ws-page=/);
+  assert.doesNotMatch(`${admin}\n${adminComponents}`, /ws-skin-root|data-ws-page=/);
   assert.doesNotMatch(demo, /:global\(:root\[data-theme="dark"\]\)/);
   assert.match(demo, /\.demo-page\[data-ws-skin="builtin\.dark"\]/);
 });

@@ -8,8 +8,8 @@ import vuePlugin from "@vitejs/plugin-vue";
 // Mount the actual SFC setup and router with a headless Vue renderer. HTTP is
 // controlled to reorder responses; DOM layout and real authentication are not
 // claimed by these lifecycle tests.
-let vite, AdminView, createRenderer, createRouter, createMemoryHistory, ssrContextKey;
-let app, router, state, handler;
+let vite, AdminView, createRenderer, createRouter, createMemoryHistory, ssrContextKey, reactive;
+let app, router, state, handler, serverModel, operationsModel, skinsModel;
 const globals = new Map();
 function global(name, value) {
   if (!globals.has(name)) globals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
@@ -46,7 +46,7 @@ before(async () => {
   vite = await createServer({ configFile: false, root: fileURLToPath(new URL("../", import.meta.url)),
     plugins: [vuePlugin()], server: { middlewareMode: true, hmr: false, ws: false, watch: null },
     optimizeDeps: { noDiscovery: true, include: [] }, appType: "custom" });
-  ({ createRenderer, ssrContextKey } = await import("vue"));
+  ({ createRenderer, ssrContextKey, reactive } = await import("vue"));
   ({ createRouter, createMemoryHistory } = await import("vue-router"));
   ({ default: AdminView } = await vite.ssrLoadModule("/src/views/AdminView.vue"));
 });
@@ -81,6 +81,9 @@ async function mount(path = "/admin/server") {
   app.use(router);
   app.mount({});
   state = app._instance.setupState;
+  serverModel = reactive(state.serverSettings);
+  operationsModel = reactive(state.adminOperations);
+  skinsModel = reactive(state.adminSkins);
   await nextTurn();
   assert.equal(state.loading, false);
 }
@@ -89,30 +92,30 @@ test("saving settings preserves edits made after the request started", async () 
   await mount();
   const save = deferred();
   handler = (path, init) => path === "/server" && init.method === "PUT" ? save.promise : Promise.resolve(json(defaults(path)));
-  state.serverForm.siteName = "Submitted";
-  state.serverForm.passwordAction = "replace";
-  state.serverForm.serverPassword = "submitted-test-password";
-  const pending = state.saveServerSettings();
-  state.serverForm.siteName = "New draft";
-  state.serverForm.serverPassword = "new-test-password";
+  serverModel.serverForm.siteName = "Submitted";
+  serverModel.serverForm.passwordAction = "replace";
+  serverModel.serverForm.serverPassword = "submitted-test-password";
+  const pending = serverModel.saveServerSettings();
+  serverModel.serverForm.siteName = "New draft";
+  serverModel.serverForm.serverPassword = "new-test-password";
   save.resolve(json({ ok: true, settings: settings({ siteName: "Submitted", hasPassword: true }) }));
   await pending;
-  assert.equal(state.serverForm.siteName, "New draft");
-  assert.equal(state.serverForm.serverPassword, "new-test-password");
-  assert.equal(state.serverForm.passwordAction, "replace");
-  assert.equal(state.serverForm.hasPassword, true);
+  assert.equal(serverModel.serverForm.siteName, "New draft");
+  assert.equal(serverModel.serverForm.serverPassword, "new-test-password");
+  assert.equal(serverModel.serverForm.passwordAction, "replace");
+  assert.equal(serverModel.serverForm.hasPassword, true);
 });
 
 test("changing the target while probing discards the old server result", async () => {
   await mount();
   const probe = deferred();
   handler = path => path === "/server/test" ? probe.promise : Promise.resolve(json(defaults(path)));
-  const pending = state.testServerConnection();
-  state.serverForm.address = "replacement.example";
+  const pending = serverModel.testServerConnection();
+  serverModel.serverForm.address = "replacement.example";
   probe.resolve(json({ ok: true, checkType: "protocol", passwordVerified: false, latencyMs: 20, serverName: "Old", requiresPassword: false }));
   await pending;
-  assert.equal(state.testResult, null);
-  assert.equal(state.serverForm.lastTestAt, null);
+  assert.equal(serverModel.testResult, null);
+  assert.equal(serverModel.serverForm.lastTestAt, null);
 });
 
 test("an older operations refresh cannot overwrite the newer snapshot", async () => {
@@ -122,11 +125,11 @@ test("an older operations refresh cannot overwrite the newer snapshot", async ()
   handler = path => path === "/sessions"
     ? (++queries === 1 ? first.promise : Promise.resolve(json({ sessions: [session("New")] })))
     : Promise.resolve(json(defaults(path)));
-  const old = state.loadOperations();
-  await state.loadOperations();
+  const old = operationsModel.loadOperations();
+  await operationsModel.loadOperations();
   first.resolve(json({ sessions: [session("Old")] }));
   await old;
-  assert.deepEqual(state.operations.sessions.map(item => item.nickname), ["New"]);
+  assert.deepEqual(operationsModel.operations.sessions.map(item => item.nickname), ["New"]);
 });
 
 test("unmounting the admin page prevents late login from navigating back", async () => {
@@ -146,51 +149,51 @@ test("refreshing skins preserves a default selection edited during the request",
   await mount("/admin/skins");
   const skins = deferred();
   handler = path => path === "/skins" ? skins.promise : Promise.resolve(json(defaults(path)));
-  const pending = state.loadSkinCatalog();
-  state.skinDefaultId = "builtin.dark";
+  const pending = skinsModel.loadSkinCatalog();
+  skinsModel.skinDefaultId = "builtin.dark";
   skins.resolve(json({ skins: [], defaultSkinId: "builtin.light" }));
   await pending;
-  assert.equal(state.skinDefaultId, "builtin.dark");
+  assert.equal(skinsModel.skinDefaultId, "builtin.dark");
 });
 
 test("a successful settings save clears submitted secrets and updates their stored status", async () => {
   await mount();
-  state.serverForm.passwordAction = "replace";
-  state.serverForm.serverPassword = "submitted-test-password";
-  state.addRelayNode();
-  Object.assign(state.serverForm.relayNodes[0], { name: "Relay", target: "relay.example:9000", token: "submitted-test-token" });
-  const relay = { ...state.serverForm.relayNodes[0], hasToken: true };
+  serverModel.serverForm.passwordAction = "replace";
+  serverModel.serverForm.serverPassword = "submitted-test-password";
+  serverModel.addRelayNode();
+  Object.assign(serverModel.serverForm.relayNodes[0], { name: "Relay", target: "relay.example:9000", token: "submitted-test-token" });
+  const relay = { ...serverModel.serverForm.relayNodes[0], hasToken: true };
   handler = (path, init) => Promise.resolve(json(path === "/server" && init.method === "PUT"
     ? { ok: true, settings: settings({ hasPassword: true, relayNodes: [relay] }) } : defaults(path)));
-  await state.saveServerSettings();
-  assert.equal(state.serverForm.serverPassword, "");
-  assert.equal(state.serverForm.passwordAction, "keep");
-  assert.equal(state.serverForm.hasPassword, true);
-  assert.equal(state.serverForm.relayNodes[0].token, "");
-  assert.equal(state.serverForm.relayNodes[0].tokenAction, "keep");
-  assert.equal(state.serverForm.relayNodes[0].hasToken, true);
-  assert.equal(state.serverSaving, false);
+  await serverModel.saveServerSettings();
+  assert.equal(serverModel.serverForm.serverPassword, "");
+  assert.equal(serverModel.serverForm.passwordAction, "keep");
+  assert.equal(serverModel.serverForm.hasPassword, true);
+  assert.equal(serverModel.serverForm.relayNodes[0].token, "");
+  assert.equal(serverModel.serverForm.relayNodes[0].tokenAction, "keep");
+  assert.equal(serverModel.serverForm.relayNodes[0].hasToken, true);
+  assert.equal(serverModel.serverSaving, false);
   assert.equal(state.errorMessage, "");
 });
 
 test("settings saves preserve relay edits, removals and additions made while awaiting the server", async () => {
   await mount();
-  state.addRelayNode(); state.addRelayNode();
-  for (const [i, node] of state.serverForm.relayNodes.entries()) Object.assign(node, { name: `Relay ${i}`, target: "relay.example:9000", token: "old-token" });
-  const submitted = state.serverForm.relayNodes.map(node => ({ ...node, hasToken: true }));
+  serverModel.addRelayNode(); serverModel.addRelayNode();
+  for (const [i, node] of serverModel.serverForm.relayNodes.entries()) Object.assign(node, { name: `Relay ${i}`, target: "relay.example:9000", token: "old-token" });
+  const submitted = serverModel.serverForm.relayNodes.map(node => ({ ...node, hasToken: true }));
   const save = deferred();
   handler = (path, init) => path === "/server" && init.method === "PUT" ? save.promise : Promise.resolve(json(defaults(path)));
-  const pending = state.saveServerSettings();
-  Object.assign(state.serverForm.relayNodes[0], { name: "New name", token: "new-token" });
-  state.removeRelayNode(1); state.addRelayNode();
-  const addedId = state.serverForm.relayNodes[1].id;
+  const pending = serverModel.saveServerSettings();
+  Object.assign(serverModel.serverForm.relayNodes[0], { name: "New name", token: "new-token" });
+  serverModel.removeRelayNode(1); serverModel.addRelayNode();
+  const addedId = serverModel.serverForm.relayNodes[1].id;
   save.resolve(json({ ok: true, settings: settings({ relayNodes: submitted }) }));
   await pending;
-  assert.deepEqual(state.serverForm.relayNodes.map(node => node.id), [submitted[0].id, addedId]);
-  assert.equal(state.serverForm.relayNodes[0].name, "New name");
-  assert.equal(state.serverForm.relayNodes[0].token, "new-token");
-  assert.equal(state.serverForm.relayNodes[0].tokenAction, "replace");
-  assert.equal(state.serverForm.relayNodes[0].hasToken, true);
+  assert.deepEqual(serverModel.serverForm.relayNodes.map(node => node.id), [submitted[0].id, addedId]);
+  assert.equal(serverModel.serverForm.relayNodes[0].name, "New name");
+  assert.equal(serverModel.serverForm.relayNodes[0].token, "new-token");
+  assert.equal(serverModel.serverForm.relayNodes[0].tokenAction, "replace");
+  assert.equal(serverModel.serverForm.relayNodes[0].hasToken, true);
 });
 
 test("duplicate saves submit once and failed saves retain the draft", async () => {
@@ -198,16 +201,16 @@ test("duplicate saves submit once and failed saves retain the draft", async () =
   const save = deferred(); let calls = 0;
   handler = (path, init) => path === "/server" && init.method === "PUT"
     ? (++calls, save.promise) : Promise.resolve(json(defaults(path)));
-  Object.assign(state.serverForm, { siteName: "Unsaved", passwordAction: "replace", serverPassword: "unsaved-test-password" });
-  const pending = state.saveServerSettings();
-  await state.saveServerSettings();
+  Object.assign(serverModel.serverForm, { siteName: "Unsaved", passwordAction: "replace", serverPassword: "unsaved-test-password" });
+  const pending = serverModel.saveServerSettings();
+  await serverModel.saveServerSettings();
   assert.equal(calls, 1);
-  assert.equal(state.serverSaving, true);
+  assert.equal(serverModel.serverSaving, true);
   save.resolve(json({ code: "REQUEST_FAILED" }, 500));
   await pending;
-  assert.equal(state.serverSaving, false);
-  assert.equal(state.serverForm.siteName, "Unsaved");
-  assert.equal(state.serverForm.serverPassword, "unsaved-test-password");
+  assert.equal(serverModel.serverSaving, false);
+  assert.equal(serverModel.serverForm.siteName, "Unsaved");
+  assert.equal(serverModel.serverForm.serverPassword, "unsaved-test-password");
   assert.ok(state.errorMessage);
 });
 
@@ -216,14 +219,14 @@ test("only the latest probe publishes its result and a valid probe still updates
   const old = deferred(); let probes = 0;
   const result = name => ({ ok: true, checkType: "protocol", passwordVerified: false, latencyMs: 20, serverName: name, requiresPassword: false });
   handler = path => path === "/server/test" ? (++probes === 1 ? old.promise : Promise.resolve(json(result("New")))) : Promise.resolve(json(defaults(path)));
-  const pending = state.testServerConnection();
-  state.serverForm.address = "new.example";
-  await state.testServerConnection();
+  const pending = serverModel.testServerConnection();
+  serverModel.serverForm.address = "new.example";
+  await serverModel.testServerConnection();
   old.resolve(json(result("Old"))); await pending;
-  assert.equal(state.testResult.serverName, "New");
-  assert.equal(state.serverForm.lastTestLatencyMs, 20);
-  assert.ok(state.serverForm.lastTestAt);
-  assert.equal(state.testing, false);
+  assert.equal(serverModel.testResult.serverName, "New");
+  assert.equal(serverModel.serverForm.lastTestLatencyMs, 20);
+  assert.ok(serverModel.serverForm.lastTestAt);
+  assert.equal(serverModel.testing, false);
   assert.equal(state.errorMessage, "");
 });
 
@@ -231,54 +234,54 @@ test("an obsolete refresh failure cannot clear a newer spinner or publish an err
   await mount("/admin/operations");
   const old = deferred(), latest = deferred(); let calls = 0;
   handler = path => path === "/sessions" ? (++calls === 1 ? old.promise : latest.promise) : Promise.resolve(json(defaults(path)));
-  const first = state.loadOperations(), second = state.loadOperations();
+  const first = operationsModel.loadOperations(), second = operationsModel.loadOperations();
   old.resolve(json({ code: "REQUEST_FAILED" }, 500)); await first;
-  assert.equal(state.operationsLoading, true);
+  assert.equal(operationsModel.operationsLoading, true);
   assert.equal(state.errorMessage, "");
   latest.resolve(json({ sessions: [session("New")] })); await second;
-  assert.equal(state.operationsLoading, false);
-  assert.equal(state.operations.sessions[0].nickname, "New");
+  assert.equal(operationsModel.operationsLoading, false);
+  assert.equal(operationsModel.operations.sessions[0].nickname, "New");
 });
 
 test("leaving a management section discards its pending read and returning loads fresh data", async () => {
   await mount("/admin/operations");
   const old = deferred();
   handler = path => path === "/sessions" ? old.promise : Promise.resolve(json(defaults(path)));
-  const pending = state.loadOperations();
+  const pending = operationsModel.loadOperations();
   state.errorMessage = "Previous section error";
   await router.push("/admin/server");
   await nextTurn();
   old.resolve(json({ sessions: [session("Old")] })); await pending;
-  assert.deepEqual(state.operations.sessions, []);
-  assert.equal(state.operationsLoading, false);
+  assert.deepEqual(operationsModel.operations.sessions, []);
+  assert.equal(operationsModel.operationsLoading, false);
   assert.equal(state.errorMessage, "");
   handler = path => Promise.resolve(json(path === "/sessions" ? { sessions: [session("Current")] } : defaults(path)));
   await router.push("/admin/operations"); await nextTurn();
-  assert.equal(state.operations.sessions[0].nickname, "Current");
+  assert.equal(operationsModel.operations.sessions[0].nickname, "Current");
 });
 
 test("a failed logout preserves the authenticated draft and a successful logout clears private state", async () => {
   await mount("/admin/operations");
-  state.serverForm.siteName = "Draft"; state.serverForm.serverPassword = "private-test-password";
-  state.inviteForm.expiresInHours = 48; state.inviteForm.maxUses = 10;
-  state.createdInvite = { token: "test-only-invite", link: "https://gateway.example/?invite=test-only-invite" };
+  serverModel.serverForm.siteName = "Draft"; serverModel.serverForm.serverPassword = "private-test-password";
+  operationsModel.inviteForm.expiresInHours = 48; operationsModel.inviteForm.maxUses = 10;
+  operationsModel.createdInvite = { token: "test-only-invite", link: "https://gateway.example/?invite=test-only-invite" };
   handler = path => Promise.resolve(path === "/logout" ? json({ code: "REQUEST_FAILED" }, 500) : json(defaults(path)));
   await state.logout();
   assert.equal(state.screen, "admin");
-  assert.equal(state.serverForm.siteName, "Draft");
-  assert.equal(state.serverForm.serverPassword, "private-test-password");
-  assert.equal(state.createdInvite?.token, "test-only-invite");
+  assert.equal(serverModel.serverForm.siteName, "Draft");
+  assert.equal(serverModel.serverForm.serverPassword, "private-test-password");
+  assert.equal(operationsModel.createdInvite?.token, "test-only-invite");
   assert.equal(state.loggingOut, false);
   assert.ok(state.errorMessage);
   handler = path => Promise.resolve(json(path === "/logout" ? { ok: true } : defaults(path)));
   await state.logout();
   assert.equal(state.screen, "login");
   assert.equal(state.csrfToken, "");
-  assert.equal(state.serverForm.serverPassword, "");
-  assert.equal(state.operations.diagnostics.node, "");
-  assert.equal(state.inviteForm.expiresInHours, 24);
-  assert.equal(state.inviteForm.maxUses, 0);
-  assert.equal(state.createdInvite, null);
+  assert.equal(serverModel.serverForm.serverPassword, "");
+  assert.equal(operationsModel.operations.diagnostics.node, "");
+  assert.equal(operationsModel.inviteForm.expiresInHours, 24);
+  assert.equal(operationsModel.inviteForm.maxUses, 0);
+  assert.equal(operationsModel.createdInvite, null);
   assert.equal(router.currentRoute.value.path, "/admin/login");
 });
 
@@ -286,7 +289,7 @@ test("an old 401 cannot log out a newly authenticated page", async () => {
   await mount("/admin/operations");
   const old = deferred();
   handler = path => path === "/sessions" ? old.promise : Promise.resolve(json(path === "/logout" ? { ok: true } : defaults(path)));
-  const pending = state.loadOperations();
+  const pending = operationsModel.loadOperations();
   await state.logout();
   handler = path => Promise.resolve(json(path === "/login" ? { ok: true, mustChangePassword: false, csrfToken: "new-test-csrf" } : defaults(path)));
   await state.login();
@@ -299,13 +302,13 @@ test("an old 401 cannot log out a newly authenticated page", async () => {
 
 test("a current 401 resets the page without leaving an error or loading spinner", async () => {
   await mount("/admin/operations");
-  state.serverForm.serverPassword = "private-test-password";
+  serverModel.serverForm.serverPassword = "private-test-password";
   handler = () => Promise.resolve(json({ code: "AUTH_REQUIRED" }, 401));
-  await state.loadOperations(); await nextTurn();
+  await operationsModel.loadOperations(); await nextTurn();
   assert.equal(state.screen, "login");
-  assert.equal(state.serverForm.serverPassword, "");
-  assert.equal(state.operations.diagnostics.version, "");
-  assert.equal(state.operationsLoading, false);
+  assert.equal(serverModel.serverForm.serverPassword, "");
+  assert.equal(operationsModel.operations.diagnostics.version, "");
+  assert.equal(operationsModel.operationsLoading, false);
   assert.equal(state.errorMessage, "");
   assert.equal(router.currentRoute.value.path, "/admin/login");
 });
@@ -315,7 +318,7 @@ test("unmounting during a backup download cannot trigger a late file download", 
   const backup = deferred(); let downloads = 0;
   global("document", { createElement() { downloads++; return { click() {} }; } });
   handler = path => path === "/backup" ? backup.promise : Promise.resolve(json(defaults(path)));
-  const pending = state.downloadBackup();
+  const pending = operationsModel.downloadBackup();
   app.unmount(); app = null;
   backup.resolve(new Response(new Uint8Array([0, 1, 255]))); await pending;
   assert.equal(downloads, 0);
@@ -326,28 +329,28 @@ test("skin mutations are serialized and failure restores the last saved default"
   await mount("/admin/skins");
   const save = deferred(); let calls = 0;
   handler = path => path === "/skins/default" ? (++calls, save.promise) : Promise.resolve(json(defaults(path)));
-  state.skinDefaultId = "builtin.dark";
-  const pending = state.saveSkinDefault();
-  await state.saveSkinDefault();
+  skinsModel.skinDefaultId = "builtin.dark";
+  const pending = skinsModel.saveSkinDefault();
+  await skinsModel.saveSkinDefault();
   assert.equal(calls, 1);
-  assert.equal(state.skinBusy, true);
+  assert.equal(skinsModel.skinBusy, true);
   save.resolve(json({ code: "REQUEST_FAILED" }, 500)); await pending;
-  assert.equal(state.skinDefaultId, "builtin.light");
-  assert.equal(state.skinBusy, false);
-  assert.ok(state.skinManagerError);
+  assert.equal(skinsModel.skinDefaultId, "builtin.light");
+  assert.equal(skinsModel.skinBusy, false);
+  assert.ok(skinsModel.skinManagerError);
 });
 
 test("a settings response cannot restore probe metadata after the draft password changes", async () => {
   await mount();
   const save = deferred();
   handler = (path, init) => path === "/server" && init.method === "PUT" ? save.promise : Promise.resolve(json(defaults(path)));
-  const pending = state.saveServerSettings();
-  state.serverForm.passwordAction = "replace";
-  state.serverForm.serverPassword = "new-test-password";
+  const pending = serverModel.saveServerSettings();
+  serverModel.serverForm.passwordAction = "replace";
+  serverModel.serverForm.serverPassword = "new-test-password";
   save.resolve(json({ ok: true, settings: settings({ lastTestAt: "2020-01-01T00:00:00Z", lastTestLatencyMs: 30 }) }));
   await pending;
-  assert.equal(state.serverForm.lastTestAt, null);
-  assert.equal(state.serverForm.lastTestLatencyMs, null);
+  assert.equal(serverModel.serverForm.lastTestAt, null);
+  assert.equal(serverModel.serverForm.lastTestLatencyMs, null);
 });
 
 test("a settings response cannot overwrite a newer probe completed during the save", async () => {
@@ -355,21 +358,21 @@ test("a settings response cannot overwrite a newer probe completed during the sa
   const save = deferred();
   handler = (path, init) => path === "/server" && init.method === "PUT" ? save.promise : Promise.resolve(json(path === "/server/test"
     ? { ok: true, checkType: "protocol", passwordVerified: false, latencyMs: 10, serverName: "Current", requiresPassword: false } : defaults(path)));
-  const pending = state.saveServerSettings();
-  await state.testServerConnection();
-  const testedAt = state.serverForm.lastTestAt;
+  const pending = serverModel.saveServerSettings();
+  await serverModel.testServerConnection();
+  const testedAt = serverModel.serverForm.lastTestAt;
   save.resolve(json({ ok: true, settings: settings({ lastTestAt: "2020-01-01T00:00:00Z", lastTestLatencyMs: 30 }) }));
   await pending;
-  assert.equal(state.serverForm.lastTestAt, testedAt);
-  assert.equal(state.serverForm.lastTestLatencyMs, 10);
+  assert.equal(serverModel.serverForm.lastTestAt, testedAt);
+  assert.equal(serverModel.serverForm.lastTestLatencyMs, 10);
 });
 
 test("duplicate invite revocation sends one mutation", async () => {
   await mount("/admin/operations");
   const revoke = deferred(); let calls = 0;
   handler = path => path === "/invites/test/revoke" ? (++calls, revoke.promise) : Promise.resolve(json(defaults(path)));
-  const pending = state.revokeInvite({ id: "test" });
-  const duplicate = state.revokeInvite({ id: "test" });
+  const pending = operationsModel.revokeInvite({ id: "test" });
+  const duplicate = operationsModel.revokeInvite({ id: "test" });
   revoke.resolve(json({ ok: true }));
   await Promise.all([pending, duplicate]);
   assert.equal(calls, 1);

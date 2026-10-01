@@ -8,7 +8,6 @@ interface Options { api: AdminApi; tr(key: keyof typeof copy.zh): string }
 
 export function useAdminSkins(options: Options) {
   const requests = createAdminRequests();
-  const skinFileInput = ref<HTMLInputElement | null>(null);
   const skinEntries = ref<SkinCatalogEntry[]>([]);
   const skinLoading = ref(false), skinUploading = ref(false), skinDefaultSaving = ref(false);
   const removingSkinId = ref(""), updatingSkinId = ref(""), skinDefaultId = ref("builtin.light");
@@ -98,6 +97,6 @@ export function useAdminSkins(options: Options) {
     } catch (error) { if (request.isCurrent()) report(error); }
     finally { if (request.isCurrent()) removingSkinId.value = ""; request.finish(); }
   }
-  return { skinFileInput, skinEntries, skinLoading, skinUploading, skinDefaultSaving, removingSkinId, updatingSkinId, skinDefaultId,
+  return { skinEntries, skinLoading, skinUploading, skinDefaultSaving, removingSkinId, updatingSkinId, skinDefaultId,
     skinManagerError, skinManagerNotice, skinBusy, enabledSkinEntries, loadSkinCatalog, saveSkinDefault, toggleSkinEnabled, onSkinFileChanged, removeSkin, cancelRequests, reset };
 }

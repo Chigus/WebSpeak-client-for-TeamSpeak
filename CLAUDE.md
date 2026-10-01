@@ -41,6 +41,7 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 | `web/src/composables/usePublicSkin.ts`, `web/src/services/skin-operation.ts` | Shared public-page skin initialization and selection, page ownership, cancellation and bounded loading |
 | `web/src/services/admin-api.ts`, `admin-requests.ts` | Admin HTTP validation and cancellation, session-bound CSRF and per-feature request ownership, including skin uploads and backup downloads |
 | `web/src/composables/useAdminServerSettings.ts`, `useAdminOperations.ts`, `useAdminSkins.ts` | Admin form merging, probes, operational actions and skin state; the page owns authentication, routing and overview |
+| `web/src/components/admin/` | Server settings, operations and skin presentation; the parent page retains the feature controller instances across subroute changes |
 | `web/src/composables/useAdminI18n.ts`, `web/src/i18n/admin.ts` | Admin formatting and error/status mappings; all five languages explicitly implement the same translation keys |
 | `src/mobile/`, `mobile/`, `web/android/` | Android loopback gateway, asset packaging and Capacitor container |
 
@@ -179,6 +180,10 @@ Platform startup owns its message listener, polling interval and deadline, inclu
 Routes load their page modules on demand. Document-level page styles must be gated by `html[data-ws-route]` because loaded CSS remains after navigation. The admin stylesheet is independent of public skins. Component extraction must retain `data-ws-part` hooks and account for Vue scoped styles across component boundaries.
 
 The identity dialog retains page-owned CSS with narrowly targeted `:deep` selectors so the existing declaration order and specificity remain intact. Shared button rules target its dedicated classes across the component boundary. Its close button is positioned within the modal. Public skin-contract tests include Vue files recursively under `components/web-client`; keep new public parts documented.
+
+Admin presentation components receive stable feature controllers; do not instantiate duplicate controllers in children. The welcome-language model remains page-owned and the skin file input belongs to its presentation component. Feature CSS crosses these boundaries with `:deep`, while shell and language-control selectors retain their existing scope. On narrow screens the brand and logout occupy the first row and all four navigation links share a separate row with at least 44 px high targets.
+
+Keep each repair batch tied to its current plan item. Combine related fixes before running the full verification command; use focused checks during diagnosis and repeat the full suite only when subsequent changes or failures warrant it.
 
 Public skin activation is last-choice-owned across both public pages. Retire previous runtime work before preparing a replacement, and reject results after page disposal, a newer choice or local-data reset. Check ownership before modifying document styles, selected content, asset URLs or stored preferences. An already aborted caller must not cancel a newer page's activation. Release compiled candidate URLs on failed installation.
 
