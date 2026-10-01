@@ -7,13 +7,15 @@ import { createAccompaniment, type AccompanimentErrorCode } from "../voice/accom
 import { createWebRtcTransport } from "../voice/webrtc-transport.js";
 import { createVoiceConnection } from "../voice/connection.js";
 import { createVoiceCommands } from "../voice/commands.js";
+import { createAudioDiagnostics, type AudioPermission, type VoiceAudioStatusSample } from "../voice/audio-diagnostics.js";
+export type { AudioPermission, BrowserVoiceAudioStats, VoiceAudioStatusSample } from "../voice/audio-diagnostics.js";
 import type { SinkAudioElement } from "../voice/webrtc-playback.js";
 import { createScreenShareController } from "../voice/screen-share.js";
 export type { ScreenShareOutputSettings, ScreenShareCaptureStats, ScreenSharePeerStats, ScreenShareWebRtcStats } from "../voice/screen-share.js";
 import { parseServerMessage } from "../../../src/shared/server-messages.js";
 import type { ClientCommandPayloads, ClientCommandType } from "../../../src/shared/client-commands.js";
 export type { ScreenShareStreamDescription as ScreenShareStream, ScreenShareViewerDescription as ScreenShareViewer, ScreenSharePeerSignal as ScreenShareSignal } from "../../../src/shared/screen-share.js";
-import type { ChannelMember, ChannelInfo, ChatMessage, ServerEvent, VoiceAudioBridgeStats } from "../../../src/shared/voice-models.js";
+import type { ChannelMember, ChannelInfo, ChatMessage, ServerEvent } from "../../../src/shared/voice-models.js";
 export type { ChannelMember, ChannelInfo, ChatMessage, ServerEvent, VoiceAudioBridgeStats } from "../../../src/shared/voice-models.js";
 import { reactive, ref, shallowRef } from "vue";
 import { loadLocalPreferences, saveLocalPreferences } from "../services/local-persistence.js";
@@ -51,38 +53,9 @@ export interface AudioOutputDevice {
   groupId: string;
 }
 
-export type AudioPermission = "unknown" | "granted" | "denied";
-
 type SinkAudioContext = AudioContext & {
   setSinkId?: (sinkId: string) => Promise<void>;
 };
-
-export interface BrowserVoiceAudioStats {
-  outboundBytes: number | null;
-  outboundPackets: number | null;
-  outboundPacketsLost: number | null;
-  outboundLossPercent: number | null;
-  outboundRttMs: number | null;
-  inboundBytes: number | null;
-  inboundPackets: number | null;
-  inboundPacketsLost: number | null;
-  inboundLossPercent: number | null;
-  inboundJitterMs: number | null;
-  concealedSamples: number | null;
-}
-
-export interface VoiceAudioStatusSample {
-  sampledAt: number;
-  transport: "webrtc" | "websocket" | "negotiating" | "disconnected";
-  connectionState: string | null;
-  microphoneMuted: boolean;
-  microphoneReady: boolean;
-  microphonePermission: AudioPermission;
-  playbackState: "playing" | "paused" | "unavailable" | null;
-  bridge: VoiceAudioBridgeStats;
-  browser: BrowserVoiceAudioStats | null;
-  fallbackPlayback: { framesReceived: number; framesDropped: number; decodeErrors: number };
-}
 
 const MAX_VISIBLE_ERROR_CODE_LENGTH = 64;
 const CLIENT_ERROR_CODE_ALIASES: Record<string, string> = {
@@ -245,11 +218,6 @@ export function useVoiceWebSocket() {
   });
   const commands = createVoiceCommands({ socket: () => ws.value, generation: () => voiceConnection.generation });
   let lastConnection: { target: string; channel: string; nickname: string; serverPassword: string; identity?: string; rememberIdentity: boolean; accelerated: boolean; accelerationRelayId: string } | null = null;
-  let audioStatusProbeSequence = 0;
-  const pendingAudioStatusProbes = new Map<string, { resolve: (stats: VoiceAudioBridgeStats | null) => void; timer: ReturnType<typeof setTimeout> }>();
-  let fallbackAudioFramesReceived = 0;
-  let fallbackAudioFramesDropped = 0;
-  let fallbackAudioDecodeErrors = 0;
   const identityMaterial = ref("");
   const storedVolumesByUid = reactive<Record<string, number>>({});
   let microphoneStartPromise: Promise<void> | null = null;
@@ -341,8 +309,8 @@ export function useVoiceWebSocket() {
   const remotePlayback = createRemotePlayback({
     getContext: getAudioCtx,
     getVolume: clientId => (volumes[clientId] ?? 1) * effectiveOutputVolume(),
-    onDecodeError: () => { fallbackAudioDecodeErrors++; },
-    onDrop: () => { fallbackAudioFramesDropped++; },
+    onDecodeError: () => audioDiagnostics.count("decodeErrors"),
+    onDrop: () => audioDiagnostics.count("framesDropped"),
   });
   const webrtc = createWebRtcTransport({
     prepareMicrophone: async () => {
@@ -383,6 +351,26 @@ export function useVoiceWebSocket() {
       },
       onPlaying: syncAudioContextNotice,
     },
+  });
+  const audioDiagnostics = createAudioDiagnostics({
+    source() {
+      const socket = ws.value;
+      if (!socket || socket.readyState !== WebSocket.OPEN || !state.connected) return null;
+      const peer = webrtc.peer;
+      return { socket, connection: voiceConnection.generation, transportGeneration: webrtc.generation, peer,
+        transport: webrtc.active ? "webrtc" : peer ? "negotiating" : "websocket" };
+    },
+    presentation({ peer }) {
+      return {
+        microphoneMuted: microphoneMuted.value,
+        microphoneReady: Boolean(micStream?.getAudioTracks().some(track => track.readyState === "live")),
+        microphonePermission: audioPermission.value,
+        playbackState: peer
+          ? webrtc.output ? webrtc.output.paused ? "paused" : "playing" : "unavailable"
+          : audioCtx ? audioCtx.state === "running" ? "playing" : "paused" : null,
+      };
+    },
+    send: (source, sequence) => source.socket.send(JSON.stringify({ type: "audioStatsProbe", payload: { sequence } })),
   });
 
   async function saveAudioPreferences(): Promise<void> {
@@ -1021,7 +1009,7 @@ export function useVoiceWebSocket() {
     selectedOutputDeviceId.value = committedOutputDeviceId;
     noiseSuppressionEnabled.value = committedNoiseSuppressionEnabled;
     microphoneTest.dispose();
-    clearAudioStatusProbes();
+    audioDiagnostics.reset();
     commands.clear(new Error("语音连接已关闭"));
     screenShare.stopTransport(sendScreenStop);
     webrtc.stop();
@@ -1030,14 +1018,6 @@ export function useVoiceWebSocket() {
     clearSpeakingState();
     whisperTargetIds.clear();
     whisperActive.value = false;
-  }
-
-  function clearAudioStatusProbes(): void {
-    for (const [sequence, pending] of pendingAudioStatusProbes) {
-      clearTimeout(pending.timer);
-      pendingAudioStatusProbes.delete(sequence);
-      pending.resolve(null);
-    }
   }
 
   function handleMessage(raw: unknown): void {
@@ -1161,9 +1141,7 @@ export function useVoiceWebSocket() {
         break;
       case "audioStats": {
         const sequence = typeof msg.sequence === "string" ? msg.sequence : "";
-        const pending = pendingAudioStatusProbes.get(sequence);
-        if (!pending) break;
-        pending.resolve(msg.stats);
+        audioDiagnostics.receive(sequence, msg.stats);
         break;
       }
       case "disconnected":
@@ -1252,12 +1230,12 @@ export function useVoiceWebSocket() {
     // produce duplicate or delayed playback.
     if (webrtc.active) return;
     if (data.length < 4) {
-      fallbackAudioFramesDropped++;
+      audioDiagnostics.count("framesDropped");
       return;
     }
     const clientId = (data[1] << 8) | data[2];
     if (clientId === state.tsClientId) return;
-    fallbackAudioFramesReceived++;
+    audioDiagnostics.count("framesReceived");
     markSpeaking(clientId);
     remotePlayback.play(clientId, data.slice(3));
   }
@@ -1281,131 +1259,8 @@ export function useVoiceWebSocket() {
     return sendCommandAndWait("moveClient", { clientId, channelId, ...(password ? { password } : {}) });
   }
 
-  async function collectBrowserVoiceAudioStats(): Promise<BrowserVoiceAudioStats | null> {
-    const peer = webrtc.peer;
-    if (!peer) return null;
-    try {
-      const report = await peer.getStats();
-      let outbound: Record<string, unknown> | undefined;
-      let remoteInbound: Record<string, unknown> | undefined;
-      let inbound: Record<string, unknown> | undefined;
-      let candidatePair: Record<string, unknown> | undefined;
-      report.forEach((raw) => {
-        const stats = raw as unknown as Record<string, unknown>;
-        const type = typeof stats.type === "string" ? stats.type : "";
-        const kind = typeof stats.kind === "string" ? stats.kind : typeof stats.mediaType === "string" ? stats.mediaType : "";
-        if (kind === "audio") {
-          if (type === "outbound-rtp") outbound = stats;
-          else if (type === "remote-inbound-rtp") remoteInbound = stats;
-          else if (type === "inbound-rtp") inbound = stats;
-        }
-        if (type === "candidate-pair" && (stats.selected === true || stats.nominated === true) && stats.state === "succeeded") candidatePair = stats;
-      });
-      const readNumber = (stats: Record<string, unknown> | undefined, key: string): number | null => {
-        const value = stats?.[key];
-        return typeof value === "number" && Number.isFinite(value) ? value : null;
-      };
-      const outboundLost = readNumber(remoteInbound, "packetsLost");
-      const outboundPackets = readNumber(outbound, "packetsSent");
-      const fractionLost = readNumber(remoteInbound, "fractionLost");
-      const outboundLossPercent = fractionLost !== null
-        ? Math.min(100, Math.max(0, fractionLost * 100))
-        : outboundLost !== null && outboundPackets !== null && outboundPackets + Math.max(0, outboundLost) > 0
-          ? (Math.max(0, outboundLost) / (outboundPackets + Math.max(0, outboundLost))) * 100
-          : null;
-      const inboundPackets = readNumber(inbound, "packetsReceived");
-      const inboundPacketsLost = readNumber(inbound, "packetsLost");
-      const inboundLossTotal = inboundPackets !== null && inboundPacketsLost !== null
-        ? inboundPackets + Math.max(0, inboundPacketsLost)
-        : null;
-      const outboundRttSeconds = readNumber(remoteInbound, "roundTripTime") ?? readNumber(candidatePair, "currentRoundTripTime");
-      const inboundJitterSeconds = readNumber(inbound, "jitter");
-      return {
-        outboundBytes: readNumber(outbound, "bytesSent"),
-        outboundPackets,
-        outboundPacketsLost: outboundLost,
-        outboundLossPercent,
-        outboundRttMs: outboundRttSeconds === null ? null : outboundRttSeconds * 1_000,
-        inboundBytes: readNumber(inbound, "bytesReceived"),
-        inboundPackets,
-        inboundPacketsLost,
-        inboundLossPercent: inboundLossTotal && inboundLossTotal > 0 && inboundPacketsLost !== null
-          ? (Math.max(0, inboundPacketsLost) / inboundLossTotal) * 100
-          : null,
-        inboundJitterMs: inboundJitterSeconds === null ? null : inboundJitterSeconds * 1_000,
-        concealedSamples: readNumber(inbound, "concealedSamples"),
-      };
-    } catch {
-      return null;
-    }
-  }
-
   function measureVoiceAudioStatus(timeoutMs = 1_800): Promise<VoiceAudioStatusSample | null> {
-    const socket = ws.value;
-    if (!socket || socket.readyState !== WebSocket.OPEN || !state.connected) return Promise.resolve(null);
-    const connection = voiceConnection.generation;
-    const peer = webrtc.peer;
-    const isCurrent = () => connection === voiceConnection.generation && ws.value === socket
-      && socket.readyState === WebSocket.OPEN && state.connected && webrtc.peer === peer;
-    const sequence = `audio-${Date.now().toString(36)}-${(audioStatusProbeSequence++).toString(36)}`;
-    const browserStatsPromise = collectBrowserVoiceAudioStats();
-    return new Promise<VoiceAudioStatusSample | null>((resolve) => {
-      let settled = false;
-      let receivedBridge = false;
-      const finish = (sample: VoiceAudioStatusSample | null): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        pendingAudioStatusProbes.delete(sequence);
-        resolve(sample);
-      };
-      // Keep the deadline and cancellation entry until both sources finish.
-      // A gateway reply must not leave an unbounded browser getStats wait.
-      const timer = setTimeout(() => finish(null), timeoutMs);
-      pendingAudioStatusProbes.set(sequence, {
-        resolve: (bridge) => {
-          if (!bridge) {
-            finish(null);
-            return;
-          }
-          if (settled || receivedBridge) return;
-          receivedBridge = true;
-          void browserStatsPromise.then((browser) => {
-            if (settled) return;
-            if (!isCurrent()) { finish(null); return; }
-            const transport = !state.connected
-              ? "disconnected"
-              : webrtc.active
-                ? "webrtc"
-                : peer
-                  ? "negotiating"
-                  : "websocket";
-            const playbackState = peer
-              ? webrtc.output ? webrtc.output.paused ? "paused" : "playing" : "unavailable"
-              : audioCtx ? audioCtx.state === "running" ? "playing" : "paused" : null;
-            finish({
-              sampledAt: performance.now(),
-              transport,
-              connectionState: peer?.connectionState ?? null,
-              microphoneMuted: microphoneMuted.value,
-              microphoneReady: Boolean(micStream?.getAudioTracks().some((track) => track.readyState === "live")),
-              microphonePermission: audioPermission.value,
-              playbackState,
-              bridge,
-              browser,
-              fallbackPlayback: {
-                framesReceived: fallbackAudioFramesReceived,
-                framesDropped: fallbackAudioFramesDropped,
-                decodeErrors: fallbackAudioDecodeErrors,
-              },
-            });
-          });
-        },
-        timer,
-      });
-      try { sendCmd("audioStatsProbe", { sequence }); }
-      catch { finish(null); }
-    });
+    return audioDiagnostics.measure(timeoutMs);
   }
 
   function sendTextMessage(message: string, targetId = ""): void {

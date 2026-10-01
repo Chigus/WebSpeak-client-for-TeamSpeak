@@ -182,6 +182,7 @@ export function createWebRtcTransport(options: TransportOptions) {
 
   return {
     start, stop, applyAnswer,
+    get generation(): number { return generation; },
     releaseInput(): void { releaseInput(); },
     async fallback(reason: string): Promise<void> { if (current) await fail(current, reason); },
     get peer(): RTCPeerConnection | null { return current?.peer ?? null; },

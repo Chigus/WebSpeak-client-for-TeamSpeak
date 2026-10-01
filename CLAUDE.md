@@ -32,6 +32,7 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 | `web/src/voice/microphone-meter.ts` | Optional per-peer level sampling, owned analysis nodes and timer, partial-failure cleanup and stale-tick rejection |
 | `web/src/voice/webrtc-transport.ts`, `webrtc-playback.ts` | Per-attempt peer negotiation, input/meter ownership, compatibility fallback and independently owned playback elements and retries |
 | `web/src/voice/connection.ts`, `commands.ts` | Cancellable ticket acquisition, socket and connection generations, plus per-command acknowledgement deadlines and cleanup |
+| `web/src/voice/audio-diagnostics.ts`, `web/src/composables/useWebClientPerformance.ts` | Session-owned diagnostic probes and compatibility counters, browser statistics, comparable sample scopes and cancellable UI polling |
 | `web/src/platform/` | Browser mounting and cancellable Android gateway readiness handshake |
 | `web/src/services/`, `web/src/i18n/`, `web/src/skins/` | Browser persistence, identity import, skin packages and translations |
 | `web/src/services/admin-api.ts`, `admin-requests.ts` | Admin HTTP validation and cancellation, session-bound CSRF and per-feature request ownership, including skin uploads and backup downloads |
@@ -71,6 +72,10 @@ Ticket acquisition has a 15-second browser deadline covering preference readines
 Every acknowledged command owns its original socket, connection generation and deadline. Success, server rejection, synchronous send failure, timeout and disconnect all use one idempotent completion path; release the registration and timer immediately. Fire-and-forget commands keep the existing shared wire contract.
 
 Audio diagnostic probes retain their cancellation entry and deadline until both gateway and browser statistics finish. Bind the result to the original socket, connection generation and peer; disconnect settles pending consumers immediately, and a late browser getStats result cannot mix with a replacement peer. A probe send failure returns no sample.
+
+Diagnostic samples also include the WebRTC transport generation, so a probe cannot survive a failed attempt that starts and ends without a peer. A browser-local scope ID changes with the source and session resets; compatibility counters reset at session teardown and snapshots stay independent. The scope ID is internal metadata, not part of the gateway protocol. Keep the exported diagnostic types available from the voice composable for existing callers.
+
+The performance panel only subtracts counters from matching scopes, transports and downlink sources (PCM, RTP or gateway frames). Null or rejected probes clear stale activity and restart the baseline. Check the polling generation before starting work as well as after awaiting results; unmount retires callbacks and manual refresh. Preserve the 2-second polling interval. For loss estimates, packetsSent already includes all sent packets, while packetsReceived requires adding lost packets to form the denominator; keep percentages bounded and treat RTCP/local snapshots as estimates.
 
 Accompaniment changes keep the WebRTC sender output alive. Prepare and connect the new source before replacing the old one; a failure preserves the current microphone and accompaniment. The input mixer owns its nodes and output track, never the externally owned capture streams. Release partial allocations and continue cleanup if an individual node fails. Application audio bypasses microphone gain/denoising and retains its source level.
 
@@ -136,6 +141,8 @@ npm run verify
 ```
 
 `npm run verify` runs unit tests, the backend build and `npm run web:build`. The latter delegates to the frontend build, including `vue-tsc --noEmit`. Use `npm run dev` and `npm run web:dev` for development, or `npm start` after building both applications.
+
+Headless Vue tests use Vite middleware mode with both HMR and the WebSocket listener disabled (`hmr: false`, `ws: false`). Disabling HMR alone still reserves Vite's default socket port and causes parallel test processes to conflict.
 
 CI verifies pushes to `dev` and `master`, pull requests and manual runs. Docker publication on `master` or release tags, and release packaging on tags or manual runs, call the same verification workflow before publishing or packaging. Verification includes the application checks and a Docker HTTP health smoke test; that smoke test does not prove voice or screen-sharing functionality.
 

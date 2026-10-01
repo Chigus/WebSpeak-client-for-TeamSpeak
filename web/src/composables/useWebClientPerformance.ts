@@ -1,5 +1,5 @@
 import { computed, onUnmounted, ref, watch, type Ref } from "vue";
-import type { VoiceAudioStatusSample } from "./useVoiceWebSocket.js";
+import type { VoiceAudioStatusSample } from "../voice/audio-diagnostics.js";
 
 const SAMPLE_INTERVAL_MS = 2_000;
 
@@ -27,13 +27,21 @@ function intervalLossPercent(
   currentLost: number | null | undefined,
   previousLost: number | null | undefined,
   fallback: number | null,
+  packetsIncludeLost = false,
 ): number | null {
   if (currentReceived == null || previousReceived == null || currentLost == null || previousLost == null) return fallback;
   const receivedDelta = counterDelta(currentReceived, previousReceived);
   const lostDelta = counterDelta(Math.max(0, currentLost), Math.max(0, previousLost));
   if (receivedDelta === null || lostDelta === null) return fallback;
-  const total = receivedDelta + lostDelta;
-  return total > 0 ? (lostDelta / total) * 100 : fallback;
+  const total = receivedDelta + (packetsIncludeLost ? 0 : lostDelta);
+  return total > 0 ? Math.min(100, (lostDelta / total) * 100) : fallback;
+}
+
+function downlinkCounter(sample: VoiceAudioStatusSample | null) {
+  if (!sample) return null;
+  if (sample.transport === "websocket") return { source: "pcm", value: sample.fallbackPlayback.framesReceived };
+  if (sample.transport === "webrtc" && sample.browser?.inboundPackets != null) return { source: "rtp", value: sample.browser.inboundPackets };
+  return { source: "bridge", value: sample.bridge.egressFrames };
 }
 
 export function useWebClientPerformance(
@@ -46,10 +54,12 @@ export function useWebClientPerformance(
   const previousSample = ref<VoiceAudioStatusSample | null>(null);
   let timer: number | null = null;
   let generation = 0;
+  let disposed = false;
 
   const stats = computed(() => {
     const current = latestSample.value;
-    const previous = previousSample.value;
+    const prior = previousSample.value;
+    const previous = current && prior && current.scopeId === prior.scopeId && current.transport === prior.transport ? prior : null;
     const elapsedMs = current && previous ? current.sampledAt - previous.sampledAt : 0;
     const bridge = current?.bridge;
     const previousBridge = previous?.bridge;
@@ -58,25 +68,12 @@ export function useWebClientPerformance(
     const uplinkFramesPerSecond = bridge
       ? ratePerSecond(bridge.tsSendFrames, previousBridge?.tsSendFrames, elapsedMs)
       : null;
-    const downlinkCounter = current
-      ? current.transport === "websocket"
-        ? current.fallbackPlayback.framesReceived
-        : current.transport === "webrtc" && browser?.inboundPackets !== null && browser?.inboundPackets !== undefined
-          ? browser.inboundPackets
-          : bridge?.egressFrames ?? null
-      : null;
-    const previousDownlinkCounter = previous
-      ? previous.transport === "websocket"
-        ? previous.fallbackPlayback.framesReceived
-        : previous.transport === "webrtc" && previousBrowser?.inboundPackets !== null && previousBrowser?.inboundPackets !== undefined
-          ? previousBrowser.inboundPackets
-          : previousBridge?.egressFrames ?? null
-      : null;
-    const downlinkFramesPerSecond = downlinkCounter === null
-      ? null
-      : ratePerSecond(downlinkCounter, previousDownlinkCounter ?? undefined, elapsedMs);
+    const downlink = downlinkCounter(current);
+    const priorDownlink = downlinkCounter(previous);
+    const downlinkFramesPerSecond = downlink && priorDownlink && downlink.source === priorDownlink.source
+      ? ratePerSecond(downlink.value, priorDownlink.value, elapsedMs) : null;
     const uplinkLossPercent = browser
-      ? intervalLossPercent(browser.outboundPackets, previousBrowser?.outboundPackets, browser.outboundPacketsLost, previousBrowser?.outboundPacketsLost, browser.outboundLossPercent)
+      ? intervalLossPercent(browser.outboundPackets, previousBrowser?.outboundPackets, browser.outboundPacketsLost, previousBrowser?.outboundPacketsLost, browser.outboundLossPercent, true)
       : null;
     const downlinkLossPercent = browser
       ? intervalLossPercent(browser.inboundPackets, previousBrowser?.inboundPackets, browser.inboundPacketsLost, previousBrowser?.inboundPacketsLost, browser.inboundLossPercent)
@@ -138,13 +135,18 @@ export function useWebClientPerformance(
   });
 
   async function runProbe(expectedGeneration = generation): Promise<void> {
-    if (running.value || !connected.value) return;
+    if (disposed || expectedGeneration !== generation || running.value || !connected.value) return;
     running.value = true;
     try {
       const sample = await measureAudioStatus();
-      if (expectedGeneration !== generation || !connected.value || !sample) return;
-      previousSample.value = latestSample.value;
+      if (expectedGeneration !== generation || !connected.value) return;
+      previousSample.value = sample ? latestSample.value : null;
       latestSample.value = sample;
+    } catch {
+      if (expectedGeneration === generation) {
+        latestSample.value = null;
+        previousSample.value = null;
+      }
     } finally {
       if (expectedGeneration === generation) running.value = false;
     }
@@ -181,7 +183,7 @@ export function useWebClientPerformance(
     else stop();
   }, { immediate: true });
 
-  onUnmounted(stop);
+  onUnmounted(() => { disposed = true; stop(); });
 
   return { panelOpen, running, stats, togglePanel, refresh };
 }

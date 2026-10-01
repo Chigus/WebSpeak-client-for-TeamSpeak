@@ -44,7 +44,7 @@ const defaults = path => ({
 
 before(async () => {
   vite = await createServer({ configFile: false, root: fileURLToPath(new URL("../", import.meta.url)),
-    plugins: [vuePlugin()], server: { middlewareMode: true, hmr: false, watch: null },
+    plugins: [vuePlugin()], server: { middlewareMode: true, hmr: false, ws: false, watch: null },
     optimizeDeps: { noDiscovery: true, include: [] }, appType: "custom" });
   ({ createRenderer, ssrContextKey } = await import("vue"));
   ({ createRouter, createMemoryHistory } = await import("vue-router"));

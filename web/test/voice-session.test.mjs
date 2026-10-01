@@ -166,7 +166,7 @@ before(async () => {
   vite = await createServer({
     configFile: false,
     root: fileURLToPath(new URL("../", import.meta.url)),
-    server: { middlewareMode: true, hmr: false, watch: null },
+    server: { middlewareMode: true, hmr: false, ws: false, watch: null },
     optimizeDeps: { noDiscovery: true, include: [] },
     appType: "custom",
   });
@@ -1220,11 +1220,66 @@ test("a current audio probe retains browser metrics and accepts missing browser 
   assert.equal(sample.browser.outboundPackets, 10);
   assert.equal(sample.browser.outboundBytes, 100);
   assert.equal(sample.browser.outboundRttMs, 50);
+  assert.equal(sample.browser.outboundLossPercent, 20);
   peer.getStats = async () => { throw new Error("Stats unavailable"); };
   const missing = voice.measureVoiceAudioStatus();
   const nextRequest = socket.messages.filter(message => message.type === "audioStatsProbe").at(-1);
   socket.receive({ type: "audioStats", sequence: nextRequest.payload.sequence, stats: { transport: "webrtc" } });
   assert.equal((await missing).browser, null);
+});
+
+async function audioSample(socket, bridge = {}) {
+  const pending = voice.measureVoiceAudioStatus();
+  const request = socket.messages.filter(message => message.type === "audioStatsProbe").at(-1);
+  socket.receive({ type: "audioStats", sequence: request.payload.sequence, stats: { transport: "websocket", ...bridge } });
+  return pending;
+}
+
+test("diagnostic sample scopes follow peer replacement and fallback on one socket", async () => {
+  const { socket } = await connectWebRtc();
+  const first = await audioSample(socket);
+  const next = await audioSample(socket);
+  assert.equal(typeof first.scopeId, "number");
+  assert.equal(next.scopeId, first.scopeId);
+  await voice.setInputDevice("replacement");
+  const replaced = await audioSample(socket);
+  assert.notEqual(replaced.scopeId, first.scopeId);
+  socket.receive({ type: "webrtcError", code: "WEBRTC_UNAVAILABLE" });
+  await nextTurn();
+  const fallback = await audioSample(socket);
+  assert.notEqual(fallback.scopeId, replaced.scopeId);
+  assert.equal(fallback.transport, "websocket");
+});
+
+test("session recovery resets compatibility diagnostics without mutating old snapshots", async () => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  await nextTurn();
+  receiveAudio(socket);
+  receiveAudio(socket);
+  socket.onmessage({ data: new Uint8Array([1, 2]).buffer });
+  const previous = await audioSample(socket);
+  assert.equal(previous.fallbackPlayback.framesReceived, 2);
+  assert.equal(previous.fallbackPlayback.framesDropped, 1);
+  socket.receive({ type: "disconnected", recoverable: true });
+  socket.receive({ type: "connected", tsClientId: 2 });
+  await nextTurn();
+  const current = await audioSample(socket);
+  assert.notEqual(current.scopeId, previous.scopeId);
+  assert.deepEqual(current.fallbackPlayback, { framesReceived: 0, framesDropped: 0, decodeErrors: 0 });
+  assert.equal(previous.fallbackPlayback.framesReceived, 2);
+});
+
+test("a probe started before peer allocation cannot survive a failed transport attempt", async t => {
+  t.mock.method(TestPeer.prototype, "createOffer", async () => { throw new Error("Offer unavailable"); });
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1, webrtcAvailable: true });
+  const pending = voice.measureVoiceAudioStatus();
+  const request = socket.messages.filter(message => message.type === "audioStatsProbe").at(-1);
+  await nextTurn();
+  assert.equal(TestPeer.instances.at(-1).connectionState, "closed");
+  socket.receive({ type: "audioStats", sequence: request.payload.sequence, stats: { transport: "websocket" } });
+  assert.equal(await pending, null);
 });
 
 test("disconnect clears the WebRTC answer deadline immediately", async () => {
