@@ -1,3 +1,5 @@
+import { createRemotePlayback } from "../voice/remote-playback.js";
+import { createMicrophoneTest } from "../voice/microphone-test.js";
 import { createScreenShareController } from "../voice/screen-share.js";
 export type { ScreenShareOutputSettings, ScreenShareCaptureStats, ScreenSharePeerStats, ScreenShareWebRtcStats } from "../voice/screen-share.js";
 import { parseServerMessage } from "../../../src/shared/server-messages.js";
@@ -307,8 +309,13 @@ export function useVoiceWebSocket() {
   const micLevel = ref(0);
   const microphoneTestActive = ref(false);
   const testAudioUrl = ref("");
-  let testRecorder: MediaRecorder | null = null;
-  let testRecorderTimer: ReturnType<typeof setTimeout> | null = null;
+  const microphoneTest = createMicrophoneTest({
+    prepare: async () => { await prepareInputDevices(); return micStream; },
+    onActive: active => { microphoneTestActive.value = active; },
+    onUrl: url => { testAudioUrl.value = url; },
+    onStopped: () => { if (!state.connected) stopMicrophone(); },
+    onError: error => { setMicrophoneError(error); },
+  });
   const microphoneMuted = ref(false);
   const noiseSuppressionEnabled = ref(true);
   const inputVolume = ref(1);
@@ -324,15 +331,6 @@ export function useVoiceWebSocket() {
   let accumBuf = new Int16Array(2048);
   let accumLen = 0;
 
-  // Playback is kept per client so frames from multiple speakers cannot
-  // interleave into one decoder or one scheduling queue.
-  const remoteDecoders = new Map<number, AudioDecoder>();
-  const remoteDecoderGenerations = new Map<number, number>();
-  let nextRemoteDecoderGeneration = 0;
-  const remotePlayTimes = new Map<number, number>();
-  const remotePlaybackSources = new Map<number, Set<AudioBufferSourceNode>>();
-  const remoteGains = new Map<number, GainNode>();
-  const remoteDecodeTimestamps = new Map<number, number>();
   const volumes = reactive<Record<number, number>>({});
   const speakingIds = reactive(new Set<number>());
   const whisperTargetIds = reactive(new Set<number>());
@@ -343,11 +341,12 @@ export function useVoiceWebSocket() {
   const AUDIO_FRAME_BYTES = AUDIO_FRAME_SAMPLES * 2;
   const MAX_AUDIO_BUFFERED_FRAMES = 10;
   const MAX_AUDIO_BUFFERED_BYTES = AUDIO_FRAME_BYTES * MAX_AUDIO_BUFFERED_FRAMES;
-  // Keep the WebSocket playback buffer below the 100 ms latency target. A
-  // 20 ms frame plus three queued decoder frames leaves only a short cushion
-  // for jitter; stale audio is discarded instead of being played late.
-  const MAX_REMOTE_PLAY_AHEAD_SECONDS = 0.08;
-  const MAX_REMOTE_DECODE_QUEUE_FRAMES = 3;
+  const remotePlayback = createRemotePlayback({
+    getContext: getAudioCtx,
+    getVolume: clientId => (volumes[clientId] ?? 1) * effectiveOutputVolume(),
+    onDecodeError: () => { fallbackAudioDecodeErrors++; },
+    onDrop: () => { fallbackAudioFramesDropped++; },
+  });
 
   async function saveAudioPreferences(): Promise<void> {
     await saveLocalPreferences({
@@ -417,7 +416,7 @@ export function useVoiceWebSocket() {
 
   function applyOutputVolume(): void {
     const level = effectiveOutputVolume();
-    for (const [clientId, gain] of remoteGains) gain.gain.value = (volumes[clientId] ?? 1) * level;
+    remotePlayback.updateVolumes();
     if (webrtcOutputElement) webrtcOutputElement.volume = level;
   }
 
@@ -1288,41 +1287,11 @@ export function useVoiceWebSocket() {
   }
 
   async function startMicrophoneTest(): Promise<void> {
-    microphoneTestActive.value = true;
-    if (testAudioUrl.value) {
-      URL.revokeObjectURL(testAudioUrl.value);
-      testAudioUrl.value = "";
-    }
-    try {
-      await prepareInputDevices();
-      if (typeof MediaRecorder !== "undefined" && micStream) {
-        const chunks: Blob[] = [];
-        const recorder = new MediaRecorder(micStream);
-        testRecorder = recorder;
-        recorder.ondataavailable = (event) => {
-          if (event.data.size) chunks.push(event.data);
-        };
-        recorder.onstop = () => {
-          if (chunks.length) {
-            testAudioUrl.value = URL.createObjectURL(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
-          }
-          if (testRecorder === recorder) testRecorder = null;
-        };
-        recorder.start();
-        testRecorderTimer = setTimeout(() => stopMicrophoneTest(), 5_000);
-      }
-    } catch (error) {
-      microphoneTestActive.value = false;
-      throw error;
-    }
+    await microphoneTest.start();
   }
 
   function stopMicrophoneTest(): void {
-    microphoneTestActive.value = false;
-    if (testRecorderTimer) clearTimeout(testRecorderTimer);
-    testRecorderTimer = null;
-    if (testRecorder && testRecorder.state !== "inactive") testRecorder.stop();
-    if (!state.connected) stopMicrophone();
+    microphoneTest.stop();
   }
 
   async function setOutputDevice(deviceId: string): Promise<void> {
@@ -1369,122 +1338,6 @@ export function useVoiceWebSocket() {
     } catch {
       // Notification sounds are best effort and must never affect the session.
     }
-  }
-
-  function playAudioFrame(clientId: number, opusData: Uint8Array): void {
-    if (opusData.length < 3) {
-      fallbackAudioFramesDropped++;
-      return;
-    }
-    let decoder = remoteDecoders.get(clientId);
-    const ctx = getAudioCtx();
-    const now = ctx.currentTime;
-    const scheduledUntil = remotePlayTimes.get(clientId) ?? now;
-    const decodeQueueSize = decoder?.decodeQueueSize ?? 0;
-    if (
-      decoder &&
-      (scheduledUntil > now + MAX_REMOTE_PLAY_AHEAD_SECONDS || decodeQueueSize >= MAX_REMOTE_DECODE_QUEUE_FRAMES)
-    ) {
-      resetRemotePlayback(clientId);
-      decoder = undefined;
-    }
-
-    if (!decoder) {
-      const gainNode = ctx.createGain();
-      gainNode.gain.value = (volumes[clientId] ?? 1) * effectiveOutputVolume();
-      gainNode.connect(ctx.destination);
-      remoteGains.set(clientId, gainNode);
-      const generation = ++nextRemoteDecoderGeneration;
-      const nextDecoder = new AudioDecoder({
-        output: (chunk: AudioData) => {
-          if (remoteDecoderGenerations.get(clientId) !== generation) {
-            chunk.close();
-            return;
-          }
-          try {
-            const { sampleRate, numberOfChannels, numberOfFrames } = chunk;
-            const buffer = ctx.createBuffer(numberOfChannels, numberOfFrames, sampleRate);
-            for (let ch = 0; ch < numberOfChannels; ch++) {
-              const data = new Float32Array(numberOfFrames);
-              chunk.copyTo(data, { planeIndex: ch, format: "f32-planar" });
-              buffer.copyToChannel(data, ch);
-            }
-            const source = ctx.createBufferSource();
-            source.buffer = buffer;
-            source.connect(gainNode);
-            let sources = remotePlaybackSources.get(clientId);
-            if (!sources) {
-              sources = new Set<AudioBufferSourceNode>();
-              remotePlaybackSources.set(clientId, sources);
-            }
-            sources.add(source);
-            source.addEventListener("ended", () => {
-              source.disconnect();
-              sources?.delete(source);
-              if (sources?.size === 0) remotePlaybackSources.delete(clientId);
-            }, { once: true });
-            let playTime = remotePlayTimes.get(clientId) ?? ctx.currentTime;
-            if (playTime < ctx.currentTime) playTime = ctx.currentTime;
-            if (playTime + numberOfFrames / sampleRate > ctx.currentTime + MAX_REMOTE_PLAY_AHEAD_SECONDS) {
-              source.disconnect();
-              sources.delete(source);
-              if (sources.size === 0) remotePlaybackSources.delete(clientId);
-              chunk.close();
-              resetRemotePlayback(clientId);
-              return;
-            }
-            source.start(playTime);
-            remotePlayTimes.set(clientId, playTime + numberOfFrames / sampleRate);
-          } catch {
-            // A decoder can finish while the audio context is being torn down.
-          }
-          chunk.close();
-        },
-        error: () => {
-          if (remoteDecoderGenerations.get(clientId) === generation) {
-            fallbackAudioDecodeErrors++;
-            remoteDecoderGenerations.delete(clientId);
-            remoteDecoders.delete(clientId);
-          }
-        },
-      });
-      nextDecoder.configure({ codec: "opus", sampleRate: 48000, numberOfChannels: 1 });
-      decoder = nextDecoder;
-      remoteDecoderGenerations.set(clientId, generation);
-      remoteDecoders.set(clientId, decoder);
-    }
-
-    try {
-      const timestamp = remoteDecodeTimestamps.get(clientId) ?? 0;
-      decoder.decode(new EncodedAudioChunk({ type: "key", timestamp, duration: 20_000, data: opusData }));
-      remoteDecodeTimestamps.set(clientId, timestamp + 20_000);
-    } catch {
-      fallbackAudioDecodeErrors++;
-      // Ignore malformed frames; the next valid frame can still be decoded.
-    }
-  }
-
-  function clearRemotePlayback(clientId: number): void {
-    const decoder = remoteDecoders.get(clientId);
-    if (decoder) {
-      try { decoder.close(); } catch { /* already closed */ }
-    }
-    remoteDecoders.delete(clientId);
-    remoteDecoderGenerations.delete(clientId);
-    remotePlayTimes.delete(clientId);
-    remoteDecodeTimestamps.delete(clientId);
-    const sources = remotePlaybackSources.get(clientId);
-    if (sources) {
-      for (const source of sources) {
-        try { source.stop(); } catch { /* already ended */ }
-        source.disconnect();
-      }
-      remotePlaybackSources.delete(clientId);
-    }
-  }
-
-  function resetRemotePlayback(clientId: number): void {
-    clearRemotePlayback(clientId);
   }
 
   function connect(target: string, channel: string, nickname: string, serverPassword = "", identity = "", rememberIdentity = false, inviteToken = "", accelerated = false, accelerationRelayId = ""): void {
@@ -1668,16 +1521,12 @@ export function useVoiceWebSocket() {
 
   /** All ways a session ends release the same owned media and pending work. */
   function releaseSessionResources(sendScreenStop = false): void {
+    microphoneTest.dispose();
     clearAudioStatusProbes();
     rejectPendingCommands(new Error("语音连接已关闭"));
     screenShare.stopTransport(sendScreenStop);
     stopWebRtcTransport();
-    for (const clientId of new Set([...remoteDecoders.keys(), ...remotePlaybackSources.keys()])) clearRemotePlayback(clientId);
-    remoteDecoderGenerations.clear();
-    remotePlayTimes.clear();
-    remoteDecodeTimestamps.clear();
-    for (const gain of remoteGains.values()) gain.disconnect();
-    remoteGains.clear();
+    remotePlayback.clearAll();
     stopMicrophone();
     clearSpeakingState();
     whisperTargetIds.clear();
@@ -1758,7 +1607,7 @@ export function useVoiceWebSocket() {
       case "memberLeave": {
         const clientId = Number(msg.id);
         clearSpeaking(clientId);
-        clearRemotePlayback(clientId);
+        remotePlayback.clear(clientId);
         const index = members.findIndex((member) => member.id === clientId);
         if (index >= 0) members.splice(index, 1);
         break;
@@ -1932,7 +1781,7 @@ export function useVoiceWebSocket() {
     if (clientId === state.tsClientId) return;
     fallbackAudioFramesReceived++;
     markSpeaking(clientId);
-    playAudioFrame(clientId, data.slice(3));
+    remotePlayback.play(clientId, data.slice(3));
   }
 
   function sendCmd<K extends ClientCommandType>(type: K, payload: ClientCommandPayloads[K], requestId = ""): void {
@@ -2206,8 +2055,7 @@ export function useVoiceWebSocket() {
       storedVolumesByUid[member.uid] = normalized;
       void saveAudioPreferences();
     }
-    const gain = remoteGains.get(clientId);
-    if (gain) gain.gain.value = normalized * effectiveOutputVolume();
+    remotePlayback.updateVolume(clientId);
     if (webrtcPeer || webrtcActive.value) sendCmd("setMemberVolume", { clientId, volume: normalized });
   }
 

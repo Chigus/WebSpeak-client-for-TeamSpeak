@@ -32,12 +32,52 @@ class TestTrack extends EventTarget {
 
 class AudioNodeStub {
   gain = { value: 1 };
+  disconnects = 0;
   connect() {}
-  disconnect() {}
+  disconnect() { this.disconnects++; }
+}
+class AudioSourceStub extends EventTarget {
+  static failStart = false;
+  stopped = 0;
+  disconnects = 0;
+  connect() {}
+  disconnect() { this.disconnects++; }
+  start(time) { if (AudioSourceStub.failStart) throw new Error("Source cannot start"); this.startedAt = time; }
+  stop() { this.stopped++; }
+}
+class AudioDecoderStub {
+  static instances = [];
+  static failConfigure = false;
+  decodeQueueSize = 0;
+  closed = 0;
+  constructor(callbacks) { this.callbacks = callbacks; AudioDecoderStub.instances.push(this); }
+  configure() { if (AudioDecoderStub.failConfigure) throw new Error("Codec unavailable"); }
+  decode(chunk) { this.lastChunk = chunk; }
+  close() { this.closed++; }
+}
+class RecorderStub {
+  static instances = [];
+  static failStart = false;
+  state = "inactive";
+  mimeType = "audio/webm";
+  stops = 0;
+  constructor(stream) { this.stream = stream; RecorderStub.instances.push(this); }
+  start() { if (RecorderStub.failStart) throw new Error("Recorder start failed"); this.state = "recording"; }
+  stop() { this.stops++; this.state = "inactive"; }
+  finish() { this.state = "inactive"; this.ondataavailable?.({ data: new Blob(["audio"]) }); this.onstop?.(); }
+}
+function decodedChunk() {
+  return { sampleRate: 48000, numberOfChannels: 1, numberOfFrames: 960, closed: 0, copyTo() {}, close() { this.closed++; } };
+}
+function receiveAudio(socket, clientId = 7) {
+  socket.onmessage({ data: new Uint8Array([4, clientId >> 8, clientId & 255, 1, 2, 3]).buffer });
 }
 class AudioContextStub extends EventTarget {
   static processors = [];
+  static sources = [];
+  static gains = [];
   state = "running";
+  currentTime = 0;
   sampleRate = 48000;
   destination = new AudioNodeStub();
   close() { this.state = "closed"; return Promise.resolve(); }
@@ -46,7 +86,9 @@ class AudioContextStub extends EventTarget {
     return new AudioNodeStub();
   }
   createMediaStreamDestination() { return Object.assign(new AudioNodeStub(), { stream: microphoneStream() }); }
-  createGain() { return new AudioNodeStub(); }
+  createGain() { const node = new AudioNodeStub(); AudioContextStub.gains.push(node); return node; }
+  createBuffer(channels, frames, sampleRate) { return { duration: frames / sampleRate, copyToChannel() {} }; }
+  createBufferSource() { const node = new AudioSourceStub(); AudioContextStub.sources.push(node); return node; }
   createScriptProcessor() { const node = new AudioNodeStub(); AudioContextStub.processors.push(node); return node; }
 }
 function microphoneStream() {
@@ -119,6 +161,13 @@ beforeEach(() => {
   TestSocket.instances.length = 0;
   TestPeer.instances.length = 0;
   AudioContextStub.processors.length = 0;
+  AudioContextStub.sources.length = 0;
+  AudioContextStub.gains.length = 0;
+  AudioDecoderStub.instances.length = 0;
+  AudioDecoderStub.failConfigure = false;
+  AudioSourceStub.failStart = false;
+  RecorderStub.instances.length = 0;
+  RecorderStub.failStart = false;
   audioElements.clear();
   replaceGlobal("RTCPeerConnection", TestPeer);
   replaceGlobal("window", Object.assign(new EventTarget(), {
@@ -137,6 +186,9 @@ beforeEach(() => {
   replaceGlobal("location", { protocol: "https:", host: "gateway.example" });
   replaceGlobal("fetch", async () => ({ ok: true, json: async () => ({ ticket: "test-ticket" }) }));
   replaceGlobal("AudioContext", AudioContextStub);
+  replaceGlobal("AudioDecoder", AudioDecoderStub);
+  replaceGlobal("MediaRecorder", RecorderStub);
+  replaceGlobal("EncodedAudioChunk", class { constructor(init) { Object.assign(this, init); } });
   replaceGlobal("HTMLMediaElement", class {});
   replaceGlobal("navigator", { mediaDevices: {
     getDisplayMedia: async () => displayStream(),
@@ -147,6 +199,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  voice?.stopMicrophoneTest();
   voice?.disconnect();
   for (const timer of browserTimers) clearTimeout(timer);
   browserTimers.clear();
@@ -435,4 +488,254 @@ test("an offer rejected after a new connection opens cannot report a microphone 
   assert.notEqual(current.peer.connectionState, "closed");
   assert.equal(voice.state.microphoneErrorCode, "");
   assert.equal(voice.state.audioNoticeCode, "");
+});
+
+
+test("resetting an overloaded remote decoder disconnects its old gain", async () => {
+  const socket = await connect();
+  receiveAudio(socket);
+  const gain = AudioContextStub.gains.at(-1);
+  AudioDecoderStub.instances.at(-1).decodeQueueSize = 3;
+  receiveAudio(socket);
+  assert.equal(gain.disconnects, 1);
+  assert.equal(AudioDecoderStub.instances.length, 2);
+});
+
+test("an old source ending cannot hide replacement playback from session cleanup", async () => {
+  const socket = await connect();
+  receiveAudio(socket);
+  const first = AudioDecoderStub.instances.at(-1);
+  first.callbacks.output(decodedChunk());
+  const oldSource = AudioContextStub.sources.at(-1);
+  first.decodeQueueSize = 3;
+  receiveAudio(socket);
+  AudioDecoderStub.instances.at(-1).callbacks.output(decodedChunk());
+  const replacement = AudioContextStub.sources.at(-1);
+  oldSource.dispatchEvent(new Event("ended"));
+  voice.disconnect();
+  assert.equal(replacement.stopped, 1);
+});
+
+test("decoder failure releases the speaker's queued sources and gain immediately", async () => {
+  const socket = await connect();
+  receiveAudio(socket);
+  const decoder = AudioDecoderStub.instances.at(-1);
+  decoder.callbacks.output(decodedChunk());
+  const source = AudioContextStub.sources.at(-1);
+  const gain = AudioContextStub.gains.at(-1);
+  decoder.callbacks.error(new Error("Decode failed"));
+  assert.equal(source.stopped, 1);
+  assert.equal(gain.disconnects, 1);
+});
+
+test("codec configuration failure is contained and releases the partially created stream", async () => {
+  const socket = await connect();
+  AudioDecoderStub.failConfigure = true;
+  assert.doesNotThrow(() => receiveAudio(socket));
+  assert.equal(AudioDecoderStub.instances.at(-1).closed, 1);
+  assert.equal(AudioContextStub.gains.at(-1).disconnects, 1);
+  AudioDecoderStub.failConfigure = false;
+  receiveAudio(socket);
+  assert.equal(AudioDecoderStub.instances.length, 2);
+});
+
+test("a failed audio source start does not retain a connected playback node", async () => {
+  const socket = await connect();
+  receiveAudio(socket);
+  AudioSourceStub.failStart = true;
+  const chunk = decodedChunk();
+  AudioDecoderStub.instances.at(-1).callbacks.output(chunk);
+  assert.ok(AudioContextStub.sources.at(-1).disconnects > 0);
+  assert.equal(chunk.closed, 1);
+});
+
+test("late decoded chunks after disconnect close without creating playback", async () => {
+  const socket = await connect();
+  receiveAudio(socket);
+  const old = AudioDecoderStub.instances.at(-1);
+  voice.disconnect();
+  const chunk = decodedChunk();
+  old.callbacks.output(chunk);
+  assert.equal(chunk.closed, 1);
+  assert.equal(AudioContextStub.sources.length, 0);
+});
+
+test("a departing speaker releases only its own playback", async () => {
+  const socket = await connect();
+  socket.receive({ type: "memberEnter", id: 7, nickname: "Leaving" });
+  socket.receive({ type: "memberEnter", id: 8, nickname: "Staying" });
+  receiveAudio(socket, 7);
+  receiveAudio(socket, 8);
+  const [leaving, staying] = AudioDecoderStub.instances;
+  leaving.callbacks.output(decodedChunk());
+  staying.callbacks.output(decodedChunk());
+  const [oldSource, currentSource] = AudioContextStub.sources;
+  socket.receive({ type: "memberLeave", id: 7 });
+  assert.deepEqual(voice.members.map(member => member.id), [8]);
+  assert.equal(leaving.closed, 1);
+  assert.equal(oldSource.stopped, 1);
+  assert.equal(staying.closed, 0);
+  assert.equal(currentSource.stopped, 0);
+});
+
+test("remote playback preserves member volume through output mute and decoder reset", async () => {
+  const socket = await connect();
+  voice.setVolume(7, 0.4);
+  voice.setOutputVolume(0.5);
+  receiveAudio(socket, 7);
+  receiveAudio(socket, 8);
+  assert.deepEqual(AudioContextStub.gains.map(node => node.gain.value), [0.2, 0.5]);
+  voice.toggleOutputMute();
+  assert.deepEqual(AudioContextStub.gains.map(node => node.gain.value), [0, 0]);
+  const old = AudioDecoderStub.instances[0];
+  old.decodeQueueSize = 3;
+  receiveAudio(socket, 7);
+  const replacement = AudioDecoderStub.instances.at(-1);
+  old.callbacks.error(new Error("stale decoder error"));
+  assert.equal(replacement.closed, 0);
+  assert.equal(AudioContextStub.gains.at(-1).gain.value, 0);
+  voice.toggleOutputMute();
+  assert.equal(AudioContextStub.gains.at(-1).gain.value, 0.2);
+  assert.equal(AudioContextStub.gains[1].gain.value, 0.5);
+});
+
+test("decoded audio stays within the 80 ms playback window and recovers after overflow", async () => {
+  const socket = await connect();
+  receiveAudio(socket);
+  const decoder = AudioDecoderStub.instances[0];
+  const chunks = Array.from({ length: 5 }, decodedChunk);
+  for (const chunk of chunks) decoder.callbacks.output(chunk);
+  assert.deepEqual(AudioContextStub.sources.map(source => source.startedAt), [0, 0.02, 0.04, 0.06]);
+  assert.equal(decoder.closed, 1);
+  assert.ok(AudioContextStub.sources.every(source => source.stopped === 1));
+  assert.ok(chunks.every(chunk => chunk.closed === 1));
+  receiveAudio(socket);
+  const replacement = AudioDecoderStub.instances.at(-1);
+  replacement.callbacks.output(decodedChunk());
+  assert.notEqual(replacement, decoder);
+  assert.equal(AudioContextStub.sources.at(-1).startedAt, 0);
+});
+
+test("old socket audio cannot create a decoder in a replacement session", async () => {
+  const old = await connect();
+  const current = await connect();
+  receiveAudio(old);
+  assert.equal(AudioDecoderStub.instances.length, 0);
+  receiveAudio(current);
+  assert.equal(AudioDecoderStub.instances.length, 1);
+});
+
+test("disconnect stops a microphone test and discards its late recording", async () => {
+  await voice.startMicrophoneTest();
+  const recorder = RecorderStub.instances.at(-1);
+  voice.disconnect();
+  assert.equal(recorder.stops, 1);
+  assert.equal(voice.microphoneTestActive.value, false);
+  recorder.finish();
+  assert.equal(voice.testAudioUrl.value, "");
+});
+
+test("a replacement microphone test stops the old recorder and ignores its late result", async t => {
+  const created = [];
+  t.mock.method(URL, "createObjectURL", blob => { created.push(blob); return `blob:test-${created.length}`; });
+  t.mock.method(URL, "revokeObjectURL", () => {});
+  await voice.startMicrophoneTest();
+  const old = RecorderStub.instances.at(-1);
+  await voice.startMicrophoneTest();
+  const current = RecorderStub.instances.at(-1);
+  assert.equal(old.stops, 1);
+  current.finish();
+  const currentUrl = voice.testAudioUrl.value;
+  old.finish();
+  assert.equal(voice.testAudioUrl.value, currentUrl);
+  assert.equal(created.length, 1);
+});
+
+test("an old microphone test permission failure cannot stop a new recording", async () => {
+  const oldPermission = deferred();
+  let requests = 0;
+  navigator.mediaDevices.getUserMedia = () => ++requests === 1 ? oldPermission.promise : Promise.resolve(microphoneStream());
+  const old = voice.startMicrophoneTest().catch(() => {});
+  voice.stopMicrophoneTest();
+  await voice.startMicrophoneTest();
+  oldPermission.reject(new Error("Old permission failed"));
+  await old;
+  assert.equal(voice.microphoneTestActive.value, true);
+  assert.equal(RecorderStub.instances.at(-1).state, "recording");
+});
+
+test("stopping a microphone test while devices refresh prevents recorder creation", async () => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  await nextTurn();
+  const refresh = deferred();
+  navigator.mediaDevices.enumerateDevices = () => refresh.promise;
+  const pending = voice.startMicrophoneTest();
+  voice.stopMicrophoneTest();
+  refresh.resolve([]);
+  await pending;
+  assert.equal(RecorderStub.instances.length, 0);
+  assert.equal(voice.microphoneTestActive.value, false);
+});
+
+test("a naturally finished microphone recording clears active state and standalone capture", async t => {
+  const revoked = [];
+  t.mock.method(URL, "createObjectURL", () => "blob:finished");
+  t.mock.method(URL, "revokeObjectURL", url => revoked.push(url));
+  await voice.startMicrophoneTest();
+  const recorder = RecorderStub.instances.at(-1);
+  recorder.finish();
+  assert.equal(voice.microphoneTestActive.value, false);
+  assert.equal(recorder.stream.track.readyState, "ended");
+  assert.equal(voice.testAudioUrl.value, "blob:finished");
+  voice.disconnect();
+  assert.deepEqual(revoked, ["blob:finished"]);
+  assert.equal(voice.testAudioUrl.value, "");
+});
+
+test("recorder startup failure releases standalone microphone capture", async () => {
+  RecorderStub.failStart = true;
+  await assert.rejects(voice.startMicrophoneTest(), /Recorder start failed/);
+  assert.equal(voice.microphoneTestActive.value, false);
+  assert.equal(RecorderStub.instances.at(-1).stream.track.readyState, "ended");
+});
+
+test("stopping a connected microphone test publishes its recording without stopping room capture", async t => {
+  t.mock.method(URL, "createObjectURL", () => "blob:connected");
+  t.mock.method(URL, "revokeObjectURL", () => {});
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  await nextTurn();
+  await voice.startMicrophoneTest();
+  const recorder = RecorderStub.instances.at(-1);
+  voice.stopMicrophoneTest();
+  recorder.finish();
+  assert.equal(voice.testAudioUrl.value, "blob:connected");
+  assert.equal(recorder.stream.track.readyState, "live");
+  assert.equal(voice.state.connected, true);
+});
+
+test("the microphone test deadline stops recording and is removed on completion", async t => {
+  let deadline;
+  const cleared = [];
+  t.mock.method(window, "setTimeout", (callback, delay) => { assert.equal(delay, 5_000); deadline = callback; return 123; });
+  t.mock.method(window, "clearTimeout", timer => cleared.push(timer));
+  await voice.startMicrophoneTest();
+  const recorder = RecorderStub.instances.at(-1);
+  deadline();
+  assert.equal(recorder.stops, 1);
+  assert.equal(voice.microphoneTestActive.value, false);
+  assert.deepEqual(cleared, [123]);
+});
+
+test("an asynchronous recorder failure stops capture and reports a microphone error", async () => {
+  await voice.startMicrophoneTest();
+  const recorder = RecorderStub.instances.at(-1);
+  recorder.onerror({ error: new Error("Recorder failed") });
+  assert.equal(recorder.stops, 1);
+  assert.equal(recorder.stream.track.readyState, "ended");
+  assert.equal(voice.microphoneTestActive.value, false);
+  assert.notEqual(voice.state.microphoneErrorCode, "");
+  recorder.finish();
+  assert.equal(voice.testAudioUrl.value, "");
 });

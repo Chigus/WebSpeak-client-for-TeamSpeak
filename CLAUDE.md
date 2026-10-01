@@ -20,6 +20,8 @@ WebSpeak connects browser users to TeamSpeak 3 and TeamSpeak 6 through a self-ho
 | `src/relay.ts` and `src/server/acceleration-relay.ts` | Standalone relay and gateway-side relay transport |
 | `web/src/views/` and `web/src/composables/` | Vue pages, connection state, audio controls, chat and screen sharing |
 | `web/src/voice/screen-share.ts` | Per-session screen capture, peer negotiation, cleanup and diagnostics |
+| `web/src/voice/remote-playback.ts` | Per-speaker compatibility decoding, bounded scheduling, volume and resource cleanup |
+| `web/src/voice/microphone-test.ts` | Cancellable recording tests, recorder deadline and playback URL ownership |
 | `web/src/platform/` | Browser mounting and cancellable Android gateway readiness handshake |
 | `web/src/services/`, `web/src/i18n/`, `web/src/skins/` | Browser persistence, identity import, skin packages and translations |
 | `web/src/services/admin-api.ts` | Admin HTTP transport, response validation, current CSRF and authentication-expiry notification, including skin uploads and backup downloads |
@@ -49,6 +51,10 @@ When enabled by the administrator, WebRTC provides a separate voice transport be
 Screen sharing has its own peer connections. The gateway coordinates stream membership and SDP/ICE signaling between browsers and supported TeamSpeak 6 clients. Screen media travels directly or through an externally configured TURN server; the WebSpeak gateway does not carry screen media.
 
 Preserve bounded audio buffering and stale-playback recovery. Audio counters stay in memory and are exposed in session diagnostics. Do not add per-frame persistent logging to the voice path.
+
+Remote playback owns each speaker's decoder, gain and source nodes as one resource set. Member departure, decoder failure and session teardown release that set; queued callbacks must not touch its replacement. Preserve the 80 ms playback window and three-frame decoder queue threshold unless audio validation justifies changing them.
+
+Microphone recording tests own their recorder, timeout and object URL, while the capture layer owns the microphone stream. A normal stop may publish its final recording; replacement and session teardown discard late results and revoke the old URL. Stopping a test while connected must preserve room capture. Test cancellation and stale permission failures must not change a newer test's state.
 
 `src/server/opus-codec.ts` loads the native `@discordjs/opus` implementation for server deployments and `opusscript` for the Android bundle. Dispose codec and media resources at the end of their owning session.
 
