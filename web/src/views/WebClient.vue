@@ -1,7 +1,24 @@
 <template>
-  <div :class="['web-client', 'ws-skin-root', `language-${language}`, { 'skin-initializing': !skinReady }]" data-ws-part="app" :data-ws-page="voiceState.connected || voiceState.reconnecting || voiceState.reconnectFailed ? 'voice' : 'home'">
+  <div
+    :class="[
+      'web-client',
+      'ws-skin-root',
+      `language-${language}`,
+      { 'skin-initializing': !skinReady },
+    ]"
+    data-ws-part="app"
+    :data-ws-page="
+      voiceState.connected || voiceState.reconnecting || voiceState.reconnectFailed
+        ? 'voice'
+        : 'home'
+    "
+  >
     <!-- Connection / welcome screen -->
-    <section v-if="!voiceState.connected && !voiceState.reconnecting && !voiceState.reconnectFailed" class="join-page" data-ws-part="home">
+    <section
+      v-if="!voiceState.connected && !voiceState.reconnecting && !voiceState.reconnectFailed"
+      class="join-page"
+      data-ws-part="home"
+    >
       <WebClientHeader
         v-model:language="language"
         v-model:skin-id="activeSkinId"
@@ -15,178 +32,717 @@
         @language-change="persistLanguage"
       />
 
-      <main class="join-content" data-ws-part="home.content">
-        <div class="join-copy" data-ws-part="home.hero">
-          <div class="eyebrow" data-ws-part="home.hero.eyebrow"><span class="eyebrow-dot"></span> {{ skinHomeCopy.eyebrow || t('privateAudio') }}</div>
-          <h1 data-ws-part="home.hero.title">{{ skinHomeCopy.title || t('joinLine1') }}<br /><em>{{ skinHomeCopy.titleAccent || t('joinLine2') }}</em></h1>
-          <p class="join-description" data-ws-part="home.hero.description">{{ skinHomeCopy.description || localizedWelcomeText }}</p>
-          <div class="promise-list" data-ws-part="home.features">
-            <div v-for="feature in skinHomeFeatures" :key="feature.id" class="promise-item" data-ws-part="home.feature" :data-ws-feature-id="feature.id"><span :class="['promise-icon', feature.tone]"><Icon :name="feature.icon" :size="16" /></span><span><b>{{ feature.title }}</b><small>{{ feature.description }}</small></span></div>
+      <main
+        class="join-content"
+        data-ws-part="home.content"
+      >
+        <div
+          class="join-copy"
+          data-ws-part="home.hero"
+        >
+          <div
+            class="eyebrow"
+            data-ws-part="home.hero.eyebrow"
+            ><span class="eyebrow-dot"></span> {{ skinHomeCopy.eyebrow || t("privateAudio") }}</div
+          >
+          <h1 data-ws-part="home.hero.title"
+            >{{ skinHomeCopy.title || t("joinLine1") }}<br /><em>{{
+              skinHomeCopy.titleAccent || t("joinLine2")
+            }}</em></h1
+          >
+          <p
+            class="join-description"
+            data-ws-part="home.hero.description"
+            >{{ skinHomeCopy.description || localizedWelcomeText }}</p
+          >
+          <div
+            class="promise-list"
+            data-ws-part="home.features"
+          >
+            <div
+              v-for="feature in skinHomeFeatures"
+              :key="feature.id"
+              class="promise-item"
+              data-ws-part="home.feature"
+              :data-ws-feature-id="feature.id"
+              ><span :class="['promise-icon', feature.tone]"
+                ><Icon
+                  :name="feature.icon"
+                  :size="16" /></span
+              ><span
+                ><b>{{ feature.title }}</b
+                ><small>{{ feature.description }}</small></span
+              ></div
+            >
           </div>
-          <div v-if="visitorNumber !== null" class="visitor-count" data-ws-part="home.visitors" role="status" aria-live="polite">
-            <span class="visitor-count-orbit" aria-hidden="true"></span>
-            <span class="visitor-count-icon"><Icon name="users" :size="15" /></span>
-            <span class="visitor-count-label">{{ t('visitorCount', { count: visitorNumber }) }}</span>
-            <span v-if="visitorTotal !== null" class="visitor-count-divider" aria-hidden="true"></span>
-            <span v-if="visitorTotal !== null" class="visitor-count-total">{{ t('visitorTotal', { count: visitorTotal }) }}</span>
-            <span class="visitor-count-spark" aria-hidden="true">✦</span>
+          <div
+            v-if="visitorNumber !== null"
+            class="visitor-count"
+            data-ws-part="home.visitors"
+            role="status"
+            aria-live="polite"
+          >
+            <span
+              class="visitor-count-orbit"
+              aria-hidden="true"
+            ></span>
+            <span class="visitor-count-icon"
+              ><Icon
+                name="users"
+                :size="15"
+            /></span>
+            <span class="visitor-count-label">{{
+              t("visitorCount", { count: visitorNumber })
+            }}</span>
+            <span
+              v-if="visitorTotal !== null"
+              class="visitor-count-divider"
+              aria-hidden="true"
+            ></span>
+            <span
+              v-if="visitorTotal !== null"
+              class="visitor-count-total"
+              >{{ t("visitorTotal", { count: visitorTotal }) }}</span
+            >
+            <span
+              class="visitor-count-spark"
+              aria-hidden="true"
+              >✦</span
+            >
           </div>
         </div>
 
-        <div class="join-card" data-ws-part="home.join-card">
-          <div class="join-card-effects" aria-hidden="true">
-            <span class="join-card-waveform" data-ws-part="home.join-card.waveform"><i v-for="bar in 9" :key="bar"></i></span>
-            <span class="join-card-sonar" data-ws-part="home.join-card.sonar"><i v-for="ring in 3" :key="ring"></i></span>
+        <div
+          class="join-card"
+          data-ws-part="home.join-card"
+        >
+          <div
+            class="join-card-effects"
+            aria-hidden="true"
+          >
+            <span
+              class="join-card-waveform"
+              data-ws-part="home.join-card.waveform"
+              ><i
+                v-for="bar in 9"
+                :key="bar"
+              ></i
+            ></span>
+            <span
+              class="join-card-sonar"
+              data-ws-part="home.join-card.sonar"
+              ><i
+                v-for="ring in 3"
+                :key="ring"
+              ></i
+            ></span>
           </div>
-          <h2 data-ws-part="home.join-title">{{ skinHomeCopy.welcomeTitle || t('welcomeBack') }}</h2>
-          <p class="card-lead" data-ws-part="home.join-description">{{ skinHomeCopy.welcomeDescription || t('joinLead') }}</p>
+          <h2 data-ws-part="home.join-title">{{
+            skinHomeCopy.welcomeTitle || t("welcomeBack")
+          }}</h2>
+          <p
+            class="card-lead"
+            data-ws-part="home.join-description"
+            >{{ skinHomeCopy.welcomeDescription || t("joinLead") }}</p
+          >
 
-          <div v-if="voiceState.error" class="notice error-notice" data-ws-part="home.notice" data-ws-state="error"><span class="notice-symbol">!</span><span class="notice-content"><span>{{ localizedMessage(voiceState.error) }}</span><code v-if="voiceState.errorCode">{{ t('errorCode') }}: {{ visibleErrorCode(voiceState.errorCode) }}</code></span></div>
-          <div v-if="browserError" class="notice warning-notice" data-ws-part="home.notice" data-ws-state="warning"><span class="notice-symbol">i</span><span>{{ localizedMessage(browserError) }}</span></div>
-          <div v-if="!serverConfigLoading && !initialized" class="notice warning-notice" data-ws-part="home.notice" data-ws-state="unconfigured"><span class="notice-symbol">i</span><span>{{ t('notConfigured') }} <a href="/admin">{{ t('configureNow') }}</a></span></div>
-          <div v-if="!localPersistenceAvailable" class="notice warning-notice" data-ws-part="home.notice" data-ws-state="storage-warning"><span class="notice-symbol">i</span><span>{{ t('localPersistenceUnavailable') }}</span></div>
+          <div
+            v-if="voiceState.error"
+            class="notice error-notice"
+            data-ws-part="home.notice"
+            data-ws-state="error"
+            ><span class="notice-symbol">!</span
+            ><span class="notice-content"
+              ><span>{{ localizedMessage(voiceState.error) }}</span
+              ><code v-if="voiceState.errorCode"
+                >{{ t("errorCode") }}: {{ visibleErrorCode(voiceState.errorCode) }}</code
+              ></span
+            ></div
+          >
+          <div
+            v-if="browserError"
+            class="notice warning-notice"
+            data-ws-part="home.notice"
+            data-ws-state="warning"
+            ><span class="notice-symbol">i</span
+            ><span>{{ localizedMessage(browserError) }}</span></div
+          >
+          <div
+            v-if="!serverConfigLoading && !initialized"
+            class="notice warning-notice"
+            data-ws-part="home.notice"
+            data-ws-state="unconfigured"
+            ><span class="notice-symbol">i</span
+            ><span
+              >{{ t("notConfigured") }} <a href="/admin">{{ t("configureNow") }}</a></span
+            ></div
+          >
+          <div
+            v-if="!localPersistenceAvailable"
+            class="notice warning-notice"
+            data-ws-part="home.notice"
+            data-ws-state="storage-warning"
+            ><span class="notice-symbol">i</span
+            ><span>{{ t("localPersistenceUnavailable") }}</span></div
+          >
 
-          <JoinForm v-if="initialized"
-            v-model:server-host="serverHost" v-model:server-port="serverPort"
-            v-model:server-password="serverPassword" v-model:nickname="nickname"
-            v-model:channel="channel" v-model:remember-identity="rememberIdentity"
+          <JoinForm
+            v-if="initialized"
+            v-model:server-host="serverHost"
+            v-model:server-port="serverPort"
+            v-model:server-password="serverPassword"
+            v-model:nickname="nickname"
+            v-model:channel="channel"
+            v-model:remember-identity="rememberIdentity"
             v-model:acceleration-relay-id="accelerationRelayId"
-            :access-mode="accessMode" :open-target-prefill-blocked="openTargetPrefillBlocked"
-            :acceleration-relays="accelerationRelays" :favorite-servers="favoriteServers"
-            :recent-servers="recentServers" :is-favorite="isFavorite"
-            :identity-export-busy="identityExportBusy" :has-identity="Boolean(identityMaterial)"
+            :access-mode="accessMode"
+            :open-target-prefill-blocked="openTargetPrefillBlocked"
+            :acceleration-relays="accelerationRelays"
+            :favorite-servers="favoriteServers"
+            :recent-servers="recentServers"
+            :is-favorite="isFavorite"
+            :identity-export-busy="identityExportBusy"
+            :has-identity="Boolean(identityMaterial)"
             :connecting="voiceState.connecting"
-            :join-disabled="!canJoin || serverConfigLoading || !identityReady || voiceState.connecting"
-            :t="t" @connect="doConnect" @disconnect="doDisconnect"
-            @select-server="selectLocalServer" @toggle-favorite="toggleFavorite"
-            @import-identity="openIdentityImport" @export-identity="exportIdentity"
+            :join-disabled="
+              !canJoin || serverConfigLoading || !identityReady || voiceState.connecting
+            "
+            :t="t"
+            @connect="doConnect"
+            @disconnect="doDisconnect"
+            @select-server="selectLocalServer"
+            @toggle-favorite="toggleFavorite"
+            @import-identity="openIdentityImport"
+            @export-identity="exportIdentity"
           />
-          <div class="join-meta" data-ws-part="home.security-note"><Icon name="lock" :size="14" /> {{ t('connectionAuthorized') }}</div>
+          <div
+            class="join-meta"
+            data-ws-part="home.security-note"
+            ><Icon
+              name="lock"
+              :size="14"
+            />
+            {{ t("connectionAuthorized") }}</div
+          >
         </div>
       </main>
 
-      <IdentityImportDialog v-if="identityImportOpen" v-model="identityImportText"
-        :busy="identityImportBusy" :reading="identityFileReading" :error="identityImportError" :t="t"
-        @close="closeIdentityImport" @submit="importIdentity" @file="readIdentityFile" />
+      <IdentityImportDialog
+        v-if="identityImportOpen"
+        v-model="identityImportText"
+        :busy="identityImportBusy"
+        :reading="identityFileReading"
+        :error="identityImportError"
+        :t="t"
+        @close="closeIdentityImport"
+        @submit="importIdentity"
+        @file="readIdentityFile"
+      />
 
-      <footer class="join-footer" data-ws-part="home.footer">
-        <span>WebSpeak</span><span class="footer-separator">·</span><span>{{ t('teamSpeakClient') }}</span><span class="footer-spacer"></span><button type="button" class="clear-local-button" @click="clearBrowserData">{{ t('clearLocalData') }}</button><span class="footer-separator">·</span><span>{{ t('browserSupport') }}</span>
+      <footer
+        class="join-footer"
+        data-ws-part="home.footer"
+      >
+        <span>WebSpeak</span><span class="footer-separator">·</span
+        ><span>{{ t("teamSpeakClient") }}</span
+        ><span class="footer-spacer"></span
+        ><button
+          type="button"
+          class="clear-local-button"
+          @click="clearBrowserData"
+          >{{ t("clearLocalData") }}</button
+        ><span class="footer-separator">·</span><span>{{ t("browserSupport") }}</span>
       </footer>
 
       <!-- QQ community modal -->
-      <div v-if="qqModalOpen" class="modal-backdrop qq-modal-backdrop" @click.self="qqModalOpen = false">
-        <section class="qq-modal-card" data-ws-part="home.community-dialog" role="dialog" aria-modal="true" :aria-labelledby="'qq-group-title'">
-          <button type="button" class="qq-modal-close" :aria-label="t('close')" :title="t('close')" @click="qqModalOpen = false"><Icon name="close" :size="19" /></button>
-          <div class="qq-modal-heading"><span class="card-kicker">{{ t('qqGroup') }}</span><h2 id="qq-group-title">{{ t('qqGroup') }}</h2></div>
-          <img class="qq-qr-image" src="/qq-group-qr.jpg" :alt="t('qqGroupQrAlt')" />
-          <p class="qq-direct-join">{{ t('qqJoinDirect') }}</p>
-          <a class="qq-join-link" :href="qqJoinUrl" :aria-label="t('joinQqGroup')" target="_blank" rel="noreferrer">{{ qqJoinUrl }}</a>
+      <div
+        v-if="qqModalOpen"
+        class="modal-backdrop qq-modal-backdrop"
+        @click.self="qqModalOpen = false"
+      >
+        <section
+          class="qq-modal-card"
+          data-ws-part="home.community-dialog"
+          role="dialog"
+          aria-modal="true"
+          :aria-labelledby="'qq-group-title'"
+        >
+          <button
+            type="button"
+            class="qq-modal-close"
+            :aria-label="t('close')"
+            :title="t('close')"
+            @click="qqModalOpen = false"
+            ><Icon
+              name="close"
+              :size="19"
+          /></button>
+          <div class="qq-modal-heading"
+            ><span class="card-kicker">{{ t("qqGroup") }}</span
+            ><h2 id="qq-group-title">{{ t("qqGroup") }}</h2></div
+          >
+          <img
+            class="qq-qr-image"
+            src="/qq-group-qr.jpg"
+            :alt="t('qqGroupQrAlt')"
+          />
+          <p class="qq-direct-join">{{ t("qqJoinDirect") }}</p>
+          <a
+            class="qq-join-link"
+            :href="qqJoinUrl"
+            :aria-label="t('joinQqGroup')"
+            target="_blank"
+            rel="noreferrer"
+            >{{ qqJoinUrl }}</a
+          >
         </section>
       </div>
     </section>
 
     <!-- Connected application shell -->
-    <div v-else :class="['app-shell', `mobile-view-${mobileSection}`]" :data-performance-open="performancePanelOpen ? 'true' : 'false'" data-ws-part="voice.shell" @click="memberMenu = null">
-      <main class="workspace" data-ws-part="voice.workspace">
-        <header class="workspace-header" data-ws-part="voice.header">
-          <div class="breadcrumbs" data-ws-part="voice.breadcrumbs"><span class="mobile-brand">TeamSpeak <em>Web</em></span><span class="crumb-muted">{{ t('serverBreadcrumb') }}</span><Icon name="chevron-right" :size="14" /><strong>{{ currentChannelName }}</strong></div>
-          <div class="workspace-actions" data-ws-part="voice.header-actions">
-            <VoicePerformancePanel :model="performance" :screen-share-web-rtc-stats="screenShareWebRtcStats" :t="t" />
-            <button class="header-action" :title="t('copyInvite')" @click="doShare"><Icon name="share" :size="18" /></button>
-            <button v-if="isMobileViewport" class="header-action microphone-header-toggle" :class="{ muted: microphoneMuted }" :title="microphoneMuted ? t('unmuteMic') : t('muteMic')" :aria-label="microphoneMuted ? t('microphoneMuted') : t('microphoneActive')" :aria-pressed="!microphoneMuted" @click="toggleMicrophone"><Icon :name="microphoneMuted ? 'mic-off' : 'mic'" :size="18" /></button>
-            <button v-if="isMobileViewport" class="header-action" :title="t('audioSettings')" :aria-label="t('audioSettings')" @click="settingsOpen = true"><Icon name="settings" :size="18" /></button>
-            <SkinSwitcher v-model="activeSkinId" class="workspace-skin-switcher" :menu-label="t('skinSelector')" :options="skinOptions" @change="onSkinChange" />
-            <LanguageSwitcher v-model="language" class="workspace-language" :menu-label="t('languageMenu')" @change="persistLanguage" />
-            <button class="disconnect-button" @click="doDisconnect"><Icon name="door" :size="17" /><span>{{ t('exit') }}</span></button>
+    <div
+      v-else
+      :class="['app-shell', `mobile-view-${mobileSection}`]"
+      :data-performance-open="performancePanelOpen ? 'true' : 'false'"
+      data-ws-part="voice.shell"
+      @click="memberMenu = null"
+    >
+      <main
+        class="workspace"
+        data-ws-part="voice.workspace"
+      >
+        <header
+          class="workspace-header"
+          data-ws-part="voice.header"
+        >
+          <div
+            class="breadcrumbs"
+            data-ws-part="voice.breadcrumbs"
+            ><span class="mobile-brand">TeamSpeak <em>Web</em></span
+            ><span class="crumb-muted">{{ t("serverBreadcrumb") }}</span
+            ><Icon
+              name="chevron-right"
+              :size="14"
+            /><strong>{{ currentChannelName }}</strong></div
+          >
+          <div
+            class="workspace-actions"
+            data-ws-part="voice.header-actions"
+          >
+            <VoicePerformancePanel
+              :model="performance"
+              :screen-share-web-rtc-stats="screenShareWebRtcStats"
+              :t="t"
+            />
+            <button
+              class="header-action"
+              :title="t('copyInvite')"
+              @click="doShare"
+              ><Icon
+                name="share"
+                :size="18"
+            /></button>
+            <button
+              v-if="isMobileViewport"
+              class="header-action microphone-header-toggle"
+              :class="{ muted: microphoneMuted }"
+              :title="microphoneMuted ? t('unmuteMic') : t('muteMic')"
+              :aria-label="microphoneMuted ? t('microphoneMuted') : t('microphoneActive')"
+              :aria-pressed="!microphoneMuted"
+              @click="toggleMicrophone"
+              ><Icon
+                :name="microphoneMuted ? 'mic-off' : 'mic'"
+                :size="18"
+            /></button>
+            <button
+              v-if="isMobileViewport"
+              class="header-action"
+              :title="t('audioSettings')"
+              :aria-label="t('audioSettings')"
+              @click="settingsOpen = true"
+              ><Icon
+                name="settings"
+                :size="18"
+            /></button>
+            <SkinSwitcher
+              v-model="activeSkinId"
+              class="workspace-skin-switcher"
+              :menu-label="t('skinSelector')"
+              :options="skinOptions"
+              @change="onSkinChange"
+            />
+            <LanguageSwitcher
+              v-model="language"
+              class="workspace-language"
+              :menu-label="t('languageMenu')"
+              @change="persistLanguage"
+            />
+            <button
+              class="disconnect-button"
+              @click="doDisconnect"
+              ><Icon
+                name="door"
+                :size="17"
+              /><span>{{ t("exit") }}</span></button
+            >
           </div>
         </header>
 
-        <ScreenShareSettingsDialog v-if="screenShareSettingsOpen" :model="screenShareControls" :t="t" @close="screenShareSettingsOpen = false" />
+        <ScreenShareSettingsDialog
+          v-if="screenShareSettingsOpen"
+          :model="screenShareControls"
+          :t="t"
+          @close="screenShareSettingsOpen = false"
+        />
 
-        <div v-if="voiceState.reconnecting || voiceState.reconnectFailed" :class="['reconnect-banner', { failed: voiceState.reconnectFailed }]" data-ws-part="voice.connection-status" role="status">
-          <div class="reconnect-copy"><strong>{{ voiceState.reconnectFailed ? t('reconnectFailed') : t('connectionInterrupted') }}</strong><span v-if="voiceState.reconnecting">{{ t('reconnectingAttempt', { attempt: voiceState.reconnectAttempt }) }}</span><span v-else>{{ localizedMessage(voiceState.error) }}</span></div>
-          <div class="reconnect-actions"><button v-if="voiceState.reconnectFailed" type="button" class="secondary-button" @click="reconnectNow">{{ t('reconnectNow') }}</button><button type="button" class="text-button" @click="doDisconnect">{{ t('back') }}</button></div>
+        <div
+          v-if="voiceState.reconnecting || voiceState.reconnectFailed"
+          :class="['reconnect-banner', { failed: voiceState.reconnectFailed }]"
+          data-ws-part="voice.connection-status"
+          role="status"
+        >
+          <div class="reconnect-copy"
+            ><strong>{{
+              voiceState.reconnectFailed ? t("reconnectFailed") : t("connectionInterrupted")
+            }}</strong
+            ><span v-if="voiceState.reconnecting">{{
+              t("reconnectingAttempt", { attempt: voiceState.reconnectAttempt })
+            }}</span
+            ><span v-else>{{ localizedMessage(voiceState.error) }}</span></div
+          >
+          <div class="reconnect-actions"
+            ><button
+              v-if="voiceState.reconnectFailed"
+              type="button"
+              class="secondary-button"
+              @click="reconnectNow"
+              >{{ t("reconnectNow") }}</button
+            ><button
+              type="button"
+              class="text-button"
+              @click="doDisconnect"
+              >{{ t("back") }}</button
+            ></div
+          >
         </div>
-        <div v-if="voiceState.audioNotice" class="reconnect-banner degraded" data-ws-part="voice.audio-status" role="status"><div class="reconnect-copy"><strong>{{ t('audioStatus') }}</strong><span>{{ localizedAudioNotice(voiceState.audioNoticeCode, voiceState.audioNotice) }}</span></div></div>
-        <div v-for="poke in visiblePokes" :key="poke.id" class="poke-banner" data-ws-part="voice.poke" role="status"><Icon name="bell" :size="17" /><span><strong>{{ poke.invokerName }}</strong> {{ t('pokedYou') }}<small v-if="poke.message">：{{ poke.message }}</small></span><button type="button" @click="dismissPoke(poke.id)"><Icon name="close" :size="15" /></button></div>
+        <div
+          v-if="voiceState.audioNotice"
+          class="reconnect-banner degraded"
+          data-ws-part="voice.audio-status"
+          role="status"
+          ><div class="reconnect-copy"
+            ><strong>{{ t("audioStatus") }}</strong
+            ><span>{{
+              localizedAudioNotice(voiceState.audioNoticeCode, voiceState.audioNotice)
+            }}</span></div
+          ></div
+        >
+        <div
+          v-for="poke in visiblePokes"
+          :key="poke.id"
+          class="poke-banner"
+          data-ws-part="voice.poke"
+          role="status"
+          ><Icon
+            name="bell"
+            :size="17" /><span
+            ><strong>{{ poke.invokerName }}</strong> {{ t("pokedYou")
+            }}<small v-if="poke.message">：{{ poke.message }}</small></span
+          ><button
+            type="button"
+            @click="dismissPoke(poke.id)"
+            ><Icon
+              name="close"
+              :size="15" /></button
+        ></div>
 
-        <div class="workspace-scroll" data-ws-part="voice.scroll">
-          <div class="workspace-content" data-ws-part="voice.content">
-            <section :class="['voice-section', { 'mobile-section-hidden': mobileSection !== 'voice' }]" data-ws-part="voice.activity">
-              <div class="voice-activity-artwork" data-ws-part="voice.activity.artwork" aria-hidden="true"></div>
-              <div class="section-heading" data-ws-part="voice.activity-heading"><div><span class="section-kicker">{{ t('voiceActivity') }}</span><h2>{{ t('speakingNow') }}</h2></div><span class="section-counter">{{ t('onlineShort', { count: currentMembers.length }) }}</span></div>
-              <div v-if="screenShareError" class="screen-share-inline-error" data-ws-part="voice.screen-share-error" role="status"><Icon name="info" :size="15" /> <span>{{ screenShareErrorText }}</span></div>
-              <ScreenSharePlayer v-if="screenShareViewing" :model="screenShareControls"
-                :screen-share-remote-stream="screenShareRemoteStream" :screen-share-remote-volume="screenShareRemoteVolume"
-                :screen-share-error="screenShareError" :leave-screen-share="leaveScreenShare" :avatar-initial="avatarInitial" :t="t" />
-              <VoiceMemberCards :current-members="currentMembers" :is-mobile-viewport="isMobileViewport"
-                :sharing="memberSharingState" :controls="screenShareControls" :is-speaking="isSpeaking"
-                :avatar-style="avatarStyle" :avatar-initial="avatarInitial" :t="t"
-                @member-actions="openMemberActions" @stop-share="stopScreenShare" />
-              <WhisperControls v-if="whisperTargetIds.size" :targets="whisperTargets" :active="whisperActive"
-                :enabled="!isMobileViewport || mobileSection === 'voice'" :controls="audioControls" :t="t" @clear="clearWhisperTargets" />
+        <div
+          class="workspace-scroll"
+          data-ws-part="voice.scroll"
+        >
+          <div
+            class="workspace-content"
+            data-ws-part="voice.content"
+          >
+            <section
+              :class="['voice-section', { 'mobile-section-hidden': mobileSection !== 'voice' }]"
+              data-ws-part="voice.activity"
+            >
+              <div
+                class="voice-activity-artwork"
+                data-ws-part="voice.activity.artwork"
+                aria-hidden="true"
+              ></div>
+              <div
+                class="section-heading"
+                data-ws-part="voice.activity-heading"
+                ><div
+                  ><span class="section-kicker">{{ t("voiceActivity") }}</span
+                  ><h2>{{ t("speakingNow") }}</h2></div
+                ><span class="section-counter">{{
+                  t("onlineShort", { count: currentMembers.length })
+                }}</span></div
+              >
+              <div
+                v-if="screenShareError"
+                class="screen-share-inline-error"
+                data-ws-part="voice.screen-share-error"
+                role="status"
+                ><Icon
+                  name="info"
+                  :size="15"
+                /> <span>{{ screenShareErrorText }}</span></div
+              >
+              <ScreenSharePlayer
+                v-if="screenShareViewing"
+                :model="screenShareControls"
+                :screen-share-remote-stream="screenShareRemoteStream"
+                :screen-share-remote-volume="screenShareRemoteVolume"
+                :screen-share-error="screenShareError"
+                :leave-screen-share="leaveScreenShare"
+                :avatar-initial="avatarInitial"
+                :t="t"
+              />
+              <VoiceMemberCards
+                :current-members="currentMembers"
+                :is-mobile-viewport="isMobileViewport"
+                :sharing="memberSharingState"
+                :controls="screenShareControls"
+                :is-speaking="isSpeaking"
+                :avatar-style="avatarStyle"
+                :avatar-initial="avatarInitial"
+                :t="t"
+                @member-actions="openMemberActions"
+                @stop-share="stopScreenShare"
+              />
+              <WhisperControls
+                v-if="whisperTargetIds.size"
+                :targets="whisperTargets"
+                :active="whisperActive"
+                :enabled="!isMobileViewport || mobileSection === 'voice'"
+                :controls="audioControls"
+                :t="t"
+                @clear="clearWhisperTargets"
+              />
               <div class="mobile-voice-controls">
-                <button type="button" class="mobile-voice-toggle" :class="{ muted: microphoneMuted }" :aria-pressed="!microphoneMuted" @click="toggleMicrophone"><Icon :name="microphoneMuted ? 'mic-off' : 'mic'" :size="18" /><span>{{ microphoneMuted ? t('unmuteMic') : t('muteMic') }}</span></button>
-                <button type="button" class="mobile-voice-settings" @click="settingsOpen = true"><Icon name="settings" :size="17" /><span>{{ t('audioSettings') }}</span></button>
+                <button
+                  type="button"
+                  class="mobile-voice-toggle"
+                  :class="{ muted: microphoneMuted }"
+                  :aria-pressed="!microphoneMuted"
+                  @click="toggleMicrophone"
+                  ><Icon
+                    :name="microphoneMuted ? 'mic-off' : 'mic'"
+                    :size="18"
+                  /><span>{{ microphoneMuted ? t("unmuteMic") : t("muteMic") }}</span></button
+                >
+                <button
+                  type="button"
+                  class="mobile-voice-settings"
+                  @click="settingsOpen = true"
+                  ><Icon
+                    name="settings"
+                    :size="17"
+                  /><span>{{ t("audioSettings") }}</span></button
+                >
               </div>
             </section>
 
-            <ChatPanel :model="chat" :t="t" :current-channel-name="currentChannelName"
-              :mobile-hidden="mobileSection !== 'chat'" :server-events="serverEvents"
-              :avatar-style="avatarStyle" :avatar-initial="avatarInitial"
-              :message-avatar="messageAvatar" :format-time="formatTime" />
+            <ChatPanel
+              :model="chat"
+              :t="t"
+              :current-channel-name="currentChannelName"
+              :mobile-hidden="mobileSection !== 'chat'"
+              :server-events="serverEvents"
+              :avatar-style="avatarStyle"
+              :avatar-initial="avatarInitial"
+              :message-avatar="messageAvatar"
+              :format-time="formatTime"
+            />
           </div>
         </div>
-
       </main>
 
-      <ChannelMemberPanel v-model:query="memberQuery" :model="memberControls"
-        :filtered-member-channels="filteredMemberChannels" :current-channel-id="currentChannel?.id"
-        :mobile-visible="mobileSection === 'channels'" :is-mobile-viewport="isMobileViewport"
-        :volumes="volumes" :avatar-style="avatarStyle" :avatar-initial="avatarInitial"
-        :range-style="rangeStyle" :t="t" @select-channel="selectChannel" @volume-input="onVolInput">
-        <AudioDock v-if="!isMobileViewport" :model="audioDockState" :controls="audioControls"
-          :t="t" :range-style="rangeStyle" @settings="settingsOpen = true" @output-mute="toggleOutputMute" />
+      <ChannelMemberPanel
+        v-model:query="memberQuery"
+        :model="memberControls"
+        :filtered-member-channels="filteredMemberChannels"
+        :current-channel-id="currentChannel?.id"
+        :mobile-visible="mobileSection === 'channels'"
+        :is-mobile-viewport="isMobileViewport"
+        :volumes="volumes"
+        :avatar-style="avatarStyle"
+        :avatar-initial="avatarInitial"
+        :range-style="rangeStyle"
+        :t="t"
+        @select-channel="selectChannel"
+        @volume-input="onVolInput"
+      >
+        <AudioDock
+          v-if="!isMobileViewport"
+          :model="audioDockState"
+          :controls="audioControls"
+          :t="t"
+          :range-style="rangeStyle"
+          @settings="settingsOpen = true"
+          @output-mute="toggleOutputMute"
+        />
       </ChannelMemberPanel>
 
-      <section v-if="mobileSection === 'more'" class="mobile-more-panel" data-ws-part="voice.mobile-more">
-        <span class="section-kicker">{{ t('mobileMore') }}</span>
-        <h2>{{ t('mobileMore') }}</h2>
-        <button type="button" :class="{ muted: microphoneMuted }" @click="toggleMicrophone"><Icon :name="microphoneMuted ? 'mic-off' : 'mic'" :size="18" /> {{ microphoneMuted ? t('unmuteMic') : t('muteMic') }}</button>
-        <button type="button" @click="settingsOpen = true"><Icon name="settings" :size="18" /> {{ t('audioSettings') }}</button>
-        <SkinSwitcher v-model="activeSkinId" class="mobile-skin-switcher" :menu-label="t('skinSelector')" :options="skinOptions" @change="onSkinChange" />
-        <div class="language-menu-row"><Icon name="globe" :size="18" /><span>{{ t('languageMenu') }}</span><LanguageSwitcher v-model="language" :menu-label="t('languageMenu')" @change="persistLanguage" /></div>
-        <button type="button" class="danger" @click="doDisconnect"><Icon name="door" :size="18" /> {{ t('exit') }}</button>
+      <section
+        v-if="mobileSection === 'more'"
+        class="mobile-more-panel"
+        data-ws-part="voice.mobile-more"
+      >
+        <span class="section-kicker">{{ t("mobileMore") }}</span>
+        <h2>{{ t("mobileMore") }}</h2>
+        <button
+          type="button"
+          :class="{ muted: microphoneMuted }"
+          @click="toggleMicrophone"
+          ><Icon
+            :name="microphoneMuted ? 'mic-off' : 'mic'"
+            :size="18"
+          />
+          {{ microphoneMuted ? t("unmuteMic") : t("muteMic") }}</button
+        >
+        <button
+          type="button"
+          @click="settingsOpen = true"
+          ><Icon
+            name="settings"
+            :size="18"
+          />
+          {{ t("audioSettings") }}</button
+        >
+        <SkinSwitcher
+          v-model="activeSkinId"
+          class="mobile-skin-switcher"
+          :menu-label="t('skinSelector')"
+          :options="skinOptions"
+          @change="onSkinChange"
+        />
+        <div class="language-menu-row"
+          ><Icon
+            name="globe"
+            :size="18" /><span>{{ t("languageMenu") }}</span
+          ><LanguageSwitcher
+            v-model="language"
+            :menu-label="t('languageMenu')"
+            @change="persistLanguage"
+        /></div>
+        <button
+          type="button"
+          class="danger"
+          @click="doDisconnect"
+          ><Icon
+            name="door"
+            :size="18"
+          />
+          {{ t("exit") }}</button
+        >
       </section>
 
-      <nav class="mobile-nav" data-ws-part="voice.mobile-nav" :aria-label="t('mobileNavigation')">
-        <button type="button" :class="{ active: mobileSection === 'channels' }" @click="mobileSection = 'channels'"><Icon name="volume" :size="18" /><span>{{ t('mobileChannels') }}</span></button>
-        <button type="button" :class="{ active: mobileSection === 'chat' }" @click="mobileSection = 'chat'"><Icon name="message" :size="18" /><span>{{ t('mobileChat') }}</span></button>
-        <button type="button" :class="{ active: mobileSection === 'voice' }" @click="mobileSection = 'voice'"><Icon name="mic" :size="18" /><span>{{ t('mobileVoice') }}</span></button>
-        <button type="button" :class="{ active: mobileSection === 'more' }" @click="mobileSection = 'more'"><Icon name="more" :size="18" /><span>{{ t('mobileMore') }}</span></button>
+      <nav
+        class="mobile-nav"
+        data-ws-part="voice.mobile-nav"
+        :aria-label="t('mobileNavigation')"
+      >
+        <button
+          type="button"
+          :class="{ active: mobileSection === 'channels' }"
+          @click="mobileSection = 'channels'"
+          ><Icon
+            name="volume"
+            :size="18"
+          /><span>{{ t("mobileChannels") }}</span></button
+        >
+        <button
+          type="button"
+          :class="{ active: mobileSection === 'chat' }"
+          @click="mobileSection = 'chat'"
+          ><Icon
+            name="message"
+            :size="18"
+          /><span>{{ t("mobileChat") }}</span></button
+        >
+        <button
+          type="button"
+          :class="{ active: mobileSection === 'voice' }"
+          @click="mobileSection = 'voice'"
+          ><Icon
+            name="mic"
+            :size="18"
+          /><span>{{ t("mobileVoice") }}</span></button
+        >
+        <button
+          type="button"
+          :class="{ active: mobileSection === 'more' }"
+          @click="mobileSection = 'more'"
+          ><Icon
+            name="more"
+            :size="18"
+          /><span>{{ t("mobileMore") }}</span></button
+        >
       </nav>
     </div>
 
-    <MemberActionsMenu :model="memberControls" :is-mobile-viewport="isMobileViewport"
-      :volumes="volumes" :whisper-target-ids="whisperTargetIds"
-      :range-style="rangeStyle" :t="t" @private-chat="openPrivateChat" @volume-input="onVolInput" />
+    <MemberActionsMenu
+      :model="memberControls"
+      :is-mobile-viewport="isMobileViewport"
+      :volumes="volumes"
+      :whisper-target-ids="whisperTargetIds"
+      :range-style="rangeStyle"
+      :t="t"
+      @private-chat="openPrivateChat"
+      @volume-input="onVolInput"
+    />
 
     <!-- Protected channel password modal -->
-    <ChannelPasswordDialog v-if="channelPasswordDialog.open" v-model="channelPasswordDialog.password"
-      :busy="channelPasswordDialog.submitting" :error="channelPasswordDialog.error" :t="t"
-      @cancel="cancelChannelPassword" @submit="submitChannelPassword" />
+    <ChannelPasswordDialog
+      v-if="channelPasswordDialog.open"
+      v-model="channelPasswordDialog.password"
+      :busy="channelPasswordDialog.submitting"
+      :error="channelPasswordDialog.error"
+      :t="t"
+      @cancel="cancelChannelPassword"
+      @submit="submitChannelPassword"
+    />
 
     <!-- TeamSpeak server password modal -->
-    <ServerPasswordDialog v-if="serverPasswordDialog.open" v-model="serverPasswordDialog.password"
-      :error-code="serverPasswordDialog.errorCode" :t="t"
-      @cancel="cancelServerPassword" @submit="submitServerPassword" />
+    <ServerPasswordDialog
+      v-if="serverPasswordDialog.open"
+      v-model="serverPasswordDialog.password"
+      :error-code="serverPasswordDialog.errorCode"
+      :t="t"
+      @cancel="cancelServerPassword"
+      @submit="submitServerPassword"
+    />
 
     <!-- Audio settings modal -->
-    <AudioSettingsDialog v-if="settingsOpen" :model="audioSettingsState" :controls="audioControls"
-      :microphone-error="voiceState.microphoneError" :is-mobile-viewport="isMobileViewport"
-      :t="t" :localized-message="localizedMessage" :range-style="rangeStyle" @close="settingsOpen = false" />
+    <AudioSettingsDialog
+      v-if="settingsOpen"
+      :model="audioSettingsState"
+      :controls="audioControls"
+      :microphone-error="voiceState.microphoneError"
+      :is-mobile-viewport="isMobileViewport"
+      :t="t"
+      :localized-message="localizedMessage"
+      :range-style="rangeStyle"
+      @close="settingsOpen = false"
+    />
 
-    <div v-if="toast" class="toast" data-ws-part="app.toast" role="status"><Icon name="check" :size="16" /> {{ toast }}</div>
+    <div
+      v-if="toast"
+      class="toast"
+      data-ws-part="app.toast"
+      role="status"
+      ><Icon
+        name="check"
+        :size="16"
+      />
+      {{ toast }}</div
+    >
   </div>
 </template>
 

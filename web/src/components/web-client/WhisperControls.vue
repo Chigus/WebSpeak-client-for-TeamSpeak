@@ -1,8 +1,41 @@
 <template>
-  <div class="whisper-strip" data-ws-part="voice.whisper-strip">
-    <div class="whisper-strip-copy"><strong><Icon name="users" :size="15" /> {{ t('whisperTargets') }}</strong><span>{{ targets.map((member) => member.nickname).join('、') }}</span></div>
-    <button type="button" class="text-button" @click="emit('clear')">{{ t('clearWhisperTargets') }}</button>
-    <button type="button" class="whisper-ptt-button" :class="{ active: whisperPttActive || active }" :aria-pressed="whisperPttActive || active" @pointerdown.prevent="onWhisperPttDown" @pointerup.prevent="onWhisperPttUp" @pointercancel.prevent="onWhisperPttUp" @lostpointercapture="onWhisperPttUp" @keydown="onWhisperPttKeyDown" @keyup="onWhisperPttKeyUp" @blur="stopWhisperTalk"><Icon name="mic" :size="18" /> {{ whisperPttActive || active ? t('releaseWhisper') : t('whisperHoldToTalk') }}</button>
+  <div
+    class="whisper-strip"
+    data-ws-part="voice.whisper-strip"
+  >
+    <div class="whisper-strip-copy"
+      ><strong
+        ><Icon
+          name="users"
+          :size="15"
+        />
+        {{ t("whisperTargets") }}</strong
+      ><span>{{ targets.map((member) => member.nickname).join("、") }}</span></div
+    >
+    <button
+      type="button"
+      class="text-button"
+      @click="emit('clear')"
+      >{{ t("clearWhisperTargets") }}</button
+    >
+    <button
+      type="button"
+      class="whisper-ptt-button"
+      :class="{ active: whisperPttActive || active }"
+      :aria-pressed="whisperPttActive || active"
+      @pointerdown.prevent="onWhisperPttDown"
+      @pointerup.prevent="onWhisperPttUp"
+      @pointercancel.prevent="onWhisperPttUp"
+      @lostpointercapture="onWhisperPttUp"
+      @keydown="onWhisperPttKeyDown"
+      @keyup="onWhisperPttKeyUp"
+      @blur="stopWhisperTalk"
+      ><Icon
+        name="mic"
+        :size="18"
+      />
+      {{ whisperPttActive || active ? t("releaseWhisper") : t("whisperHoldToTalk") }}</button
+    >
   </div>
 </template>
 

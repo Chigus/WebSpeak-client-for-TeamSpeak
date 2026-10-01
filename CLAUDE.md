@@ -197,6 +197,8 @@ Admin presentation components receive stable feature controllers; do not instant
 
 Keep each repair batch tied to its current plan item. Combine related fixes before running the full verification command; use focused checks during diagnosis and repeat the full suite only when subsequent changes or failures warrant it.
 
+Keep template/CSS formatting separate from behavior changes. Preserve inline whitespace text nodes when wrapping Vue tags; compare compiled render output when needed. CSS formatting must retain selector meaning, values and declaration/rule order. Layout assertions should tolerate formatting whitespace while still checking the intended rules and values.
+
 Public skin activation is last-choice-owned across both public pages. Retire previous runtime work before preparing a replacement, and reject results after page disposal, a newer choice or local-data reset. Check ownership before modifying document styles, selected content, asset URLs or stored preferences. An already aborted caller must not cancel a newer page's activation. Release compiled candidate URLs on failed installation.
 
 Skin initialization has an 8-second total deadline covering preference reads, directory fetch and body, package loading and activation. Network stages also have bounded standalone operations. A timeout reveals a usable built-in palette and retires late work; retain the explicit skin choice for a later retry. Normal initialization still respects the enabled instance default unless the visitor made a deliberate choice. Home and demo use the same controller; do not restore duplicate unguarded refresh paths.

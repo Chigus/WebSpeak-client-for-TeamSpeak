@@ -1,55 +1,384 @@
 <template>
   <div class="admin-root">
-    <div v-if="loading" class="center-card compact"><span class="spinner"></span><p>{{ tr('loading') }}</p></div>
+    <div
+      v-if="loading"
+      class="center-card compact"
+      ><span class="spinner"></span><p>{{ tr("loading") }}</p></div
+    >
 
-    <main v-else-if="screen === 'change-password'" class="login-page">
+    <main
+      v-else-if="screen === 'change-password'"
+      class="login-page"
+    >
       <section class="login-card">
-        <div class="admin-brand centered"><span><Icon name="waveform" :size="24" /></span><div><strong>WebSpeak</strong><small>{{ tr('adminConsole') }}</small></div></div>
-        <header><h1>{{ tr('changePasswordTitle') }}</h1><p>{{ tr('changePasswordLead') }}</p></header>
-        <form @submit.prevent="changePassword"><div v-if="errorMessage" class="alert error">{{ errorMessage }}</div><label><span>{{ tr('newPassword') }}</span><input v-model="newPassword" type="password" autocomplete="new-password" maxlength="1024" autofocus :placeholder="tr('passwordPlaceholder')" /></label><label><span>{{ tr('confirmPassword') }}</span><input v-model="confirmNewPassword" type="password" autocomplete="new-password" maxlength="1024" /></label><div class="strength"><i :style="{ width: `${passwordStrength}%` }"></i></div><button class="primary-button wide" :disabled="submitting" type="submit"><span v-if="submitting" class="spinner small"></span>{{ tr('savePassword') }}</button></form>
-        <p class="security-note">{{ tr('defaultCredentialNotice') }}</p><LanguageSwitcher v-model="language" class="language-link" :menu-label="tr('languageMenu')" @change="persistLanguage" />
+        <div class="admin-brand centered"
+          ><span
+            ><Icon
+              name="waveform"
+              :size="24" /></span
+          ><div
+            ><strong>WebSpeak</strong><small>{{ tr("adminConsole") }}</small></div
+          ></div
+        >
+        <header
+          ><h1>{{ tr("changePasswordTitle") }}</h1
+          ><p>{{ tr("changePasswordLead") }}</p></header
+        >
+        <form @submit.prevent="changePassword"
+          ><div
+            v-if="errorMessage"
+            class="alert error"
+            >{{ errorMessage }}</div
+          ><label
+            ><span>{{ tr("newPassword") }}</span
+            ><input
+              v-model="newPassword"
+              type="password"
+              autocomplete="new-password"
+              maxlength="1024"
+              autofocus
+              :placeholder="tr('passwordPlaceholder')" /></label
+          ><label
+            ><span>{{ tr("confirmPassword") }}</span
+            ><input
+              v-model="confirmNewPassword"
+              type="password"
+              autocomplete="new-password"
+              maxlength="1024" /></label
+          ><div class="strength"><i :style="{ width: `${passwordStrength}%` }"></i></div
+          ><button
+            class="primary-button wide"
+            :disabled="submitting"
+            type="submit"
+            ><span
+              v-if="submitting"
+              class="spinner small"
+            ></span
+            >{{ tr("savePassword") }}</button
+          ></form
+        >
+        <p class="security-note">{{ tr("defaultCredentialNotice") }}</p
+        ><LanguageSwitcher
+          v-model="language"
+          class="language-link"
+          :menu-label="tr('languageMenu')"
+          @change="persistLanguage"
+        />
       </section>
     </main>
 
-    <main v-else-if="screen === 'login'" class="login-page">
+    <main
+      v-else-if="screen === 'login'"
+      class="login-page"
+    >
       <section class="login-card">
-        <div class="admin-brand centered"><span><Icon name="waveform" :size="24" /></span><div><strong>WebSpeak</strong><small>{{ tr('adminConsole') }}</small></div></div>
-        <header><h1>{{ tr('welcomeAdmin') }}</h1><p>{{ tr('loginLead') }}</p></header>
-        <form @submit.prevent="login"><div v-if="errorMessage" class="alert error">{{ errorMessage }}</div><label><span>{{ tr('adminUsername') }}</span><input v-model.trim="loginUsername" autocomplete="username" autofocus /></label><label><span>{{ tr('adminPassword') }}</span><input v-model="loginPassword" type="password" autocomplete="current-password" /></label><button class="primary-button wide" :disabled="submitting" type="submit"><span v-if="submitting" class="spinner small"></span>{{ tr('login') }}</button></form>
-        <div class="login-actions"><RouterLink to="/" class="home-link"><Icon name="home" :size="15" />{{ tr('backHome') }}</RouterLink><LanguageSwitcher v-model="language" class="language-link" :menu-label="tr('languageMenu')" @change="persistLanguage" /></div>
+        <div class="admin-brand centered"
+          ><span
+            ><Icon
+              name="waveform"
+              :size="24" /></span
+          ><div
+            ><strong>WebSpeak</strong><small>{{ tr("adminConsole") }}</small></div
+          ></div
+        >
+        <header
+          ><h1>{{ tr("welcomeAdmin") }}</h1
+          ><p>{{ tr("loginLead") }}</p></header
+        >
+        <form @submit.prevent="login"
+          ><div
+            v-if="errorMessage"
+            class="alert error"
+            >{{ errorMessage }}</div
+          ><label
+            ><span>{{ tr("adminUsername") }}</span
+            ><input
+              v-model.trim="loginUsername"
+              autocomplete="username"
+              autofocus /></label
+          ><label
+            ><span>{{ tr("adminPassword") }}</span
+            ><input
+              v-model="loginPassword"
+              type="password"
+              autocomplete="current-password" /></label
+          ><button
+            class="primary-button wide"
+            :disabled="submitting"
+            type="submit"
+            ><span
+              v-if="submitting"
+              class="spinner small"
+            ></span
+            >{{ tr("login") }}</button
+          ></form
+        >
+        <div class="login-actions"
+          ><RouterLink
+            to="/"
+            class="home-link"
+            ><Icon
+              name="home"
+              :size="15"
+            />{{ tr("backHome") }}</RouterLink
+          ><LanguageSwitcher
+            v-model="language"
+            class="language-link"
+            :menu-label="tr('languageMenu')"
+            @change="persistLanguage"
+        /></div>
       </section>
     </main>
 
-    <div v-else class="admin-shell">
+    <div
+      v-else
+      class="admin-shell"
+    >
       <aside class="admin-sidebar">
-        <div class="admin-brand"><span><Icon name="waveform" :size="22" /></span><div><strong>WebSpeak</strong><small>{{ tr('adminConsole') }}</small></div></div>
-        <nav><RouterLink to="/admin" exact-active-class="active"><Icon name="activity" :size="18" />{{ tr('overview') }}</RouterLink><RouterLink to="/admin/server" active-class="active"><Icon name="server" :size="18" />{{ tr('server') }}</RouterLink><RouterLink to="/admin/operations" active-class="active"><Icon name="users" :size="18" />{{ tr('operations') }}</RouterLink><RouterLink to="/admin/skins" active-class="active"><Icon name="compass" :size="18" />{{ tr('skinLibrary') }}</RouterLink></nav>
-        <div class="sidebar-bottom"><a href="/" target="_blank"><Icon name="share" :size="16" />{{ tr('openGuest') }}</a><button type="button" :disabled="loggingOut" @click="logout"><Icon name="door" :size="16" />{{ tr('logout') }}</button></div>
+        <div class="admin-brand"
+          ><span
+            ><Icon
+              name="waveform"
+              :size="22" /></span
+          ><div
+            ><strong>WebSpeak</strong><small>{{ tr("adminConsole") }}</small></div
+          ></div
+        >
+        <nav
+          ><RouterLink
+            to="/admin"
+            exact-active-class="active"
+            ><Icon
+              name="activity"
+              :size="18"
+            />{{ tr("overview") }}</RouterLink
+          ><RouterLink
+            to="/admin/server"
+            active-class="active"
+            ><Icon
+              name="server"
+              :size="18"
+            />{{ tr("server") }}</RouterLink
+          ><RouterLink
+            to="/admin/operations"
+            active-class="active"
+            ><Icon
+              name="users"
+              :size="18"
+            />{{ tr("operations") }}</RouterLink
+          ><RouterLink
+            to="/admin/skins"
+            active-class="active"
+            ><Icon
+              name="compass"
+              :size="18"
+            />{{ tr("skinLibrary") }}</RouterLink
+          ></nav
+        >
+        <div class="sidebar-bottom"
+          ><a
+            href="/"
+            target="_blank"
+            ><Icon
+              name="share"
+              :size="16"
+            />{{ tr("openGuest") }}</a
+          ><button
+            type="button"
+            :disabled="loggingOut"
+            @click="logout"
+            ><Icon
+              name="door"
+              :size="16"
+            />{{ tr("logout") }}</button
+          ></div
+        >
       </aside>
 
-      <main class="admin-main" :inert="loggingOut || undefined" :aria-busy="loggingOut">
+      <main
+        class="admin-main"
+        :inert="loggingOut || undefined"
+        :aria-busy="loggingOut"
+      >
         <header class="admin-topbar">
-          <div class="admin-page-title"><small>{{ tr('adminConsole') }}</small><h1>{{ currentPageTitle }}</h1></div>
+          <div class="admin-page-title"
+            ><small>{{ tr("adminConsole") }}</small
+            ><h1>{{ currentPageTitle }}</h1></div
+          >
           <div class="admin-tools">
-            <span class="gateway-status" role="status" :title="tr('gatewayRunning')"><span class="running-dot" aria-hidden="true"></span><span class="gateway-status-label">{{ tr('gatewayRunning') }}</span></span>
-            <button type="button" class="theme-toggle" :title="themeLabel" :aria-label="themeLabel" @click="cycleTheme"><Icon :name="themeIcon" :size="17" /><span>{{ themeLabel }}</span></button>
-            <LanguageSwitcher v-model="language" :menu-label="tr('languageMenu')" @change="persistLanguage" />
+            <span
+              class="gateway-status"
+              role="status"
+              :title="tr('gatewayRunning')"
+              ><span
+                class="running-dot"
+                aria-hidden="true"
+              ></span
+              ><span class="gateway-status-label">{{ tr("gatewayRunning") }}</span></span
+            >
+            <button
+              type="button"
+              class="theme-toggle"
+              :title="themeLabel"
+              :aria-label="themeLabel"
+              @click="cycleTheme"
+              ><Icon
+                :name="themeIcon"
+                :size="17"
+              /><span>{{ themeLabel }}</span></button
+            >
+            <LanguageSwitcher
+              v-model="language"
+              :menu-label="tr('languageMenu')"
+              @change="persistLanguage"
+            />
           </div>
         </header>
 
-        <div v-if="errorMessage" class="alert error page-alert">{{ errorMessage }}</div>
-        <AdminServerSettings v-if="route.path === '/admin/server'" :model="serverSettings" :i18n="i18n"
-          v-model:welcome-language="welcomeLanguage" @webrtc-toggle="handleWebRtcToggle" />
-        <AdminOperations v-else-if="route.path === '/admin/operations'" :model="adminOperations" :i18n="i18n" />
-        <AdminSkins v-else-if="route.path === '/admin/skins'" :model="adminSkins" :i18n="i18n" />
+        <div
+          v-if="errorMessage"
+          class="alert error page-alert"
+          >{{ errorMessage }}</div
+        >
+        <AdminServerSettings
+          v-if="route.path === '/admin/server'"
+          :model="serverSettings"
+          :i18n="i18n"
+          v-model:welcome-language="welcomeLanguage"
+          @webrtc-toggle="handleWebRtcToggle"
+        />
+        <AdminOperations
+          v-else-if="route.path === '/admin/operations'"
+          :model="adminOperations"
+          :i18n="i18n"
+        />
+        <AdminSkins
+          v-else-if="route.path === '/admin/skins'"
+          :model="adminSkins"
+          :i18n="i18n"
+        />
 
-        <section v-else class="page-content overview-page">
-          <div v-if="overview.legacyConfigImported" class="alert info import-notice"><span>{{ tr('legacyImported') }}</span><button type="button" @click="dismissLegacyNotice">{{ tr('gotIt') }}</button></div>
-          <div class="hero-status"><div><small>{{ tr('systemStatus') }}</small><h2>{{ tr('everythingRunning') }}</h2><p>{{ tr('overviewLead') }}</p></div><span class="status-badge"><i></i>{{ tr('running') }}</span></div>
-          <div class="metric-grid"><article><span><Icon name="activity" :size="20" /></span><small>{{ tr('gateway') }}</small><strong>{{ overview.gateway.version || '—' }}</strong><em>{{ formatUptime(overview.gateway.uptimeSeconds) }}</em></article><article><span><Icon name="server" :size="20" /></span><small>{{ tr('teamSpeakTarget') }}</small><strong>{{ overview.teamSpeak.target || '—' }}</strong><em>{{ targetStatusText }}</em></article><article><span><Icon name="users" :size="20" /></span><small>{{ tr('activeSessions') }}</small><strong>{{ overview.sessions.active }} / {{ overview.sessions.limit }}</strong><em>{{ tr('peakSessions', { count: overview.sessions.peak }) }}</em></article></div>
-          <div class="overview-columns"><article class="overview-card target-health-card"><header><div><h3>{{ tr('targetHealth') }}</h3><p>{{ tr('targetHealthLead') }}</p></div><RouterLink to="/admin/server">{{ tr('manage') }}</RouterLink></header><dl><div><dt>{{ tr('status') }}</dt><dd><i :class="overview.teamSpeak.status"></i>{{ targetStatusText }}</dd></div><div><dt>{{ tr('lastTest') }}</dt><dd>{{ formatDate(overview.teamSpeak.lastTestAt) }}</dd></div><div><dt>{{ tr('latency') }}</dt><dd>{{ overview.teamSpeak.latencyMs == null ? '—' : `${overview.teamSpeak.latencyMs} ms` }}</dd></div></dl></article><article class="overview-card recent-events-card"><header><div><h3>{{ tr('recentEvents') }}</h3><p>{{ tr('recentEventsLead') }}</p></div></header><ul class="event-list"><li v-for="event in overview.recentEvents" :key="`${event.event}-${event.createdAt}`"><span><Icon name="check" :size="14" /></span><div><strong>{{ eventName(event.event) }}</strong><small>{{ formatDate(event.createdAt) }}</small></div></li><li v-if="!overview.recentEvents.length" class="empty-event">{{ tr('noRecentEvents') }}</li></ul></article></div>
+        <section
+          v-else
+          class="page-content overview-page"
+        >
+          <div
+            v-if="overview.legacyConfigImported"
+            class="alert info import-notice"
+            ><span>{{ tr("legacyImported") }}</span
+            ><button
+              type="button"
+              @click="dismissLegacyNotice"
+              >{{ tr("gotIt") }}</button
+            ></div
+          >
+          <div class="hero-status"
+            ><div
+              ><small>{{ tr("systemStatus") }}</small
+              ><h2>{{ tr("everythingRunning") }}</h2
+              ><p>{{ tr("overviewLead") }}</p></div
+            ><span class="status-badge"><i></i>{{ tr("running") }}</span></div
+          >
+          <div class="metric-grid"
+            ><article
+              ><span
+                ><Icon
+                  name="activity"
+                  :size="20" /></span
+              ><small>{{ tr("gateway") }}</small
+              ><strong>{{ overview.gateway.version || "—" }}</strong
+              ><em>{{ formatUptime(overview.gateway.uptimeSeconds) }}</em></article
+            ><article
+              ><span
+                ><Icon
+                  name="server"
+                  :size="20" /></span
+              ><small>{{ tr("teamSpeakTarget") }}</small
+              ><strong>{{ overview.teamSpeak.target || "—" }}</strong
+              ><em>{{ targetStatusText }}</em></article
+            ><article
+              ><span
+                ><Icon
+                  name="users"
+                  :size="20" /></span
+              ><small>{{ tr("activeSessions") }}</small
+              ><strong>{{ overview.sessions.active }} / {{ overview.sessions.limit }}</strong
+              ><em>{{ tr("peakSessions", { count: overview.sessions.peak }) }}</em></article
+            ></div
+          >
+          <div class="overview-columns"
+            ><article class="overview-card target-health-card"
+              ><header
+                ><div
+                  ><h3>{{ tr("targetHealth") }}</h3
+                  ><p>{{ tr("targetHealthLead") }}</p></div
+                ><RouterLink to="/admin/server">{{ tr("manage") }}</RouterLink></header
+              ><dl
+                ><div
+                  ><dt>{{ tr("status") }}</dt
+                  ><dd><i :class="overview.teamSpeak.status"></i>{{ targetStatusText }}</dd></div
+                ><div
+                  ><dt>{{ tr("lastTest") }}</dt
+                  ><dd>{{ formatDate(overview.teamSpeak.lastTestAt) }}</dd></div
+                ><div
+                  ><dt>{{ tr("latency") }}</dt
+                  ><dd>{{
+                    overview.teamSpeak.latencyMs == null
+                      ? "—"
+                      : `${overview.teamSpeak.latencyMs} ms`
+                  }}</dd></div
+                ></dl
+              ></article
+            ><article class="overview-card recent-events-card"
+              ><header
+                ><div
+                  ><h3>{{ tr("recentEvents") }}</h3
+                  ><p>{{ tr("recentEventsLead") }}</p></div
+                ></header
+              ><ul class="event-list"
+                ><li
+                  v-for="event in overview.recentEvents"
+                  :key="`${event.event}-${event.createdAt}`"
+                  ><span
+                    ><Icon
+                      name="check"
+                      :size="14" /></span
+                  ><div
+                    ><strong>{{ eventName(event.event) }}</strong
+                    ><small>{{ formatDate(event.createdAt) }}</small></div
+                  ></li
+                ><li
+                  v-if="!overview.recentEvents.length"
+                  class="empty-event"
+                  >{{ tr("noRecentEvents") }}</li
+                ></ul
+              ></article
+            ></div
+          >
         </section>
-        <div v-if="webrtcPortNoticeOpen" class="modal-backdrop" @click.self="webrtcPortNoticeOpen = false"><section class="modal-card" role="dialog" aria-modal="true" :aria-label="tr('webrtcPortNoticeTitle')"><div class="modal-icon"><Icon name="info" :size="21" /></div><h2>{{ tr('webrtcPortNoticeTitle') }}</h2><p>{{ tr('webrtcPortNotice', { range: webrtcPortRangeText }) }}</p><button class="primary-button wide" type="button" @click="webrtcPortNoticeOpen = false">{{ tr('gotIt') }}</button></section></div>
+        <div
+          v-if="webrtcPortNoticeOpen"
+          class="modal-backdrop"
+          @click.self="webrtcPortNoticeOpen = false"
+          ><section
+            class="modal-card"
+            role="dialog"
+            aria-modal="true"
+            :aria-label="tr('webrtcPortNoticeTitle')"
+            ><div class="modal-icon"
+              ><Icon
+                name="info"
+                :size="21" /></div
+            ><h2>{{ tr("webrtcPortNoticeTitle") }}</h2
+            ><p>{{ tr("webrtcPortNotice", { range: webrtcPortRangeText }) }}</p
+            ><button
+              class="primary-button wide"
+              type="button"
+              @click="webrtcPortNoticeOpen = false"
+              >{{ tr("gotIt") }}</button
+            ></section
+          ></div
+        >
       </main>
     </div>
   </div>

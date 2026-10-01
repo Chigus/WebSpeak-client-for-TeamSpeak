@@ -1,18 +1,145 @@
 <template>
-  <div v-if="memberMenu && isMobileViewport" class="member-menu-backdrop" data-ws-part="voice.context-menu-backdrop" @click="memberMenu = null"></div>
-  <div v-if="memberMenu" ref="menuElement" class="member-context-menu" data-ws-part="voice.context-menu" :style="menuStyle" @click.stop>
-    <div class="member-menu-header" data-ws-part="voice.context-menu.header"><strong>{{ memberMenu.member.nickname }}</strong><button type="button" class="member-menu-close" :aria-label="t('close')" @click="memberMenu = null"><Icon name="close" :size="17" /></button></div>
-    <label class="menu-volume"><span>{{ t('memberVolume') }}</span><input type="range" min="0" max="400" :value="(volumes[memberMenu.member.id] ?? 1) * 100" :style="rangeStyle((volumes[memberMenu.member.id] ?? 1) / 4, 1)" :aria-label="t('memberVolume')" @input="emit('volumeInput', memberMenu.member.id, $event)" /></label>
-    <button type="button" @click="emit('privateChat', memberMenu.member.id); memberMenu = null"><Icon name="message" :size="15" /> {{ t('privateMessage') }}</button>
-    <button type="button" @click="pokeMember(memberMenu.member); memberMenu = null"><Icon name="bell" :size="15" /> {{ t('poke') }}</button>
-    <button type="button" @click="toggleWhisperTarget(memberMenu.member); memberMenu = null"><Icon name="mic" :size="15" /> {{ whisperTargetIds.has(memberMenu.member.id) ? t('removeWhisperTarget') : t('setWhisperTarget') }}</button>
-    <button type="button" @click="copyMemberName(memberMenu.member); memberMenu = null"><Icon name="copy" :size="15" /> {{ t('copyNickname') }}</button>
-    <div class="member-menu-submenu" @mouseenter="!isMobileViewport && (memberMoveMenuOpen = true)">
-      <button type="button" class="member-menu-submenu-trigger" :aria-expanded="memberMoveMenuOpen" @click="toggleMemberMoveMenu"><Icon name="chevron-right" :size="15" /> <span>{{ t('moveMemberMenu') }}</span><Icon name="chevron-right" :size="13" class="member-menu-submenu-arrow" /></button>
-      <div v-if="memberMoveMenuOpen" ref="submenuElement" :style="submenuStyle" class="member-submenu-panel" data-ws-part="voice.context-menu.move-submenu" @click.stop>
-        <button v-if="memberMoveMenuCurrentChannel" type="button" :disabled="memberMoveMenuCurrentSameChannel" @click="moveMemberDirect(memberMenu.member, memberMoveMenuCurrentChannel.id)"><Icon name="users" :size="15" /><span>{{ t('moveMemberMyChannel') }}</span><small>{{ memberMoveMenuCurrentChannel.name }}</small></button>
-        <button v-for="targetChannel in memberMoveMenuOtherChannels" :key="targetChannel.id" type="button" @click="moveMemberDirect(memberMenu.member, targetChannel.id)"><Icon name="volume" :size="15" /><span>{{ targetChannel.name }}</span></button>
-        <span v-if="!memberMoveMenuCurrentChannel && !memberMoveMenuOtherChannels.length" class="member-submenu-empty">{{ t('moveMemberNoChannels') }}</span>
+  <div
+    v-if="memberMenu && isMobileViewport"
+    class="member-menu-backdrop"
+    data-ws-part="voice.context-menu-backdrop"
+    @click="memberMenu = null"
+  ></div>
+  <div
+    v-if="memberMenu"
+    ref="menuElement"
+    class="member-context-menu"
+    data-ws-part="voice.context-menu"
+    :style="menuStyle"
+    @click.stop
+  >
+    <div
+      class="member-menu-header"
+      data-ws-part="voice.context-menu.header"
+      ><strong>{{ memberMenu.member.nickname }}</strong
+      ><button
+        type="button"
+        class="member-menu-close"
+        :aria-label="t('close')"
+        @click="memberMenu = null"
+        ><Icon
+          name="close"
+          :size="17" /></button
+    ></div>
+    <label class="menu-volume"
+      ><span>{{ t("memberVolume") }}</span
+      ><input
+        type="range"
+        min="0"
+        max="400"
+        :value="(volumes[memberMenu.member.id] ?? 1) * 100"
+        :style="rangeStyle((volumes[memberMenu.member.id] ?? 1) / 4, 1)"
+        :aria-label="t('memberVolume')"
+        @input="emit('volumeInput', memberMenu.member.id, $event)"
+    /></label>
+    <button
+      type="button"
+      @click="
+        emit('privateChat', memberMenu.member.id);
+        memberMenu = null;
+      "
+      ><Icon
+        name="message"
+        :size="15"
+      />
+      {{ t("privateMessage") }}</button
+    >
+    <button
+      type="button"
+      @click="
+        pokeMember(memberMenu.member);
+        memberMenu = null;
+      "
+      ><Icon
+        name="bell"
+        :size="15"
+      />
+      {{ t("poke") }}</button
+    >
+    <button
+      type="button"
+      @click="
+        toggleWhisperTarget(memberMenu.member);
+        memberMenu = null;
+      "
+      ><Icon
+        name="mic"
+        :size="15"
+      />
+      {{
+        whisperTargetIds.has(memberMenu.member.id)
+          ? t("removeWhisperTarget")
+          : t("setWhisperTarget")
+      }}</button
+    >
+    <button
+      type="button"
+      @click="
+        copyMemberName(memberMenu.member);
+        memberMenu = null;
+      "
+      ><Icon
+        name="copy"
+        :size="15"
+      />
+      {{ t("copyNickname") }}</button
+    >
+    <div
+      class="member-menu-submenu"
+      @mouseenter="!isMobileViewport && (memberMoveMenuOpen = true)"
+    >
+      <button
+        type="button"
+        class="member-menu-submenu-trigger"
+        :aria-expanded="memberMoveMenuOpen"
+        @click="toggleMemberMoveMenu"
+        ><Icon
+          name="chevron-right"
+          :size="15" /> <span>{{ t("moveMemberMenu") }}</span
+        ><Icon
+          name="chevron-right"
+          :size="13"
+          class="member-menu-submenu-arrow"
+      /></button>
+      <div
+        v-if="memberMoveMenuOpen"
+        ref="submenuElement"
+        :style="submenuStyle"
+        class="member-submenu-panel"
+        data-ws-part="voice.context-menu.move-submenu"
+        @click.stop
+      >
+        <button
+          v-if="memberMoveMenuCurrentChannel"
+          type="button"
+          :disabled="memberMoveMenuCurrentSameChannel"
+          @click="moveMemberDirect(memberMenu.member, memberMoveMenuCurrentChannel.id)"
+          ><Icon
+            name="users"
+            :size="15"
+          /><span>{{ t("moveMemberMyChannel") }}</span
+          ><small>{{ memberMoveMenuCurrentChannel.name }}</small></button
+        >
+        <button
+          v-for="targetChannel in memberMoveMenuOtherChannels"
+          :key="targetChannel.id"
+          type="button"
+          @click="moveMemberDirect(memberMenu.member, targetChannel.id)"
+          ><Icon
+            name="volume"
+            :size="15"
+          /><span>{{ targetChannel.name }}</span></button
+        >
+        <span
+          v-if="!memberMoveMenuCurrentChannel && !memberMoveMenuOtherChannels.length"
+          class="member-submenu-empty"
+          >{{ t("moveMemberNoChannels") }}</span
+        >
       </div>
     </div>
   </div>

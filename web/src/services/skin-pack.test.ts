@@ -219,14 +219,14 @@ test("homepage motion and room content spacing preserve the ILLUSIA layout", asy
   assert.ok(css.includes("animation: none !important"));
   assert.doesNotMatch(css, /\.join-page \*, \.join-page \*::before, \.join-page \*::after\s*\{\s*animation: none !important/);
   assert.ok(css.includes("padding: 0 clamp(12px, 1.4vw, 22px);"), "homepage header contents keep an inset from their container edge");
-  assert.ok(css.includes(".chat-panel { margin-top: 34px; padding: 0 clamp(14px, 1.8vw, 24px) 20px;"), "chat children keep horizontal and bottom breathing room");
+  assert.match(css, /\.chat-panel\s*\{\s*margin-top: 34px;\s*padding: 0 clamp\(14px, 1\.8vw, 24px\) 20px;/, "chat children keep horizontal and bottom breathing room");
   assert.match(css, /\.app-shell \.voice-section \{\s*position: relative;\s*padding: clamp\(14px, 1\.8vw, 24px\);/);
   assert.match(css, /@media \(max-width: 740px\) \{\s*\.app-shell \.voice-section \{\s*padding: 14px 10px 16px;/);
   assert.match(css, /\.promise-list \{\s*display: grid;\s*width: 100%;\s*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);
   assert.match(css, /\.promise-item \{\s*min-width: 0;\s*min-height: 58px;[\s\S]*?padding: 9px 11px;/);
   assert.match(css, /@media \(max-width: 420px\) \{\s*\.promise-list \{\s*grid-template-columns: minmax\(0, 1fr\);/);
   assert.match(css, /\.join-card-waveform i \{[^}]*animation: screen-share-wave 1\.1s ease-in-out infinite alternate;/);
-  assert.match(css, /@keyframes join-card-sonar-ring[\s\S]*?transform: scale\(\.6\); opacity: \.62;[\s\S]*?transform: scale\(1\); opacity: 0;/);
+  assert.match(css, /@keyframes join-card-sonar-ring[\s\S]*?transform: scale\(\.6\);\s*opacity: \.62;[\s\S]*?transform: scale\(1\);\s*opacity: 0;/);
 });
 
 function makeSkin(css: string, content?: unknown): File {
