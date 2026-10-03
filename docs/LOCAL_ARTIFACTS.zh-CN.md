@@ -31,7 +31,7 @@
 
 上表摘要属于 Actions 外层产物归档，不是其中部署包的摘要；当前证据来自 Actions API，不能写成已在本机复算。对应部署包由工作流生成，版本和启动结果已由平台作业检查。
 
-Android 使用同一提交的 `git archive` 源码归档，在新目录安装根、web、mobile 三套锁定依赖并重建 SDK，没有复制当前工作区的 node_modules 或历史发布包。构建主机为 Windows x64，Node.js 24.12.0、Android Studio JDK 25.0.2、Gradle 9.5.0、Android SDK 36；依次执行依赖安装、`prepare:sdk`、`android:sync`、`assembleDebug --no-daemon`。短路径目录 `<USER_HOME>/.codex/tmp/ws09a-662dad3` 构建成功，134 个 Gradle 任务全部执行。
+Android 使用同一提交的 `git archive` 源码归档，在新目录安装根、web、mobile 三套锁定依赖并重建 SDK，没有复制当前工作区的 node_modules 或历史发布包。构建主机为 Windows x64，Node.js 24.12.0、Android Studio JDK 25.0.2、Gradle 9.5.0、Android SDK 36；依次执行依赖安装、`prepare:sdk`、`android:sync`、`assembleDebug --no-daemon`。短路径目录 `<TEMP_BUILD_DIR>` 构建成功，134 个 Gradle 任务全部执行。
 
 | Android 调试产物 | 字节数 | 本机复算 SHA-256 |
 | --- | ---: | --- |

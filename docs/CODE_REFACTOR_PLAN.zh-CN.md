@@ -1,12 +1,12 @@
 # WebSpeak 代码待修改清单与修改方向
 
-本文聚焦 `webspeak-webclient`，记录代码结构、修复方向与实施结果。2026 年 10 月 3 日按用户地址 `webspeak.example.invalid:9987` 成功连接 TeamSpeak 3.13.8 / Linux，完成真实目录、私聊、状态及 PCM/WebRTC 媒体链路检查，并修复麦克风静音时伴奏被 TeamSpeak 丢弃、WebRTC 下行编码器状态不连续导致音量衰减的问题。上海 TS6 节点恢复后，已补验消息、媒体及共享信令，并修复状态恢复与共享清理问题。Android 已按用户要求移出本轮修复计划。用户随后明确跳过剩余设备、原生交互和旧版本验收；按调整后的范围，本轮施工已完成。跳过项保留未验收状态，不认定为已通过。
+本文聚焦 `webspeak-webclient`，记录代码结构、修复方向与实施结果。2026 年 10 月 3 日按用户地址 `<TS3_TEST_HOST>:9987` 成功连接 TeamSpeak 3.13.8 / Linux，完成真实目录、私聊、状态及 PCM/WebRTC 媒体链路检查，并修复麦克风静音时伴奏被 TeamSpeak 丢弃、WebRTC 下行编码器状态不连续导致音量衰减的问题。上海 TS6 节点恢复后，已补验消息、媒体及共享信令，并修复状态恢复与共享清理问题。Android 已按用户要求移出本轮修复计划。用户随后明确跳过剩余设备、原生交互和旧版本验收；按调整后的范围，本轮施工已完成。跳过项保留未验收状态，不认定为已通过。
 
 按用户要求，每批仅处理当前节点相关问题，合并相关修复后统一验证，不扩展到无关模块。管理页主要交互与布局已检查，原生确认框阻塞的操作验收单独保留。加入、聊天、频道成员、成员菜单、音频设置及密码弹窗已拆分；音频工具栏、私语控制条、语音诊断、共享设置与播放器已提取，语音活动成员卡片也已提取。06-L 的保序格式整理及两份页面样式确认冗余项已完成。真实消息与 TeamSpeak 媒体按已取得的证据记录范围；Android 既有结果仅作历史记录，不作为当前完成门槛。媒体、连接、命令、诊断、消息、身份及公共皮肤状态已有独立模块，继续复用。当前完成状态和跳过项放在前部，历史修复及验证记录保留在后部。
 
 ## 范围与依据
 
-- 最新环境更新：用户确认上海节点恢复后，`203.0.113.10:9987` 实测为 TeamSpeak `6.0.0-beta13.1` / Linux，已补充下述 TS6 消息、媒体及静音恢复验收。此前旧 IP 超时仅作为历史记录，不再阻止该节点测试；`webspeak.example.invalid:9987` 的 TS3 结果仍保留。
+- 最新环境更新：用户确认上海节点恢复后，`<TS6_TEST_HOST>:9987` 实测为 TeamSpeak `6.0.0-beta13.1` / Linux，已补充下述 TS6 消息、媒体及静音恢复验收。此前旧 IP 超时仅作为历史记录，不再阻止该节点测试；`<TS3_TEST_HOST>:9987` 的 TS3 结果仍保留。
 - 记录日期：2026 年 10 月 3 日。
 - 当前代码基线：`dev` 分支，`50d71891034736d32a1accea94d13be91c8a3003`；应用版本 `0.2.5-preview`。本次收尾仅更新本文，不修改实现。
 - 最后一批代码修复覆盖 02-C TS6 共享清理参数及命令确认，新增 7 项回归。合并修改后一次 `npm run verify` 通过 434 项测试及前后端构建。该提交远端 CI 的 verify 与 docker-smoke 均成功，含 Docker 构建及健康检查（[运行 37103379056](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/actions/runs/37103379056)）。文档收尾不重复运行全量验证。
@@ -61,14 +61,14 @@
 
 ### 旧 IP 连接记录（2026-10-02，已由域名端点替代）
 
-- 用户给出的 HTTP 形式链接按 TeamSpeak 地址 `203.0.113.10:9987` 使用；连接走 SDK 的 UDP 客户端协议，没有把 HTTP 探测当作 TeamSpeak 连通证据。
+- 用户给出的 HTTP 形式链接按 TeamSpeak 地址 `<TS6_TEST_HOST>:9987` 使用；连接走 SDK 的 UDP 客户端协议，没有把 HTTP 探测当作 TeamSpeak 连通证据。
 - 使用当前源码的 `TSClient`、锁文件 SDK 和临时测试身份，不读取或修改真实配置、密码或持久身份。第一次连接返回 `timeout / TeamSpeak connection timed out`，随后正常断开。
 - 第二次在相同实际连接外增加只计数的 UDP 诊断：发起 15 次发送、510 字节，从该服务器收到 0 个数据报、0 字节，未收到 socket error 事件；同样超时并清理连接。这是进程级发送/接收记录，不是网卡抓包证据。
 - 两次均未取得已认证会话、服务器版本或目录，未发送聊天、戳人或音频。当前只能确认本机未获得协议响应，不能区分服务端状态、网络路径或协议响应原因；待确认公网 UDP 端口及接入条件后继续该节点。
 
 ### 域名实服与静音伴奏修复（2026-10-03）
 
-- 通过当前 `TSClient` 和锁定 SDK 连接 `webspeak.example.invalid:9987`，服务器返回 `3.13.8`、build `1779874471`、Linux；初次连接约 7.2 秒，自身目录项存在，正常断开。此前 IP 超时不再作为当前接入阻塞。
+- 通过当前 `TSClient` 和锁定 SDK 连接 `<TS3_TEST_HOST>:9987`，服务器返回 `3.13.8`、build `1779874471`、Linux；初次连接约 7.2 秒，自身目录项存在，正常断开。此前 IP 超时不再作为当前接入阻塞。
 - 两个临时 WebSocket 客户端经本机实际 `VoiceBridge` 连接远端服务，使用真实原生 Opus，无 SDK/编码器替身。临时身份不写入用户配置；私聊、戳人及私语音频仅发给测试会话。目录互见、带 UID 与省略 UID 的私聊、离开/返回、戳人和非法 PCM 拒绝通过；所见 JSON 消息全部通过共享解析器。
 - WebRTC 使用本机 werift 合成端点，经真实 ICE/DTLS/SRTP 与网关通信，再通过真实 TeamSpeak 服务到另一测试端。修复后上行 50/50 帧到达；反向 50 帧被网关接收并转发到 WebRTC，输出能解码出测试音频。没有使用浏览器麦克风、扬声器或屏幕采集。
 - 故障先在实服复现：麦克风静音后开启伴奏，网关发送 30 帧，对端收到 0 帧；仅取消静音后，同一伴奏收到 30 帧。原因是 `client_input_muted=1` 会使服务器丢弃该客户端的全部音频，而网关原本只更新混音器伴奏标志。
@@ -82,7 +82,7 @@
 - 将前次实服音量异常缩小到实际 `WebRtcAudioSession` 混音器，用手动推进音频时钟排除网络和调度影响；源编码、网关解码和输出解码均使用原生 Opus。旧路径中，50 个语音帧与静音交替时，50 个输出全部低于 RMS 100；同样输入强制重编码后 50 个全部超过门槛。这证明存在独立于网络的代码故障。
 - 原因是单人且音量为 1 时直接转发源 Opus，静音、音量变化或多人混音则使用网关编码器；同一 RTP 流交替携带不同编码器历史，接收端无法维持连续解码状态。现在全部下行音频通过同一个会话编码器，删除原始 Opus 直通分支；队列、节拍、成员音量和上行路径保持原规则。
 - 新增 3 项回归覆盖静音间隔、交替说话者和音量变化，每项 50 个活动输出均达到预期电平，解码错误及队列丢弃为 0。本批一次统一验证通过 419 项测试及前后端构建。代价是单人默认音量也需要重编码，增加编码工作和一次有损转换；尚未完成容量压测。
-- 实服复查使用 `webspeak.example.invalid:9987`、两个临时身份与本机 werift 端点。下行 50 个发送帧中网关收到 46 帧、向混音器提交 46 帧，队列丢弃和上下行解码错误均为 0；解码输出有测试音频。RMS 超门槛输出计数为 70，包含编码尾音，不能解释为 70/50 帧交付或完整音质通过。
+- 实服复查使用 `<TS3_TEST_HOST>:9987`、两个临时身份与本机 werift 端点。下行 50 个发送帧中网关收到 46 帧、向混音器提交 46 帧，队列丢弃和上下行解码错误均为 0；解码输出有测试音频。RMS 超门槛输出计数为 70，包含编码尾音，不能解释为 70/50 帧交付或完整音质通过。
 - 本次整套实服脚本未通过：后续静音伴奏收到 27/30 帧，严格数量断言失败；该段网关入口和 TeamSpeak 发送累计均为 80 帧且发送错误为 0。尚未定位这 3 帧差值发生于哪一段，不能直接归因于网络，也不修改断言掩盖结果。此前 30/30 的结果保留为此前批次记录。所有临时连接已清理，网关活动会话归零。
 - 当前代码故障及确定性回归已闭环；实服帧差、浏览器设备和完整媒体矩阵继续归 02-C。未扩展到其他模块，也未恢复 Android 待办。
 
@@ -98,7 +98,7 @@
 
 ### 实服双人混音与成员音量验收（2026-10-03）
 
-- 当前 `6616d0b` 源码、原生 Opus、三个临时 TeamSpeak 身份连接 `webspeak.example.invalid:9987`。两位发送者通过 WebSocket PCM 同时生成 500 Hz 和 850 Hz 音频，仅私语到第三个测试身份；接收端通过真实 werift ICE/DTLS/SRTP 解码网关混音。未向其他用户发送测试音频，未使用真实麦克风或扬声器。
+- 当前 `6616d0b` 源码、原生 Opus、三个临时 TeamSpeak 身份连接 `<TS3_TEST_HOST>:9987`。两位发送者通过 WebSocket PCM 同时生成 500 Hz 和 850 Hz 音频，仅私语到第三个测试身份；接收端通过真实 werift ICE/DTLS/SRTP 解码网关混音。未向其他用户发送测试音频，未使用真实麦克风或扬声器。
 - 默认音量、第一位静音、第一位四分之一音量三组，每组两位各发送 100 帧。网关每组接收并提交混音 200 帧，队列丢弃和解码错误均为 0。持续使用同一个输出解码器，按 850 Hz 分量超过 500 的输出帧选取样本，比较两种频率的幅度中位数。
 - 默认音量的 500/850 Hz 幅度分别为 1211/1235；第一位静音后为 74/1187；第一位四分之一音量后为 370/1268。两种声音同时存在，单成员静音及衰减不抑制另一位。该频谱抽样只证明本场景的混音与音量控制，不作为精确增益、听感、所有网络条件或容量结论。
 - 第一次脚本在首组通过后请求统计过快，触发现有 750 毫秒限频并等待超时；只将临时脚本采样间隔调至 1100 毫秒后完成全部场景，没有修改生产限频或放宽断言。全部临时会话已关闭，网关活动会话归零。
@@ -113,7 +113,7 @@
 
 ### 上海 TS6 节点恢复与防刷期间静音恢复修复（2026-10-03）
 
-- 用户确认节点更新后，以当前 SDK 和临时身份连接 `203.0.113.10:9987`，约 290 毫秒取得连接及版本：`6.0.0-beta13.1`、build `1790080330`、Linux，协议识别为 `ts6`；3 个频道、自身目录项存在，探测后正常断开。未修改部署、真实配置或持久身份。
+- 用户确认节点更新后，以当前 SDK 和临时身份连接 `<TS6_TEST_HOST>:9987`，约 290 毫秒取得连接及版本：`6.0.0-beta13.1`、build `1790080330`、Linux，协议识别为 `ts6`；3 个频道、自身目录项存在，探测后正常断开。未修改部署、真实配置或持久身份。
 - 首轮快速并行验收触发 `FLOOD_PROTECTION`，同时首个 RTC 上行数量断言未通过，不能据此归因于媒体实现。随后将临时脚本的控制命令间隔调为 1 秒、接入后等待 1.5 秒并串行验收；没有更改服务器防刷设置或音频帧节拍。
 - 消息与 PCM 场景通过：目录互见、带 UID 与省略 UID 的双向私聊、离开/返回、测试身份间戳人、非法 PCM 拒绝；双向 PCM 和停止 WebRTC 后 PCM 均收到 50/50 帧，RMS 分别为 1268、1269、1259。全部实际 JSON 消息通过共享解析器。
 - WebRTC 使用本机 werift 合成端点和真实 ICE/DTLS/SRTP。上行 50/50 帧到达；反向网关收到并提交 50 帧，队列丢弃和解码错误为 0；输出可解码。麦克风静音阻止音频、静音伴奏及取消静音伴奏各收到 30/30 帧（codec 5）；停止伴奏恢复静音，活动 WebRTC 停止后 PCM 收到 50/50 帧。输出 RMS 计数包含编码过渡，不作为交付率。
@@ -124,7 +124,7 @@
 
 ### TS6 共享清理参数与服务端确认修复（2026-10-03）
 
-- 使用上海 `203.0.113.10:9987`、实际 VoiceBridge 网关、独立 SDK 测试身份与两个本机 werift peer，验证网页侧发布经 TS6 通知另一端，加入请求、offer/answer 和 ICE/DTLS/SRTP 建立成功；共享音频收到 30/30 帧，解码 RMS 1270。video transceiver 参与协商，但没有发送视频帧，也未运行官方 TS6 客户端或浏览器屏幕采集。
+- 使用上海 `<TS6_TEST_HOST>:9987`、实际 VoiceBridge 网关、独立 SDK 测试身份与两个本机 werift peer，验证网页侧发布经 TS6 通知另一端，加入请求、offer/answer 和 ICE/DTLS/SRTP 建立成功；共享音频收到 30/30 帧，解码 RMS 1270。video transceiver 参与协商，但没有发送视频帧，也未运行官方 TS6 客户端或浏览器屏幕采集。
 - 原代码在网页移除 TS6 观看者时遗漏 `removeclientfromstream` 的 `reason` 参数，服务器明确返回 `id=1542 / missing required parameter`；本地却立即减少观看者。停止共享又被防刷拒绝（`id=524`），未取得服务端停止通知。根因还包括适配层使用不等待回执的发送方法，使上层无法获知真实拒绝。
 - 两处移除命令补充 `reason=1`；共享命令等待服务端确认。网页移除原生观看者仅在确认或服务端离开通知后减少计数，拒绝时保留成员并返回现有错误消息；通知早于确认时不重复发送离开事件。仅对 `stopstream` 和 `removeclientfromstream` 的明确防刷拒绝重试，最多两次，等待 4 秒、8 秒；每次检查连接及代次。offer/ICE 和其他错误不重试，停止发布最终失败记入日志。
 - 新增 7 项回归覆盖等待确认、拒绝传播、清理重试间隔及上限、非清理信令不重放、连接替换失效、移除参数、失败保留成员及通知与确认去重（部分用例覆盖多项）。统一 434 项测试、后端编译、前端类型检查和构建通过，未逐项重跑全量验证。
@@ -137,7 +137,7 @@
 
 ### 04-D 前端媒体与连接编排
 
-[useVoiceWebSocket.ts](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/composables/useVoiceWebSocket.ts) 保留为页面调用入口。媒体、连接、命令、诊断和消息投影已交由各自模块管理，页面拆分继续复用现有响应式数据。
+[useVoiceWebSocket.ts](../web/src/composables/useVoiceWebSocket.ts) 保留为页面调用入口。媒体、连接、命令、诊断和消息投影已交由各自模块管理，页面拆分继续复用现有响应式数据。
 
 | 现有边界 | 应拥有的状态与资源 | 重点约束 |
 | --- | --- | --- |
@@ -156,7 +156,7 @@
 
 ### 06-C 页面组件
 
-当前依据：[WebClient.vue](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/views/WebClient.vue:1) 格式展开后有 1,337 行，加入表单、聊天面板、频道成员、成员菜单、身份导入、音频设置及密码弹窗已独立；成员卡片也已提取，父页保留页面编排及区域组合。[AdminView.vue](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/views/AdminView.vue:41) 拆分后为 251 行，本批仅展开格式后为 580 行，三个管理模板已迁移到独立组件。管理页剩余浏览器验收缺口见前表，客户端继续明确展示边界；不以文件长度推定运行故障。
+当前依据：[WebClient.vue](../web/src/views/WebClient.vue#L1) 格式展开后有 1,337 行，加入表单、聊天面板、频道成员、成员菜单、身份导入、音频设置及密码弹窗已独立；成员卡片也已提取，父页保留页面编排及区域组合。[AdminView.vue](../web/src/views/AdminView.vue#L41) 拆分后为 251 行，本批仅展开格式后为 580 行，三个管理模板已迁移到独立组件。管理页剩余浏览器验收缺口见前表，客户端继续明确展示边界；不以文件长度推定运行故障。
 
 以下名称为建议，实施时按实际接口确定。按稳定区域迁移，相关展示区域合并后统一验收，避免同时重写模板和业务状态。
 
@@ -173,9 +173,9 @@
 
 接口只传该区域需要的状态和动作，避免把整页上下文塞进一个对象，也避免父子各自实例化同一个业务 composable。管理组件当前使用 `ReturnType<typeof useAdmin...>` 描述功能控制器，并在 setup 中解构，因此依赖父页维持同一控制器实例；若后续支持替换实例，需要同步调整读取方式。可以用 `Pick` 或专用接口缩小暴露范围，但不为形式重写已明确的状态归属。展示辅助函数如头像、时间格式在确有多处复用时集中，不额外引入全局状态层。
 
-样式需要随组件边界一并核对。[客户端样式入口](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/views/WebClient.vue:1337)和[管理页样式入口](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/views/AdminView.vue:580)均使用 `scoped`，格式展开并清理重复声明后 CSS 分别为 7,659 与 3,737 行。身份弹窗已有针对组件的 `:deep` 规则；管理页当前改动将大量功能区选择器改为 `:deep`，并保留部分外壳和语言控件选择器的原作用范围。不要把这项源码变化直接等同于视觉一致：需对比子组件内部、共享按钮与语言菜单的字体、间距、尺寸、折行，以及样式声明顺序和优先级。必要时改为组件自有样式或更窄的区域选择器，保留明暗主题、`data-ws-part` 和路由隔离，管理页保持独立于公开皮肤。
+样式需要随组件边界一并核对。[客户端样式入口](../web/src/views/WebClient.vue#L1337)和[管理页样式入口](../web/src/views/AdminView.vue#L580)均使用 `scoped`，格式展开并清理重复声明后 CSS 分别为 7,659 与 3,737 行。身份弹窗已有针对组件的 `:deep` 规则；管理页当前改动将大量功能区选择器改为 `:deep`，并保留部分外壳和语言控件选择器的原作用范围。不要把这项源码变化直接等同于视觉一致：需对比子组件内部、共享按钮与语言菜单的字体、间距、尺寸、折行，以及样式声明顺序和优先级。必要时改为组件自有样式或更窄的区域选择器，保留明暗主题、`data-ws-part` 和路由隔离，管理页保持独立于公开皮肤。
 
-测试也需跟随边界调整：[皮肤节点检查](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/services/skin-pack.test.ts:80)在当前工作区已递归读取 `components/web-client` 和 `components/admin` 下的 Vue 文件，保留公开节点契约及管理页隔离检查。[管理页状态测试](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/test/admin-view.test.mjs:79)已改为读取父页功能模型，仍用 `render: () => null` 替换模板，不能单独证明子组件的字段与事件接线正确。后续验收必须覆盖真实渲染的表单、按钮和路由交互；这属于测试覆盖边界，不能推定测试已发现业务故障。
+测试也需跟随边界调整：[皮肤节点检查](../web/src/services/skin-pack.test.ts#L80)在当前工作区已递归读取 `components/web-client` 和 `components/admin` 下的 Vue 文件，保留公开节点契约及管理页隔离检查。[管理页状态测试](../web/test/admin-view.test.mjs#L79)已改为读取父页功能模型，仍用 `render: () => null` 替换模板，不能单独证明子组件的字段与事件接线正确。后续验收必须覆盖真实渲染的表单、按钮和路由交互；这属于测试覆盖边界，不能推定测试已发现业务故障。
 
 管理组件验收至少包括：服务器保存时继续编辑、失败保留草稿、不同语言欢迎词往返、WebRTC 开关触发父页提示；邀请创建和撤销、刷新与路由取消；皮肤默认选择、启停、文件导入反馈；认证失效清理和失败退出保留状态。检查桌面与 390 × 844 窄屏、明暗主题、五语长文案，以及公开页进入管理页再返回的样式隔离。既有记录完成了三个桌面页面的静态外观对比；本批补充主要表单交互和窄屏导航检查，具体结果见下节。
 
@@ -249,7 +249,7 @@
 
 ### 06-K 管理页窄屏导航修复
 
-依据：[管理页侧栏模板](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/views/AdminView.vue:23)和[窄屏样式](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/styles/admin.css:318)。修改前品牌、四个链接和退出按钮在窄屏继续同排。浏览器已复现：390 像素视口的布局可用宽度为 375 像素，退出按钮右边缘约为 455 像素，入口被裁切。
+依据：[管理页侧栏模板](../web/src/views/AdminView.vue#L23)和[窄屏样式](../web/src/styles/admin.css#L318)。修改前品牌、四个链接和退出按钮在窄屏继续同排。浏览器已复现：390 像素视口的布局可用宽度为 375 像素，退出按钮右边缘约为 455 像素，入口被裁切。
 
 已实施：不超过 850 像素时品牌与退出按钮占第一行，导航独占第二行，以四列等宽网格约束宽度，点击区域至少 44 像素高。保留桌面侧栏、可访问名称与当前页面标识，不使用隐藏横向溢出来掩盖不可见入口。
 
@@ -291,11 +291,11 @@
 
 ### 09-A 服务端发布与暂缓的 Android 事项
 
-[mobile/README.md](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/mobile/README.md) 保留 Android 已有构建、启动和运行时差异记录。用户明确 Android 暂不纳入修复计划，因此本轮不再推进 07-A、Android 布局或设备验收，也不以这些事项阻塞当前目标。
+[mobile/README.md](../mobile/README.md) 保留 Android 已有构建、启动和运行时差异记录。用户明确 Android 暂不纳入修复计划，因此本轮不再推进 07-A、Android 布局或设备验收，也不以这些事项阻塞当前目标。
 
 若以后恢复 Android 范围，再验收真实 SDK 连接、双向语音、输入输出切换、重连、资源释放及布局；既有构建和首页启动结果不替代这些检查。后台音频、前台服务和原生屏幕共享也保持独立能力范围。
 
-本轮发布检查范围为 Windows、Linux 和 Docker，现有 CI 与打包工作流已提供干净构建和启动证据。参照 [本地产物说明](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/docs/LOCAL_ARTIFACTS.zh-CN.md)，保留未知用途文件及历史产物，构建输入仅来自声明的源码与依赖。`.local-opus-hook.cjs` 是原样复制缓冲区的实验替身，不作为正式音频验收依据；容器健康检查只证明其检查的 HTTP 启动路径。
+本轮发布检查范围为 Windows、Linux 和 Docker，现有 CI 与打包工作流已提供干净构建和启动证据。参照 [本地产物说明](LOCAL_ARTIFACTS.zh-CN.md)，保留未知用途文件及历史产物，构建输入仅来自声明的源码与依赖。`.local-opus-hook.cjs` 是原样复制缓冲区的实验替身，不作为正式音频验收依据；容器健康检查只证明其检查的 HTTP 启动路径。
 
 平台记录保留提交号、构建主机与运行时版本、安装与构建命令、产物名称及校验和、启动与媒体结果。Android 的后台音频、前台服务和原生屏幕共享仍是单独的能力范围，不混入本轮代码整理的完成条件。
 
@@ -365,21 +365,21 @@
 
 ### 06-I 皮肤异步激活归属
 
-施工前，[skin-runtime.ts](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/services/skin-runtime.ts:36) 在本地读取、下载和包解析后直接修改样式及存储。五项用例先复现：慢自定义皮肤覆盖新的内置选择、旧下载失败回退覆盖新皮肤、清理后旧读取重新生效、页面取消后仍提交，以及旧目录重新启用已被新目录禁用的皮肤。
+施工前，[skin-runtime.ts](../web/src/services/skin-runtime.ts#L36) 在本地读取、下载和包解析后直接修改样式及存储。五项用例先复现：慢自定义皮肤覆盖新的内置选择、旧下载失败回退覆盖新皮肤、清理后旧读取重新生效、页面取消后仍提交，以及旧目录重新启用已被新目录禁用的皮肤。
 
 已实施：运行时按最新激活拥有提交权，目录请求有独立的同类归属；请求替换和外部取消立即结束等待，不能取消的底层操作也不能迟到提交。已失效调用不能取消下一页面的激活。失败安装释放候选对象 URL，正常替换后才释放旧资源。
 
-主页与演示页共用 [usePublicSkin.ts](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/composables/usePublicSkin.ts)，所有初始化、手动选择、恢复回退和本地数据清理均由所属页面管理。卸载使旧操作失效；皮肤内容、选择标识及偏好只接受当前结果。去除两页重复的无归属版本刷新路径，正常加载仍核对目录版本与实例默认值。
+主页与演示页共用 [usePublicSkin.ts](../web/src/composables/usePublicSkin.ts)，所有初始化、手动选择、恢复回退和本地数据清理均由所属页面管理。卸载使旧操作失效；皮肤内容、选择标识及偏好只接受当前结果。去除两页重复的无归属版本刷新路径，正常加载仍核对目录版本与实例默认值。
 
 缓存写入和偏好保存传递所属取消信号。本地数据库打开后再次检查信号，写事务期间可以取消；存储操作在事务完成时才报告成功。偏好读取和合并改在同一事务内完成，避免皮肤写入覆盖并发修改的其他设置。没有调整存储 schema 或已有键名。
 
 ### 06-J 皮肤启动期限与回退
 
-已实施：[skin-operation.ts](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/services/skin-operation.ts) 提供统一等待与取消，页面初始化默认总期限为 8 秒，覆盖偏好读取、目录、响应体、皮肤包及激活。目录与激活独立调用同样有期限。超时先使旧链失效，再显示可用内置主题，避免整页继续隐藏；显式皮肤偏好保留供下次重试。
+已实施：[skin-operation.ts](../web/src/services/skin-operation.ts) 提供统一等待与取消，页面初始化默认总期限为 8 秒，覆盖偏好读取、目录、响应体、皮肤包及激活。目录与激活独立调用同样有期限。超时先使旧链失效，再显示可用内置主题，避免整页继续隐藏；显式皮肤偏好保留供下次重试。
 
 正常网络下保留实例默认皮肤、已禁用皮肤过滤和缓存版本更新。页面不再重复发起同一版本的无归属刷新；后来的选择不能被启动响应覆盖。清理本地数据时先取消旧操作，再清理存储和重置外观，目录刷新失败不阻止页面使用。
 
-验证：[skin-lifecycle.test.mjs](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/test/skin-lifecycle.test.mjs) 的 17 项用例覆盖旧结果、目录乱序、本地读取与响应体挂起、页面退出、初始默认值、重置和候选 URL 清理；[local-persistence.test.ts](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/services/local-persistence.test.ts) 的 6 项用例覆盖延迟打开、事务取消、提交确认和偏好合并。共 23 项新增用例均通过。
+验证：[skin-lifecycle.test.mjs](../web/test/skin-lifecycle.test.mjs) 的 17 项用例覆盖旧结果、目录乱序、本地读取与响应体挂起、页面退出、初始默认值、重置和候选 URL 清理；[local-persistence.test.ts](../web/src/services/local-persistence.test.ts) 的 6 项用例覆盖延迟打开、事务取消、提交确认和偏好合并。共 23 项新增用例均通过。
 
 浏览器通过真实 HTTP 接口人为保持目录和皮肤包响应未完成，检查页面恢复和请求中止；取消旧下载后刷新仍为新的内置选择。正常加载 ILLUSIA 皮肤并进入演示页，内容和外观恢复成功，未发现浏览器错误日志。网络和数据库边界测试不替代真实媒体与设备验收。
 
@@ -387,7 +387,7 @@
 
 ### 06-H 身份文件读取的异步归属
 
-原入口为 `28eda60` 中的 `WebClient.vue` 文件读取、弹窗开关与卸载函数。当前实现见 [useWebClientIdentity.ts](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/composables/useWebClientIdentity.ts) 与 [IdentityImportDialog.vue](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/components/web-client/IdentityImportDialog.vue)。
+原入口为 `28eda60` 中的 `WebClient.vue` 文件读取、弹窗开关与卸载函数。当前实现见 [useWebClientIdentity.ts](../web/src/composables/useWebClientIdentity.ts) 与 [IdentityImportDialog.vue](../web/src/components/web-client/IdentityImportDialog.vue)。
 
 修改前，`readIdentityFile` 等待 `file.arrayBuffer()` 后直接写入导入文本或错误，没有读取序号、弹窗代次或页面失效检查。文件读取也不设置 `identityImportBusy`；该标志用于点击导入后的解析阶段，不能阻止读取中的关闭操作。以下时序已通过可控制返回顺序的用例复现：
 
@@ -399,15 +399,15 @@
 
 保留 128 KiB 文件限制、UTF-8 与带 BOM 的 UTF-16 解码、身份格式校验和五语提示。解析期间维持不允许关闭的行为，同时禁用编辑与文件选择。导出等待绑定当前身份与页面，重复点击合并，迟到结果不下载；锚点、对象 URL 和计时器分别释放。启动身份读取同样检查修订，不能覆盖新导入、已取消的记忆偏好或清理后的状态。
 
-验证：[identity-dialog.test.mjs](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/test/identity-dialog.test.mjs) 的 24 项测试覆盖上述时序、格式读取、正常提交、解析失败、导出与 URL 清理、启动恢复；其中 10 项先失败后通过。既有格式测试继续保留。浏览器实际选择 UTF-16 测试文件并验证错误反馈、保留文本、关闭和重开；桌面及窄屏对比发现原关闭按钮位于屏幕右上角，现定位于弹窗内。没有把该批验证扩展解释为真实 TeamSpeak 或 Android 验收。
+验证：[identity-dialog.test.mjs](../web/test/identity-dialog.test.mjs) 的 24 项测试覆盖上述时序、格式读取、正常提交、解析失败、导出与 URL 清理、启动恢复；其中 10 项先失败后通过。既有格式测试继续保留。浏览器实际选择 UTF-16 测试文件并验证错误反馈、保留文本、关闭和重开；桌面及窄屏对比发现原关闭按钮位于屏幕右上角，现定位于弹窗内。没有把该批验证扩展解释为真实 TeamSpeak 或 Android 验收。
 
 ## 上一批状态与聊天修复
 
-以下问题描述与带行号的原入口引用对应上一批施工前基线 `a97fa54`；本节“本批”均指该历史批次。成员与消息的当前实现见 [session-state.ts](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/voice/session-state.ts)，聊天交互见 [useWebClientChat.ts](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/composables/useWebClientChat.ts)。
+以下问题描述与带行号的原入口引用对应上一批施工前基线 `a97fa54`；本节“本批”均指该历史批次。成员与消息的当前实现见 [session-state.ts](../web/src/voice/session-state.ts)，聊天交互见 [useWebClientChat.ts](../web/src/composables/useWebClientChat.ts)。
 
 ### 04-K 统一成员目录更新
 
-依据：[前端消息分支](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/composables/useVoiceWebSocket.ts:1072)、[服务端成员更新](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/src/server/session-events.ts:121)、[私聊名称](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/composables/useWebClientChat.ts:50)及[私语目标](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/composables/useWebClientChannels.ts:133)。
+依据：[前端消息分支](../web/src/composables/useVoiceWebSocket.ts#L1072)、[服务端成员更新](../src/server/session-events.ts#L121)、[私聊名称](../web/src/composables/useWebClientChat.ts#L50)及[私语目标](../web/src/composables/useWebClientChannels.ts#L133)。
 
 修改前，服务端收到成员更新后发布 `channelList`；浏览器只替换 `channels`，不更新扁平 `members`，导致频道树与私聊、私语名称不同步。进入事件丢失部分状态，离开事件也未立即移除频道副本。
 
@@ -417,7 +417,7 @@
 
 ### 06-E 明确聊天发送结果并保留失败草稿
 
-依据：[命令发送](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/voice/commands.ts:19)、[聊天发送入口](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/composables/useVoiceWebSocket.ts:1266)、[提交草稿](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/composables/useWebClientChat.ts:99)及[发送按钮](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/views/WebClient.vue:255)。
+依据：[命令发送](../web/src/voice/commands.ts#L19)、[聊天发送入口](../web/src/composables/useVoiceWebSocket.ts#L1266)、[提交草稿](../web/src/composables/useWebClientChat.ts#L99)及[发送按钮](../web/src/views/WebClient.vue#L255)。
 
 修改前，普通命令在 socket 未打开时直接返回，聊天入口仍追加消息并清空草稿。重连期间界面允许提交，服务端拒绝也没有与本地消息关联的确认。
 
@@ -429,7 +429,7 @@
 
 ### 06-F 将私聊目标绑定到所属会话
 
-依据：[私聊状态与发送](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/composables/useWebClientChat.ts:45)、[连接动作](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/composables/useWebClientConnection.ts:90)及[页面组装](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/views/WebClient.vue:862)。
+依据：[私聊状态与发送](../web/src/composables/useWebClientChat.ts#L45)、[连接动作](../web/src/composables/useWebClientConnection.ts#L90)及[页面组装](../web/src/views/WebClient.vue#L862)。
 
 修改前，私聊选择与草稿未随退出重置，历史只按数字 ID 分组。编号复用可使旧私聊自动对应新成员；本批已用跨服务器和同服务器替换场景复现。
 
@@ -441,7 +441,7 @@
 
 ### 04-L 统一会话通知清理规则
 
-依据：[断开处理](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/composables/useVoiceWebSocket.ts:982)、[连接成功及事件处理](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/composables/useVoiceWebSocket.ts:1052)和[通知展示](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/views/WebClient.vue:933)。
+依据：[断开处理](../web/src/composables/useVoiceWebSocket.ts#L982)、[连接成功及事件处理](../web/src/composables/useVoiceWebSocket.ts#L1052)和[通知展示](../web/src/views/WebClient.vue#L933)。
 
 修改前，显式断开没有清空事件和戳一戳通知；成功连接虽然替换事件，仍会展示旧通知。本批通过退出与替换目标用例复现。
 
@@ -458,7 +458,7 @@
 
 ### 06-G 防止异常频道层级导致递归失控
 
-依据：[频道树遍历](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/composables/useWebClientChannels.ts:30)与[频道消息校验](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/src/shared/server-messages.ts:59)。
+依据：[频道树遍历](../web/src/composables/useWebClientChannels.ts#L30)与[频道消息校验](../src/shared/server-messages.ts#L59)。
 
 修改前，父子遍历 `visit` 没有访问保护。共享解析器允许形状有效但父子成环的目录，本批自环与双节点环用例实际触发栈溢出；不推定正常 TeamSpeak 一定产生这种目录。
 
@@ -472,7 +472,7 @@
 
 ### 04-H 命令发送异常立即清理等待资源
 
-当前实现：[commands.ts](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/voice/commands.ts)。原入口先创建默认 8 秒计时器、登记等待，再发送命令。同步发送抛错后 Promise 拒绝，但登记和计时器未立即清理。本批通过发送故障注入复现该缺口。
+当前实现：[commands.ts](../web/src/voice/commands.ts)。原入口先创建默认 8 秒计时器、登记等待，再发送命令。同步发送抛错后 Promise 拒绝，但登记和计时器未立即清理。本批通过发送故障注入复现该缺口。
 
 已实施：每条命令拥有统一且幂等的结束函数，成功、服务端错误、发送异常、超时及断开都通过它清理。确认等待绑定原 socket 与连接代次，保留默认 8 秒期限、共享命令类型和现有调用接口。
 
@@ -480,7 +480,7 @@
 
 ### 04-I 加入凭证请求可取消且等待有期限
 
-当前实现：[connection.ts](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/voice/connection.ts)。原请求只有代次检查，没有取消信号和应用层期限；请求或响应体迟迟不返回时，页面持续处于连接中。原 socket 关闭异常还会跳过后续页面状态清理。本批已通过边界替身复现。
+当前实现：[connection.ts](../web/src/voice/connection.ts)。原请求只有代次检查，没有取消信号和应用层期限；请求或响应体迟迟不返回时，页面持续处于连接中。原 socket 关闭异常还会跳过后续页面状态清理。本批已通过边界替身复现。
 
 已实施：连接控制器持有取消器、15 秒期限、socket 和连接代次。期限覆盖偏好就绪、HTTP 请求及响应体；新连接和断开立即取消旧请求，旧期限与迟到响应不能写回。socket 关闭前解绑所属监听，关闭异常不妨碍其余状态清理。超时用 `REQUEST_TIMEOUT` 和五语提示说明网关等待失败。
 
@@ -488,13 +488,13 @@
 
 ### WebRTC 与诊断实现的验证结果
 
-[webrtc-transport.ts](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/voice/webrtc-transport.ts) 已集中 peer、输入混音、电平监测、ICE 等待、answer 期限和兼容回退；[webrtc-playback.ts](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/voice/webrtc-playback.ts) 已集中播放元素、播放中的 Promise 和用户手势重试监听。原始麦克风和 PCM 由采集层管理，控制 socket 由连接模块管理，入口负责组装。
+[webrtc-transport.ts](../web/src/voice/webrtc-transport.ts) 已集中 peer、输入混音、电平监测、ICE 等待、answer 期限和兼容回退；[webrtc-playback.ts](../web/src/voice/webrtc-playback.ts) 已集中播放元素、播放中的 Promise 和用户手势重试监听。原始麦克风和 PCM 由采集层管理，控制 socket 由连接模块管理，入口负责组装。
 
-诊断请求现由采样模块管理，保留等待期限直至网关和浏览器统计均返回，并检查原 socket、连接与传输代次和 peer；断开立即结束消费者等待。清理异常、旧播放重试、旧协商期限、回退信令失败、统计挂起、替换 peer 和诊断发送失败均已纳入 [voice-session.test.mjs](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/test/voice-session.test.mjs)，当前全部通过。此处验证浏览器边界行为，不等同于真实网络媒体验收。
+诊断请求现由采样模块管理，保留等待期限直至网关和浏览器统计均返回，并检查原 socket、连接与传输代次和 peer；断开立即结束消费者等待。清理异常、旧播放重试、旧协商期限、回退信令失败、统计挂起、替换 peer 和诊断发送失败均已纳入 [voice-session.test.mjs](../web/test/voice-session.test.mjs)，当前全部通过。此处验证浏览器边界行为，不等同于真实网络媒体验收。
 
 ### 04-J 诊断采样与展示只比较同一来源
 
-当前实现：[audio-diagnostics.ts](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/voice/audio-diagnostics.ts) 与 [useWebClientPerformance.ts](<USER_HOME>/Desktop/othercode/teamspeakclient4web/webspeak-webclient/web/src/composables/useWebClientPerformance.ts)。原面板直接相减前后样本中的下行计数，来源可能分别为 RTP 包、兼容音频帧或网关发送帧。peer 替换后新计数若大于旧值，也会被误当成同一流的增长。采样失败时保留旧活动状态，已排队的旧轮询会设置运行标志却无法清除；卸载后手动刷新仍能发起请求。
+当前实现：[audio-diagnostics.ts](../web/src/voice/audio-diagnostics.ts) 与 [useWebClientPerformance.ts](../web/src/composables/useWebClientPerformance.ts)。原面板直接相减前后样本中的下行计数，来源可能分别为 RTP 包、兼容音频帧或网关发送帧。peer 替换后新计数若大于旧值，也会被误当成同一流的增长。采样失败时保留旧活动状态，已排队的旧轮询会设置运行标志却无法清除；卸载后手动刷新仍能发起请求。
 
 已实施：采样模块拥有等待登记、总期限、兼容计数和浏览器统计。样本携带仅用于浏览器内部的 `scopeId`，不修改网关协议；连接或传输变化以及会话释放会使范围失效。兼容计数随会话重置，旧快照保持独立。面板只比较相同范围、传输和下行计数来源；缺失或拒绝的采样清除旧状态，下一样本重新建立基线。轮询开始前与结果返回后均校验代次，卸载同时禁止旧回调和手动刷新。
 

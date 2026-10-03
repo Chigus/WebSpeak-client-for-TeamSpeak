@@ -92,7 +92,7 @@ jobs:
           Copy-Item -Recurse -LiteralPath $packageRoot -Destination $smokeRoot
           @{
             port = 3040
-            tsHost = "203.0.113.10"
+            tsHost = "127.0.0.1"
             tsPort = 9987
             tsServerPassword = ""
             tsServerProtocol = "ts6"
@@ -180,7 +180,7 @@ jobs:
           cat > "$smoke_root/config.json" <<'CONFIG'
           {
             "port": 3040,
-            "tsHost": "203.0.113.10",
+            "tsHost": "127.0.0.1",
             "tsPort": 9987,
             "tsServerPassword": "",
             "tsServerProtocol": "ts6",

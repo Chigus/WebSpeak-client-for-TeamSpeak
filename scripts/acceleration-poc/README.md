@@ -4,7 +4,7 @@
 
 它验证以下核心能力：
 
-- 香港侧客户端向上海侧中继发起认证；
+- 客户端向远端中继发起认证；
 - 每个会话动态指定 TeamSpeak 目标地址；
 - 双向 UDP 数据报转发，并保持数据包边界；
 - 会话之间按随机 ID 隔离；
@@ -27,16 +27,16 @@ IPv6 回环验证：
 npm run acceleration:ipv6-smoke
 ```
 
-## 通过隧道连接上海 TeamSpeak
+## 通过隧道连接指定 TeamSpeak
 
-下面的命令会让 SDK 连接本地代理端口，再由 PoC 中继把 UDP 数据转发到指定 TeamSpeak。它不进入指定频道，只验证 TeamSpeak 握手和断开：
+必须先将下方示例域名替换为你获准测试的 TeamSpeak 地址；脚本不内置真实服务器默认值。下面的命令会让 SDK 连接本地代理端口，再由 PoC 中继把 UDP 数据转发到指定 TeamSpeak。它不进入指定频道，只验证 TeamSpeak 握手和断开：
 
 ```bash
-$env:WEBSPEAK_ACCEL_TS_TARGET="203.0.113.10#9987"
+$env:WEBSPEAK_ACCEL_TS_TARGET="ts.example.invalid#9987"
 npm run acceleration:sdk-smoke
 ```
 
-跨机器验证时，需要在上海启动 `relay-server.mjs`，再把 `WEBSPEAK_ACCEL_RELAY` 指向上海中继地址。当前项目不会自动部署或启动该远程进程。
+跨机器验证时，需要在目标服务器启动 `relay-server.mjs`，再把 `WEBSPEAK_ACCEL_RELAY` 指向中继地址。当前项目不会自动部署或启动该远程进程。
 
 ## 手动启动中继
 

@@ -20,3 +20,12 @@ config.json
 /.local-opus-hook.cjs
 /界面参考/stitch_teamspeak_web_interface.zip
 claude.pem
+
+# Private credentials and deployment notes stay local.
+.env.*
+!.env.example
+*.pem
+*.key
+/.claude/
+/LOCAL-RELEASE-RUNBOOK.md
+/DEPLOYMENT-*.md

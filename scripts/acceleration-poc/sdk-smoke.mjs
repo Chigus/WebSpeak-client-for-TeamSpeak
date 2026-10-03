@@ -4,7 +4,11 @@ import { createRelayServer } from "./relay-server.mjs";
 import { parseEndpoint } from "./protocol.mjs";
 
 const token = process.env.WEBSPEAK_ACCEL_TOKEN ?? "local-acceleration-poc-token";
-const target = parseEndpoint(process.env.WEBSPEAK_ACCEL_TS_TARGET ?? "203.0.113.10#9987", 9987);
+const targetAddress = process.env.WEBSPEAK_ACCEL_TS_TARGET;
+if (!targetAddress?.trim()) {
+  throw new Error("Set WEBSPEAK_ACCEL_TS_TARGET to your authorized TeamSpeak test endpoint");
+}
+const target = parseEndpoint(targetAddress, 9987);
 const relayEndpoint = process.env.WEBSPEAK_ACCEL_RELAY;
 let relayServer = null;
 let relayClient = null;
