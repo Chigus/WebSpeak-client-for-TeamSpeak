@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import pino from "pino";
 import { VoiceBridge } from "./voice-bridge.js";
 import { JoinTicketStore } from "./join-ticket.js";
@@ -35,7 +36,7 @@ function fixture() {
   const entry = {
     id: "session", session: { state: "connected" }, ws: { readyState: 1 as 0 | 1 | 2 | 3, bufferedAmount: 0, send() {} },
     webrtc: null as PeerStub | null, webrtcGeneration: 0,
-    tsClient: { setInputMuted: async (_muted: boolean) => {}, sendVoice: () => { forwarded++; }, sendWhisper: () => { forwarded++; } },
+    tsClient: { isConnected: () => true, setInputMuted: async (_muted: boolean) => {}, setAccompanimentActive: async (_active: boolean) => {}, sendVoice: () => { forwarded++; }, sendWhisper: () => { forwarded++; } },
     whisperActive: false, whisperTargetIds: new Set<number>(), audio: createAudioFlowStats(),
     audioTransport: null as SessionAudioTransport | null,
   };
@@ -116,8 +117,7 @@ test("a superseded answer failure cannot send an error for the current offer", a
   const answer = deferred();
   f.configure(peer => { if (f.peers.length === 1) peer.answerResult = answer.promise; });
   const old = f.offer("old");
-  await Promise.resolve();
-  await Promise.resolve();
+  await nextTurn();
   await f.offer("new");
   const current = f.entry.webrtc;
   answer.reject(new Error("old peer closed"));
@@ -161,6 +161,35 @@ test("a current peer construction failure reports a recoverable negotiation erro
   await f.offer("current");
   assert.equal(f.entry.webrtc, null);
   assert.deepEqual(f.messages, [{ type: "webrtcError", code: "WEBRTC_NEGOTIATION_FAILED" }]);
+});
+
+test("initial accompaniment updates TeamSpeak before creating a muted mixer and resets on stop", async () => {
+  const f = fixture();
+  const inputs: Array<[string, boolean]> = [];
+  f.entry.tsClient.setInputMuted = async muted => { inputs.push(["muted", muted]); };
+  f.entry.tsClient.setAccompanimentActive = async active => { inputs.push(["music", active]); };
+  await f.bridge.handleWebRtcOffer(f.entry, { type: "offer", sdp: "audio", muted: true, accompanimentActive: true }, message => f.messages.push(message));
+  assert.deepEqual(inputs, [["music", false], ["muted", true], ["music", true]]);
+  assert.equal(f.peers[0]?.options.microphoneMuted, true);
+  assert.equal(f.peers[0]?.options.accompanimentActive, true);
+  await f.bridge.stopWebRtc(f.entry);
+  assert.deepEqual(inputs.at(-1), ["music", false]);
+});
+
+test("stopping during accompaniment synchronization restores input even without a peer", async () => {
+  const f = fixture();
+  const waiting = deferred();
+  const inputs: boolean[] = [];
+  f.entry.tsClient.setAccompanimentActive = async active => { inputs.push(active); if (active) await waiting.promise; };
+  const offer = f.bridge.handleWebRtcOffer(f.entry, { type: "offer", sdp: "audio", muted: true, accompanimentActive: true }, message => f.messages.push(message));
+  await nextTurn();
+  assert.deepEqual(inputs, [false, true]);
+  await f.bridge.stopWebRtc(f.entry);
+  waiting.resolve();
+  await offer;
+  assert.deepEqual(inputs, [false, true, false]);
+  assert.equal(f.peers.length, 0);
+  assert.deepEqual(f.messages, []);
 });
 
 test("old close statistics cannot overwrite a new peer's live snapshot", async () => {

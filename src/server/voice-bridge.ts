@@ -659,8 +659,14 @@ export class VoiceBridge {
     const generation = ++entry.webrtcGeneration;
     const peer = entry.webrtc;
     entry.webrtc = null;
-    if (!peer) return;
+    // Enqueue the reset even while an offer is still preparing its first peer.
+    // A later offer's input changes are then ordered after this restoration.
+    const restoreInput = this.entries.get(entry.id) === entry && entry.tsClient.isConnected()
+      ? entry.tsClient.setAccompanimentActive(false).catch(() => undefined)
+      : Promise.resolve();
+    if (!peer) { await restoreInput; return; }
     try { await peer.close(); } catch { /* peer teardown is idempotent */ }
+    await restoreInput;
     if (entry.webrtcGeneration === generation) {
       try { Object.assign(entry.audio, peer.getStats()); } catch { /* diagnostics must not abort cleanup */ }
     }
@@ -686,6 +692,7 @@ export class VoiceBridge {
       // the browser track locally, but TeamSpeak clients only see the state
       // after the gateway updates its own TS client as well.
       await entry.tsClient.setInputMuted(muted);
+      if (isCurrent()) await entry.tsClient.setAccompanimentActive(offer.accompanimentActive === true);
     } catch (error: unknown) {
       if (isCurrent()) this.logger.warn({ entryId: entry.id, muted, err: error instanceof Error ? error.message : String(error) }, "Could not synchronize initial microphone mute state");
     }
@@ -719,6 +726,8 @@ export class VoiceBridge {
       if (entry.webrtc === peer) entry.webrtc = null;
       try { await peer?.close(); } catch { /* best effort */ }
       if (isCurrent()) {
+        try { await entry.tsClient.setAccompanimentActive(false); } catch { /* best effort */ }
+        if (!isCurrent()) return;
         this.logger.warn({ entryId: entry.id, err: error instanceof Error ? error.message : String(error) }, "WebRTC audio negotiation failed");
         sendJson({ type: "webrtcError", code: "WEBRTC_NEGOTIATION_FAILED" });
       }

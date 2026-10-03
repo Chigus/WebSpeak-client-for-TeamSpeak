@@ -26,6 +26,7 @@ class TeamSpeakStub extends EventEmitter {
   getChannelId() { return 1n; }
   isConnected() { return !this.disconnected; }
   async sendProtocolCommand() {}
+  async setAccompanimentActive() {}
   sendVoice(data: Buffer) { this.sent.push(data); this.emit("sent", data); }
   sendWhisper(data: Buffer) { this.sent.push(data); }
   getClientAvatar(id: number, uid: string) { return this.avatarRequest(id, uid); }

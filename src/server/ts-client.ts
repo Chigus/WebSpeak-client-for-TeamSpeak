@@ -87,6 +87,8 @@ export class TSClient extends EventEmitter {
   private clientId = 0;
   private connected = false;
   private connectionGeneration = 0;
+  private inputState = { muted: false, accompaniment: false };
+  private inputStateQueue: Promise<void> = Promise.resolve();
   private preferredChannelId = 0n;
   private accelerationClient: AccelerationRelayClient | null = null;
   // Reason id of the most recent self leave, kept so the SDK `kicked` event can
@@ -102,6 +104,8 @@ export class TSClient extends EventEmitter {
 
   async connect(): Promise<void> {
     this.connectionGeneration++;
+    this.inputState = { muted: false, accompaniment: false };
+    this.inputStateQueue = Promise.resolve();
     this.selfLeaveReasonId = null;
     if (!this.adapter || !this.client) {
       let transportTarget = this.options.target;
@@ -357,8 +361,28 @@ export class TSClient extends EventEmitter {
   }
 
   async setInputMuted(muted: boolean): Promise<void> {
-    if (!this.client || !this.connected) throw new Error("TeamSpeak session is not ready");
-    await this.client.execCommand(`clientupdate client_input_muted=${muted ? 1 : 0}`);
+    await this.updateInputState({ muted });
+  }
+
+  async setAccompanimentActive(accompaniment: boolean): Promise<void> {
+    await this.updateInputState({ accompaniment });
+  }
+
+  private updateInputState(change: Partial<typeof this.inputState>): Promise<void> {
+    const client = this.client;
+    const generation = this.connectionGeneration;
+    const isCurrent = () => client !== null && this.client === client && this.connected && this.connectionGeneration === generation;
+    const update = this.inputStateQueue.then(async () => {
+      if (!isCurrent()) throw new Error("TeamSpeak session is not ready");
+      const next = { ...this.inputState, ...change };
+      // TeamSpeak discards all audio from an input-muted client, including
+      // music. The browser removes the microphone from its accompaniment mix.
+      await client!.execCommand(`clientupdate client_input_muted=${next.muted && !next.accompaniment ? 1 : 0}`);
+      if (!isCurrent()) throw new Error("TeamSpeak session changed while updating input state");
+      this.inputState = next;
+    });
+    this.inputStateQueue = update.catch(() => undefined);
+    return update;
   }
 
   async switchChannel(channelId: bigint, password?: string): Promise<void> {

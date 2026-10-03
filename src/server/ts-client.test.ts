@@ -16,6 +16,9 @@ const rows = [{ client_unique_identifier: "member", client_flag_avatar: "marker"
 const transfer = { size: 6n };
 
 class SdkStub extends EventEmitter {
+  inputCommands: string[] = [];
+  inputUpdate = async (_command: string): Promise<void> => {};
+  async execCommand(command: string) { this.inputCommands.push(command); await this.inputUpdate(command); }
   initialized = 0;
   downloaded = 0;
   metadata = async () => rows;
@@ -35,6 +38,57 @@ function fixture() {
   state.attachClientListeners(sdk);
   return { client, sdk, state };
 }
+
+test("accompaniment remains audible with the microphone muted and stopping restores mute", async () => {
+  const f = fixture();
+  await f.client.setInputMuted(true);
+  await f.client.setAccompanimentActive(true);
+  await f.client.setInputMuted(true);
+  await f.client.setAccompanimentActive(false);
+  await f.client.setInputMuted(false);
+  assert.deepEqual(f.sdk.inputCommands, [1, 0, 0, 1, 0].map(value => `clientupdate client_input_muted=${value}`));
+});
+
+test("overlapping microphone and accompaniment changes use the last accepted input state", async () => {
+  const f = fixture();
+  const pending = deferred<void>();
+  f.sdk.inputUpdate = async () => pending.promise;
+  const mute = f.client.setInputMuted(true);
+  const music = f.client.setAccompanimentActive(true);
+  await nextTurn();
+  assert.equal(f.sdk.inputCommands.length, 1);
+  pending.resolve();
+  await Promise.all([mute, music]);
+  assert.deepEqual(f.sdk.inputCommands, ["clientupdate client_input_muted=1", "clientupdate client_input_muted=0"]);
+});
+
+test("a rejected accompaniment update cannot change later mute decisions or poison the queue", async () => {
+  const f = fixture();
+  await f.client.setInputMuted(true);
+  f.sdk.inputUpdate = async () => { throw new Error("denied"); };
+  await assert.rejects(f.client.setAccompanimentActive(true), /denied/);
+  f.sdk.inputUpdate = async () => {};
+  await f.client.setInputMuted(true);
+  assert.equal(f.sdk.inputCommands.at(-1), "clientupdate client_input_muted=1");
+});
+
+test("queued and in-flight input changes cannot cross a disconnected session", async () => {
+  const f = fixture();
+  const pending = deferred<void>();
+  f.sdk.inputUpdate = async () => pending.promise;
+  const first = assert.rejects(f.client.setAccompanimentActive(true), /session changed/);
+  const queued = assert.rejects(f.client.setInputMuted(true), /not ready/);
+  await nextTurn();
+  await f.client.disconnect();
+  f.state.client = f.sdk;
+  f.state.connected = true;
+  pending.resolve();
+  await Promise.all([first, queued]);
+  assert.equal(f.sdk.inputCommands.length, 1);
+  f.sdk.inputUpdate = async () => {};
+  await f.client.setInputMuted(true);
+  assert.equal(f.sdk.inputCommands.at(-1), "clientupdate client_input_muted=1");
+});
 
 test("an old avatar metadata response cannot start a transfer on a replacement SDK client", async () => {
   const f = fixture();

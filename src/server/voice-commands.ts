@@ -9,7 +9,7 @@ import { teamSpeakServerErrorCode } from "../errors.js";
 
 /** Only the session capabilities used by control commands cross this boundary. */
 export interface VoiceCommandContext extends AudioStatsSource {
-  tsClient: Pick<TSClient, "execCommandWithResponse" | "switchChannel" | "getClientId" | "getChannelId" | "moveClient" | "sendTextMessage" | "poke" | "setAway" | "setInputMuted">;
+  tsClient: Pick<TSClient, "execCommandWithResponse" | "switchChannel" | "getClientId" | "getChannelId" | "moveClient" | "sendTextMessage" | "poke" | "setAway" | "setInputMuted" | "setAccompanimentActive">;
   channelTree: ChannelInfo[];
   members: ReadonlyMap<number, { uid?: string }>;
   whisperTargetIds: Set<number>;
@@ -154,7 +154,11 @@ export async function handleCommand(
       await entry.tsClient.setInputMuted(muted);
       entry.webrtc?.setMicrophoneMuted(muted);
     } else if (command.type === "setAccompanimentActive") {
-      entry.webrtc?.setAccompanimentActive(command.payload.active);
+      const peer = entry.webrtc;
+      if (peer) {
+        await entry.tsClient.setAccompanimentActive(command.payload.active);
+        if (entry.webrtc === peer) peer.setAccompanimentActive(command.payload.active);
+      }
     } else if (command.type === "setMemberVolume") {
       const clientId = command.payload.clientId;
       entry.webrtc?.setMemberVolume(clientId, command.payload.volume);

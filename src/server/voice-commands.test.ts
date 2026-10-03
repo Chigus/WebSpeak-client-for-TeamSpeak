@@ -19,6 +19,7 @@ function fixture() {
       poke: async (...args) => { calls.push(["poke", ...args]); },
       setAway: async (...args) => { calls.push(["away", ...args]); },
       setInputMuted: async (...args) => { calls.push(["mute", ...args]); },
+      setAccompanimentActive: async (...args) => { calls.push(["accompaniment", ...args]); },
     },
     channelTree: [{ id: "18446744073709551615", parentID: "0", name: "Large ID" }],
     members,
@@ -132,6 +133,23 @@ test("chat routing uses the current channel, server scope, and private target in
   await f.run({ type: "sendTextMessage", payload: { message: "   " }, requestId: "empty" });
   assert.deepEqual(f.calls, [["text", "channel", "channel", 5n], ["text", "server", "server"], ["text", "private", "private", 2n]]);
   assert.deepEqual(f.messages.at(-1), { type: "commandCompleted", requestId: "empty" });
+});
+
+test("accompaniment changes reach the mixer only after TeamSpeak accepts them", async () => {
+  const f = fixture();
+  let active = false;
+  f.context.webrtc = {
+    getStats: createAudioFlowStats, setMicrophoneMuted() {}, setMemberVolume() {},
+    setAccompanimentActive: value => { active = value; },
+  };
+  f.context.tsClient.setAccompanimentActive = async () => { throw Object.assign(new Error("denied"), { id: 2568 }); };
+  await f.run({ type: "setAccompanimentActive", payload: { active: true }, requestId: "music-denied" });
+  assert.equal(active, false);
+  assert.equal(f.messages.at(-1)?.type, "error");
+  f.context.tsClient.setAccompanimentActive = async () => {};
+  await f.run({ type: "setAccompanimentActive", payload: { active: true }, requestId: "music-ok" });
+  assert.equal(active, true);
+  assert.deepEqual(f.messages.at(-1), { type: "commandCompleted", requestId: "music-ok" });
 });
 
 test("audio probing is bounded per session and accepts the next request at the interval boundary", async () => {
