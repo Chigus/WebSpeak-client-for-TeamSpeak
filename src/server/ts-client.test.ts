@@ -46,7 +46,64 @@ test("accompaniment remains audible with the microphone muted and stopping resto
   await f.client.setInputMuted(true);
   await f.client.setAccompanimentActive(false);
   await f.client.setInputMuted(false);
-  assert.deepEqual(f.sdk.inputCommands, [1, 0, 0, 1, 0].map(value => `clientupdate client_input_muted=${value}`));
+  assert.deepEqual(f.sdk.inputCommands, [1, 0, 1, 0].map(value => `clientupdate client_input_muted=${value}`));
+});
+
+test("unchanged wire mute still records microphone and accompaniment changes", async () => {
+  const f = fixture();
+  await f.client.setInputMuted(false);
+  await f.client.setAccompanimentActive(true);
+  await f.client.setInputMuted(true);
+  await f.client.setAccompanimentActive(false);
+  assert.deepEqual(f.sdk.inputCommands, ["clientupdate client_input_muted=0", "clientupdate client_input_muted=1"]);
+});
+
+test("stopping accompaniment retries flood rejection before committing restored mute", async t => {
+  const f = fixture();
+  await f.client.setInputMuted(true);
+  await f.client.setAccompanimentActive(true);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let attempts = 0;
+  f.sdk.inputUpdate = async () => { if (++attempts === 1) throw new Error("TeamSpeak server error: client is flooding (id=524)"); };
+  const pending = f.client.setAccompanimentActive(false);
+  await nextTurn();
+  assert.equal(attempts, 1);
+  t.mock.timers.tick(1000);
+  await pending;
+  await f.client.setInputMuted(true);
+  assert.equal(attempts, 2);
+  assert.deepEqual(f.sdk.inputCommands.slice(-2), ["clientupdate client_input_muted=1", "clientupdate client_input_muted=1"]);
+});
+
+test("input flood retries are bounded and a rejected update does not poison later changes", async t => {
+  const f = fixture();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const flooding = new Error("TeamSpeak server error: client is flooding (id=524)");
+  f.sdk.inputUpdate = async () => { throw flooding; };
+  const pending = assert.rejects(f.client.setInputMuted(true), error => error === flooding);
+  await nextTurn();
+  t.mock.timers.tick(1000);
+  await nextTurn();
+  t.mock.timers.tick(2000);
+  await pending;
+  assert.equal(f.sdk.inputCommands.length, 3);
+  f.sdk.inputUpdate = async () => {};
+  await f.client.setInputMuted(false);
+  assert.equal(f.sdk.inputCommands.at(-1), "clientupdate client_input_muted=0");
+});
+
+test("a flood retry cannot send into a replaced connection", async t => {
+  const f = fixture();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  f.sdk.inputUpdate = async () => { throw new Error("TeamSpeak server error: client is flooding (id=524)"); };
+  const pending = assert.rejects(f.client.setInputMuted(true), /not ready/);
+  await nextTurn();
+  await f.client.disconnect();
+  f.state.client = f.sdk;
+  f.state.connected = true;
+  t.mock.timers.tick(1000);
+  await pending;
+  assert.equal(f.sdk.inputCommands.length, 1);
 });
 
 test("overlapping microphone and accompaniment changes use the last accepted input state", async () => {

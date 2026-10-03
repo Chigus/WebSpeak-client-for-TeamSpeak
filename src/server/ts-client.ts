@@ -88,6 +88,7 @@ export class TSClient extends EventEmitter {
   private connected = false;
   private connectionGeneration = 0;
   private inputState = { muted: false, accompaniment: false };
+  private syncedInputMuted: boolean | null = null;
   private inputStateQueue: Promise<void> = Promise.resolve();
   private preferredChannelId = 0n;
   private accelerationClient: AccelerationRelayClient | null = null;
@@ -105,6 +106,7 @@ export class TSClient extends EventEmitter {
   async connect(): Promise<void> {
     this.connectionGeneration++;
     this.inputState = { muted: false, accompaniment: false };
+    this.syncedInputMuted = null;
     this.inputStateQueue = Promise.resolve();
     this.selfLeaveReasonId = null;
     if (!this.adapter || !this.client) {
@@ -375,10 +377,27 @@ export class TSClient extends EventEmitter {
     const update = this.inputStateQueue.then(async () => {
       if (!isCurrent()) throw new Error("TeamSpeak session is not ready");
       const next = { ...this.inputState, ...change };
+      const muted = next.muted && !next.accompaniment;
       // TeamSpeak discards all audio from an input-muted client, including
       // music. The browser removes the microphone from its accompaniment mix.
-      await client!.execCommand(`clientupdate client_input_muted=${next.muted && !next.accompaniment ? 1 : 0}`);
+      if (this.syncedInputMuted !== muted) {
+        for (let attempt = 0; ; attempt++) {
+          if (!isCurrent()) throw new Error("TeamSpeak session is not ready");
+          try {
+            await client!.execCommand(`clientupdate client_input_muted=${muted ? 1 : 0}`);
+            break;
+          } catch (error: unknown) {
+            // A failed acknowledgement cannot justify skipping a later update.
+            if (isCurrent()) this.syncedInputMuted = null;
+            if (!isCurrent() || attempt >= 2 || normalizeTeamSpeakError(error).code !== "flooding") throw error;
+            // In particular, stopping accompaniment must get a chance to
+            // restore mute after the server's short flood-control window.
+            await new Promise<void>(resolve => setTimeout(resolve, (attempt + 1) * 1000));
+          }
+        }
+      }
       if (!isCurrent()) throw new Error("TeamSpeak session changed while updating input state");
+      this.syncedInputMuted = muted;
       this.inputState = next;
     });
     this.inputStateQueue = update.catch(() => undefined);
