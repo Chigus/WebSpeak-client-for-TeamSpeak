@@ -72,13 +72,6 @@ export interface WebRtcAudioStats {
 interface PendingAudioFrame {
   pcm: Buffer;
   receivedAt: number;
-  /** Preserve a native 20 ms Opus frame when no mix is required. */
-  opus?: Buffer;
-}
-
-interface SelectedAudioFrame extends PendingAudioFrame {
-  clientId: number;
-  volume: number;
 }
 
 /**
@@ -260,7 +253,6 @@ export class WebRtcAudioSession {
       // including quiet/comfort-noise frames, continues into the queue so the
       // receiver keeps an uninterrupted codec timeline.
       if (rms >= SPEAKER_ACTIVITY_RMS) this.activeSpeakerIds.add(data.clientId);
-      const canForwardOpus = !pendingPcm && pcm.length === AUDIO_FRAME_BYTES;
       let offset = 0;
       let enqueued = false;
       let queue = this.pendingFrames.get(data.clientId);
@@ -276,7 +268,6 @@ export class WebRtcAudioSession {
         queue.push({
           pcm: Buffer.from(combined.subarray(offset, offset + AUDIO_FRAME_BYTES)),
           receivedAt: performance.now(),
-          ...(canForwardOpus && offset === 0 ? { opus: Buffer.from(data.data) } : {}),
         });
         enqueued = true;
         offset += AUDIO_FRAME_BYTES;
@@ -352,23 +343,19 @@ export class WebRtcAudioSession {
       }
     }
     const mixed = new Int32Array(AUDIO_FRAME_SAMPLES);
-    const selectedFrames: SelectedAudioFrame[] = [];
     for (const [clientId, queue] of this.pendingFrames) {
       const frame = queue.shift();
       if (queue.length === 0) this.pendingFrames.delete(clientId);
       if (!frame) continue;
       const volume = this.memberVolumes.get(clientId) ?? 1;
-      selectedFrames.push({ ...frame, clientId, volume });
       for (let index = 0; index < AUDIO_FRAME_SAMPLES; index++) {
         mixed[index] += Math.round(frame.pcm.readInt16LE(index * 2) * volume);
       }
     }
 
-    if (selectedFrames.length === 1 && selectedFrames[0]?.opus && selectedFrames[0].volume === 1) {
-      this.sendRtpAudio(selectedFrames[0].opus);
-      return;
-    }
-
+    // One RTP stream needs one continuous Opus encoder state. Alternating
+    // source packets with our encoded silence/mixes corrupts decoder history
+    // and can suppress otherwise valid speech without any packet loss.
     const pcm = Buffer.allocUnsafe(AUDIO_FRAME_BYTES);
     for (let index = 0; index < AUDIO_FRAME_SAMPLES; index++) {
       // Keep a fixed gain for the mixed path. Per-sample soft limiting changes
