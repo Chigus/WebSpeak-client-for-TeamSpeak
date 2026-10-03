@@ -161,3 +161,56 @@ test("a failed old native join cannot remove a newer membership", async () => {
   assert.equal(f.list(viewer)[0]?.viewerCount, 1);
   assert.equal(f.messages.some(({ message }) => message.type === "screenShareError" && message.requestId === "old"), false);
 });
+
+test("leaving a native source includes the removal reason required by TS6", () => {
+  const f = fixture();
+  const viewer = f.participant("viewer", 2);
+  viewer.channelTree[0]!.members!.push({ id: 17, nickname: "Native" });
+  f.coordinator.handleNotification(viewer, { name: "notifystreamstarted", params: { id: "native", clid: "17" } });
+  f.handle(viewer, { type: "screenShareJoin", streamId: "native" });
+  f.handle(viewer, { type: "screenShareLeave", streamId: "native" });
+  assert.ok(f.commands.some(({ command }) => command === "removeclientfromstream id=native clid=2 reason=1"));
+});
+
+test("a refused native viewer removal retains membership and reports failure until retry succeeds", async () => {
+  const f = fixture();
+  const owner = f.participant("owner", 1);
+  const streamId = f.start(owner);
+  f.coordinator.handleNotification(owner, { name: "notifystreamstarted", params: { id: "native", clid: "1" } });
+  f.coordinator.handleNotification(owner, { name: "notifyjoinstreamrequest", params: { id: "native", clid: "17" } });
+  let reject!: (error: Error) => void;
+  const denied = new Promise<void>((_, no) => { reject = no; });
+  owner.tsClient.sendProtocolCommand = command => {
+    assert.equal(command, "removeclientfromstream id=native clid=17 reason=1");
+    return denied;
+  };
+  const close: ScreenShareClientMessage = { type: "screenShareSignal", streamId, targetPeerId: "ts-viewer-17", signal: { kind: "close" } };
+  f.handle(owner, close);
+  assert.equal(f.list(owner)[0]?.viewerCount, 1);
+  reject(new Error("denied"));
+  await nextTurn();
+  assert.equal(f.list(owner)[0]?.viewerCount, 1);
+  assert.equal(f.messages.some(({ message }) => message.type === "screenShareViewerLeft"), false);
+  assert.ok(f.messages.some(({ message }) => message.type === "screenShareError" && message.code === "SCREEN_SHARE_SIGNAL_FAILED"));
+  owner.tsClient.sendProtocolCommand = async () => {};
+  f.handle(owner, close);
+  await nextTurn();
+  assert.equal(f.list(owner)[0]?.viewerCount, 0);
+  assert.equal(f.messages.filter(({ message }) => message.type === "screenShareViewerLeft").length, 1);
+});
+
+test("native removal notification and acknowledgement publish only one viewer-left event", async () => {
+  const f = fixture();
+  const owner = f.participant("owner", 1);
+  const streamId = f.start(owner);
+  f.coordinator.handleNotification(owner, { name: "notifystreamstarted", params: { id: "native", clid: "1" } });
+  f.coordinator.handleNotification(owner, { name: "notifyjoinstreamrequest", params: { id: "native", clid: "17" } });
+  let resolve!: () => void;
+  owner.tsClient.sendProtocolCommand = () => new Promise<void>(yes => { resolve = yes; });
+  f.handle(owner, { type: "screenShareSignal", streamId, targetPeerId: "ts-viewer-17", signal: { kind: "close" } });
+  f.coordinator.handleNotification(owner, { name: "notifystreamclientleft", params: { id: "native", clid: "17" } });
+  resolve();
+  await nextTurn();
+  assert.equal(f.list(owner)[0]?.viewerCount, 0);
+  assert.equal(f.messages.filter(({ message }) => message.type === "screenShareViewerLeft").length, 1);
+});

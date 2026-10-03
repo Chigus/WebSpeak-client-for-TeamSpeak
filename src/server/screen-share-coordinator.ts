@@ -257,7 +257,9 @@ export class ScreenShareCoordinator {
         void publisher.tsClient.sendProtocolCommand(buildTeamSpeakCommand("stopstream", {
           id: stream.teamSpeakStreamId,
           reason: "1",
-        })).catch(() => undefined);
+        })).catch((error: unknown) => {
+          this.logger.warn({ streamId: stream.teamSpeakStreamId, err: error instanceof Error ? error.message : String(error) }, "Could not stop native screen publication");
+        });
       }
     }
     const message: ServerMessage = { type: "screenShareStopped", streamId: stream.streamId, reason };
@@ -275,6 +277,7 @@ export class ScreenShareCoordinator {
       void entry.tsClient.sendProtocolCommand(buildTeamSpeakCommand("removeclientfromstream", {
         id: stream.streamId,
         clid: String(entry.tsClient.getClientId()),
+        reason: "1",
       })).catch(() => undefined);
     }
     this.sendToEntry(entry.id, { type: "screenShareLeft", streamId: stream.streamId });
@@ -330,11 +333,20 @@ export class ScreenShareCoordinator {
         void publisher.tsClient.sendProtocolCommand(buildTeamSpeakCommand("removeclientfromstream", {
           id: stream.teamSpeakStreamId,
           clid: String(viewerClid),
-        })).catch(() => undefined);
-        stream.nativeViewerClids.delete(viewerClid);
-        stream.viewerCount = this.screenShareViewerCount(stream);
-        this.sendToEntry(entry.id, { type: "screenShareViewerLeft", streamId: stream.streamId, viewerPeerId: targetPeerId });
-        this.broadcastScreenMessage(stream, this.screenShareViewerCountMessage(stream));
+          reason: "1",
+        })).then(() => {
+          if (this.entries.get(entry.id) !== entry
+            || this.screenStreams.get(screenStreamKey(stream.targetKey, stream.streamId)) !== stream
+            || !stream.nativeViewerClids.delete(viewerClid)) return;
+          // The native notification may already have removed this viewer.
+          stream.viewerCount = this.screenShareViewerCount(stream);
+          this.sendToEntry(entry.id, { type: "screenShareViewerLeft", streamId: stream.streamId, viewerPeerId: targetPeerId });
+          this.broadcastScreenMessage(stream, this.screenShareViewerCountMessage(stream));
+        }).catch((error: unknown) => {
+          if (this.entries.get(entry.id) !== entry
+            || this.screenStreams.get(screenStreamKey(stream.targetKey, stream.streamId)) !== stream) return;
+          sendJson({ type: "screenShareError", code: "SCREEN_SHARE_SIGNAL_FAILED", message: error instanceof Error ? error.message : "无法移除 TeamSpeak 观看者" });
+        });
         return;
       }
       if (signal.kind === "answer") {

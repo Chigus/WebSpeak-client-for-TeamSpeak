@@ -439,8 +439,25 @@ export class TSClient extends EventEmitter {
    * assembled by the trusted server-side stream adapter, never by the browser.
    */
   async sendProtocolCommand(command: string): Promise<void> {
-    if (!this.client || !this.connected) throw new Error("TeamSpeak session is not ready");
-    await this.client.sendCommandNoWait(command);
+    const client = this.client;
+    const generation = this.connectionGeneration;
+    const isCurrent = () => client !== null && this.client === client && this.connected && this.connectionGeneration === generation;
+    const cleanup = /^(?:stopstream|removeclientfromstream)(?:\s|$)/.test(command);
+    for (let attempt = 0; ; attempt++) {
+      if (!isCurrent()) throw new Error("TeamSpeak session is not ready");
+      try {
+        // Stream lifecycle callers need the server's acknowledgement, not
+        // merely confirmation that the command was handed to the transport.
+        await client!.execCommand(command);
+        if (!isCurrent()) throw new Error("TeamSpeak session changed while sending stream command");
+        return;
+      } catch (error: unknown) {
+        if (!cleanup || !isCurrent() || attempt >= 2 || normalizeTeamSpeakError(error).code !== "flooding") throw error;
+        // Only retry an explicit refusal of cleanup. Never replay offers or
+        // ICE candidates, and never carry an old cleanup into a new connection.
+        await new Promise<void>(resolve => setTimeout(resolve, (attempt + 1) * 4000));
+      }
+    }
   }
 
   getIdentityString(): string {

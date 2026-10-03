@@ -39,6 +39,59 @@ function fixture() {
   return { client, sdk, state };
 }
 
+test("stream commands wait for server acknowledgement and propagate refusals", async () => {
+  const f = fixture();
+  const ack = deferred<void>();
+  f.sdk.inputUpdate = () => ack.promise;
+  let completed = false;
+  const pending = f.client.sendProtocolCommand("setupstream name=Test").then(() => { completed = true; });
+  await nextTurn();
+  assert.equal(completed, false);
+  ack.resolve();
+  await pending;
+  f.sdk.inputUpdate = async () => { throw new Error("missing required parameter"); };
+  await assert.rejects(f.client.sendProtocolCommand("removeclientfromstream id=test"), /missing required parameter/);
+});
+
+test("stream cleanup flood retries back off and stop after two retries", async t => {
+  const f = fixture();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const flooding = new Error("TeamSpeak server error: client is flooding (id=524)");
+  f.sdk.inputUpdate = async () => { throw flooding; };
+  const pending = assert.rejects(f.client.sendProtocolCommand("stopstream id=test reason=1"), error => error === flooding);
+  await nextTurn();
+  t.mock.timers.tick(3999);
+  await nextTurn();
+  assert.equal(f.sdk.inputCommands.length, 1);
+  t.mock.timers.tick(1);
+  await nextTurn();
+  assert.equal(f.sdk.inputCommands.length, 2);
+  t.mock.timers.tick(8000);
+  await pending;
+  assert.equal(f.sdk.inputCommands.length, 3);
+});
+
+test("stream signaling flood refusals are not replayed", async () => {
+  const f = fixture();
+  f.sdk.inputUpdate = async () => { throw new Error("TeamSpeak server error: client is flooding (id=524)"); };
+  await assert.rejects(f.client.sendProtocolCommand("streamsignaling id=test clid=2 json=payload"), /flooding/);
+  assert.equal(f.sdk.inputCommands.length, 1);
+});
+
+test("stream cleanup retries cannot reach a replacement connection", async t => {
+  const f = fixture();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  f.sdk.inputUpdate = async () => { throw new Error("TeamSpeak server error: client is flooding (id=524)"); };
+  const pending = assert.rejects(f.client.sendProtocolCommand("removeclientfromstream id=test clid=2 reason=1"), /not ready/);
+  await nextTurn();
+  await f.client.disconnect();
+  f.state.client = f.sdk;
+  f.state.connected = true;
+  t.mock.timers.tick(4000);
+  await pending;
+  assert.equal(f.sdk.inputCommands.length, 1);
+});
+
 test("accompaniment remains audible with the microphone muted and stopping restores mute", async () => {
   const f = fixture();
   await f.client.setInputMuted(true);
