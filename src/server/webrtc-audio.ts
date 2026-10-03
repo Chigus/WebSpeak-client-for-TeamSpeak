@@ -4,6 +4,7 @@ import {
   RtpHeader,
   RtpPacket,
   RTCPeerConnection,
+  useOPUS,
 } from "werift";
 import type { Logger as LoggerType } from "../logger.js";
 import type { TSVoiceData } from "./ts-client.js";
@@ -142,6 +143,9 @@ export class WebRtcAudioSession {
     const iceAdditionalHostAddresses = options.publicHost ? [options.publicHost] : undefined;
     const udpPortRange = options.udpPortRange ?? WEBRTC_UDP_PORT_RANGE;
     this.peer = new RTCPeerConnection({
+      // Both audio routes carry Opus; accepting PCMU would label Opus output
+      // as another codec and silently discard the peer's incoming audio.
+      codecs: { audio: [useOPUS()] },
       iceServers: [],
       iceUseIpv4: true,
       iceUseIpv6: false,
@@ -209,10 +213,16 @@ export class WebRtcAudioSession {
 
   async createAnswer(offer: WebRtcSessionDescription): Promise<WebRtcSessionDescription> {
     if (this.closed) throw new Error("WebRTC session is closed");
-    this.setOpusPayloadTypes(offer.sdp);
     await this.peer.setRemoteDescription(offer);
     const transceiver = this.peer.getTransceivers().find((candidate) => candidate.kind === "audio");
-    if (transceiver) await transceiver.sender.replaceTrack(this.outgoingTrack);
+    const opus = transceiver?.codecs.filter(codec => codec.mimeType.toLowerCase() === "audio/opus" && codec.clockRate === AUDIO_SAMPLE_RATE) ?? [];
+    if (!transceiver || !opus.length) throw new Error("WebRTC offer did not negotiate Opus audio");
+    // Use negotiated audio codecs, not rtpmap lines from unrelated media or
+    // a guessed payload type when the offer contains no usable audio.
+    this.opusPayloadTypes.clear();
+    for (const codec of opus) this.opusPayloadTypes.add(codec.payloadType);
+    this.outgoingPayloadType = opus[0]!.payloadType;
+    await transceiver.sender.replaceTrack(this.outgoingTrack);
     const answer = await this.peer.createAnswer();
     await this.peer.setLocalDescription(answer);
     const description = this.peer.localDescription;
@@ -447,14 +457,4 @@ export class WebRtcAudioSession {
     return count;
   }
 
-  private setOpusPayloadTypes(sdp: string): void {
-    this.opusPayloadTypes.clear();
-    for (const match of sdp.matchAll(/^a=rtpmap:(\d+)\s+opus\/48000(?:\/\d+)?/gim)) {
-      const payloadType = Number(match[1]);
-      if (!Number.isInteger(payloadType) || payloadType < 0 || payloadType > 127) continue;
-      this.opusPayloadTypes.add(payloadType);
-      this.outgoingPayloadType = payloadType;
-    }
-    if (!this.opusPayloadTypes.size) this.opusPayloadTypes.add(DEFAULT_WEBRTC_OPUS_PAYLOAD_TYPE);
-  }
 }

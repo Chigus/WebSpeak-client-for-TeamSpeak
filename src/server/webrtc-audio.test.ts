@@ -1,9 +1,38 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import pino from "pino";
-import type { RtpPacket } from "werift";
+import { RTCPeerConnection, useOPUS, usePCMU, type RtpPacket } from "werift";
 import { OpusEncoder } from "./opus-codec.js";
 import { WebRtcAudioSession } from "./webrtc-audio.js";
+
+test("WebRTC rejects an offer without negotiated audio instead of returning an empty answer", async t => {
+  const session = new WebRtcAudioSession({ connectionId: "invalid-offer", logger: pino({ enabled: false }), onVoiceFrame() {}, onVoiceActivity() {} });
+  t.after(() => session.close());
+  await assert.rejects(session.createAnswer({ type: "offer", sdp: "invalid sdp" }), /did not negotiate Opus audio/);
+});
+
+for (const scenario of ["PCMU only", "Opus only", "PCMU before Opus"] as const) {
+  test(`WebRTC negotiates only supported audio with ${scenario}`, async t => {
+    const codecs = scenario === "PCMU only" ? [usePCMU()]
+      : scenario === "Opus only" ? [useOPUS({ payloadType: 109 })]
+      : [usePCMU(), useOPUS({ payloadType: 109 })];
+    const source = new RTCPeerConnection({ iceServers: [], codecs: { audio: codecs } });
+    const session = new WebRtcAudioSession({ connectionId: scenario, logger: pino({ enabled: false }), onVoiceFrame() {}, onVoiceActivity() {} });
+    t.after(async () => { await session.close(); await source.close(); });
+    source.addTransceiver("audio", { direction: "sendrecv" });
+    const offer = await source.createOffer();
+    if (scenario === "PCMU only") {
+      await assert.rejects(session.createAnswer({ type: "offer", sdp: offer.sdp }));
+      return;
+    }
+    const answer = await session.createAnswer({ type: "offer", sdp: offer.sdp });
+    assert.equal(answer.type, "answer");
+    assert.match(answer.sdp, /a=rtpmap:109 opus\/48000\/2/i);
+    assert.doesNotMatch(answer.sdp, /PCMU/i);
+    const audio = session.peer.getTransceivers().find(transceiver => transceiver.kind === "audio")!;
+    assert.deepEqual(audio.codecs.map(codec => codec.payloadType), [109]);
+  });
+}
 
 function rms(pcm: Buffer): number {
   let energy = 0;
