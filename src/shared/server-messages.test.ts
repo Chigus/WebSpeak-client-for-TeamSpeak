@@ -8,6 +8,8 @@ const stream = {
 };
 const event = { id: "event-1", kind: "joined", message: "Member joined", timestamp: 1_000 };
 const samples: Record<ServerMessage["type"], ServerMessage> = {
+  peerVoiceRoster: { type: "peerVoiceRoster", selfPeerId: "self", limited: false, peers: [{ peerId: "peer", clientId: 2 }] },
+  peerVoiceSignal: { type: "peerVoiceSignal", fromPeerId: "peer", connectionId: "connection", signal: { kind: "close" } },
   connected: { type: "connected", tsClientId: 1, members: [{ id: 1, nickname: "Owner" }], serverEventLog: [event] },
   memberEnter: { type: "memberEnter", id: 2, nickname: "Visitor", uid: "uid-2", isSelf: false },
   memberLeave: { type: "memberLeave", id: 2 },

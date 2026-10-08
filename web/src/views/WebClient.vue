@@ -773,8 +773,14 @@ const {
   chatMessages,
   serverEvents,
   pokeNotifications,
+  peerVoiceEnabled, peerVoiceAvailable, peerVoiceSupported, peerVoiceStatus, peerVoiceConnectedPeers, setPeerVoiceEnabled,
   microphoneMuted,
   noiseSuppressionEnabled,
+  noiseSuppressionLevel,
+  receiveNoiseSuppressionEnabled,
+  receiveNoiseSuppressionLevel,
+  microphoneNoiseSuppressionState,
+  receiveNoiseSuppressionState,
   stereoInputEnabled,
   inputVolume,
   outputVolume,
@@ -802,6 +808,9 @@ const {
   setVolume,
   setInputVolume,
   setNoiseSuppressionEnabled,
+  setNoiseSuppressionLevel,
+  setReceiveNoiseSuppressionEnabled,
+  setReceiveNoiseSuppressionLevel,
   setStereoInputEnabled,
   setOutputVolume,
   toggleOutputMute,
@@ -963,6 +972,13 @@ const skinHomeFeatures = computed(() => {
 const audioControls = useWebClientAudioControls({
   settingsOpen,
   microphoneMuted,
+  noiseSuppressionEnabled,
+  noiseSuppressionLevel,
+  receiveNoiseSuppressionEnabled,
+  receiveNoiseSuppressionLevel,
+  microphoneNoiseSuppressionState,
+  receiveNoiseSuppressionState,
+  stereoInputEnabled,
   inputVolume,
   voxThreshold,
   notificationVolume,
@@ -974,6 +990,9 @@ const audioControls = useWebClientAudioControls({
   prepareInputDevices,
   setInputVolume,
   setNoiseSuppressionEnabled,
+  setNoiseSuppressionLevel,
+  setReceiveNoiseSuppressionEnabled,
+  setReceiveNoiseSuppressionLevel,
   setStereoInputEnabled,
   setOutputVolume,
   setVoxThreshold,
@@ -998,8 +1017,13 @@ function reconnectMobile(): void {
   reconnectNow();
 }
 const { toggleMicrophone, stopWhisperTalk } = audioControls;
-const audioDockState = { microphoneMuted, inputVolume, outputVolume, outputMuted, noiseSuppressionEnabled, stereoInputEnabled, accompanimentActive };
+const audioDockState = {
+  microphoneMuted, inputVolume, outputVolume, outputMuted,
+  noiseSuppressionEnabled, noiseSuppressionLevel, receiveNoiseSuppressionEnabled, receiveNoiseSuppressionLevel,
+  stereoInputEnabled, accompanimentActive,
+};
 const audioSettingsState = {
+  peerVoiceEnabled, peerVoiceAvailable, peerVoiceSupported, peerVoiceStatus, peerVoiceConnectedPeers, setPeerVoiceEnabled,
   inputDevices,
   outputDevices,
   selectedInputDeviceId,
@@ -1010,6 +1034,9 @@ const audioSettingsState = {
   audioContextState,
   microphoneMuted,
   noiseSuppressionEnabled,
+  noiseSuppressionLevel,
+  receiveNoiseSuppressionEnabled,
+  receiveNoiseSuppressionLevel,
   stereoInputEnabled,
   inputVolume,
   outputVolume,

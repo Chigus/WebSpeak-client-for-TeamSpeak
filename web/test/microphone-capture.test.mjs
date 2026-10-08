@@ -206,6 +206,32 @@ test("capture factory preserves stereo and capture ownership", async t => {
   t.after(() => vite.close());
   const { createMicrophoneCaptureFactory } = await vite.ssrLoadModule("/src/voice/microphone-capture.ts");
 
+  await t.test("input model readiness and live grade changes retain the current microphone graph", async () => {
+    const context = makeContext();
+    const stream = makeStream({ channelCount: 1 });
+    const statuses = [], levels = [];
+    let onState, destroyed = 0;
+    const factory = createMicrophoneCaptureFactory({ createNoiseSuppression(ctx, settings) {
+      onState = settings.onState;
+      onState("loading");
+      assert.equal(settings.level, "heavy");
+      return { input: new AudioNodeStub(), output: new AudioNodeStub(), ready: Promise.resolve(true),
+        setLevel(level) { levels.push(level); }, destroy() { destroyed++; } };
+    } });
+    const { options } = captureOptions(context, stream, { noiseSuppression: true, noiseSuppressionLevel: "heavy", onNoiseSuppressionState: state => statuses.push(state) });
+    const capture = await factory.prepare(options);
+    assert.equal(capture.processing.rnnoise, false);
+    onState("active");
+    assert.equal(capture.processing.rnnoise, true);
+    capture.setNoiseSuppressionLevel("light"); capture.setNoiseSuppressionLevel("medium");
+    assert.deepEqual(levels, ["light", "medium"]);
+    assert.equal(context.sources.length, 1);
+    assert.equal(stream.track.readyState, "live");
+    capture.dispose(); onState("failed");
+    assert.equal(destroyed, 1);
+    assert.deepEqual(statuses, ["loading", "active"]);
+  });
+
   await t.test("stereo bypasses RNNoise, reports source metadata, and meters the gained capture path", async () => {
     const context = makeContext();
     const stream = makeStream({ channelCount: 2, sampleRate: 44100, echoCancellation: false, noiseSuppression: false, autoGainControl: false });

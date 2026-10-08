@@ -6,7 +6,7 @@ import type { ServerMessage } from "../shared/server-messages.js";
 import type { TSVoiceData } from "./ts-client.js";
 
 function fixture(createStereoEncoder?: () => VoiceEncoder) {
-  const state = { current: true, ready: true, now: 0, targets: null as number[] | null, disposed: 0,
+  const state = { directRoute: "normal" as "normal" | "fallback" | "suppress", current: true, ready: true, now: 0, targets: null as number[] | null, disposed: 0,
     stereoCreated: 0, stereoDisposed: 0,
     peer: null as { pushTeamSpeakVoice(data: TSVoiceData): void } | null };
   const audio = createAudioFlowStats();
@@ -29,6 +29,7 @@ function fixture(createStereoEncoder?: () => VoiceEncoder) {
     dispose() { state.stereoDisposed++; },
   };
   const transport = new SessionAudioTransport({
+    directVoice: () => state.directRoute,
     audio, socket, client, isCurrent: () => state.current, isReady: () => state.ready,
     selfId: () => 1, peer: () => state.peer, whisperTargets: () => state.targets,
     sendJson: message => { notices.push(message); },
@@ -37,6 +38,21 @@ function fixture(createStereoEncoder?: () => VoiceEncoder) {
   const remote = (clientId = 513) => ({ clientId, codec: 4, data: Buffer.from([11, 12, 13]) });
   return { transport, audio, state, socket, client, encoder, stereoEncoder, packets, encoded, stereoEncoded, forwarded, notices, remote };
 }
+
+test("direct receive lease suppresses duplicates while fallback flags retain the exact Opus payload", () => {
+  const f = fixture();
+  f.state.directRoute = "fallback";
+  f.transport.receiveTeamSpeak(f.remote());
+  assert.equal(f.packets[0][0], 4 | 0x80);
+  assert.equal(f.packets[0].readUInt16BE(1), 513);
+  assert.deepEqual(f.packets[0].subarray(3), f.remote().data);
+  f.state.directRoute = "suppress";
+  f.transport.receiveTeamSpeak(f.remote());
+  assert.equal(f.packets.length, 1);
+  f.state.directRoute = "normal";
+  f.transport.receiveTeamSpeak(f.remote());
+  assert.equal(f.packets[1][0], 4);
+});
 
 test("PCM framing preserves codec, whisper routing and timing counters", () => {
   const f = fixture();

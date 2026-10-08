@@ -25,6 +25,7 @@ export interface SessionAudioOptions {
   peer(): Pick<WebRtcAudioSession, "pushTeamSpeakVoice"> | null;
   whisperTargets(): readonly number[] | null;
   sendJson(message: ServerMessage): void;
+  directVoice?(clientId: number): "normal" | "fallback" | "suppress";
   createStereoEncoder?(): VoiceEncoder;
 }
 
@@ -138,11 +139,13 @@ export class SessionAudioTransport {
       catch { stats.egressDroppedFrames++; }
       return;
     }
+    const directRoute = this.options.directVoice?.(data.clientId) ?? "normal";
+    if (directRoute === "suppress") return;
     const bufferedBytes = this.options.socket.bufferedAmount;
     stats.egressPeakBufferedBytes = Math.max(stats.egressPeakBufferedBytes, bufferedBytes);
     if (bufferedBytes > MAX_BUFFERED_BYTES) { stats.egressDroppedFrames++; return; }
     const packet = Buffer.allocUnsafe(3 + data.data.length);
-    packet[0] = data.codec;
+    packet[0] = data.codec | (directRoute === "fallback" ? 0x80 : 0);
     packet.writeUInt16BE(data.clientId, 1);
     data.data.copy(packet, 3);
     try {

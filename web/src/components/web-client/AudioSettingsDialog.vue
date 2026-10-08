@@ -94,18 +94,41 @@
                 />
                 {{ microphoneMuted ? t("unmuteMic") : t("muteMic") }}</button
               ></div
-            ><label
-              v-if="isMobileViewport"
-              class="mobile-noise-toggle"
-              ><span
-                ><strong>{{ t("noiseSuppression") }}</strong
-                ><small>{{ t("noiseSuppressionHint") }}</small></span
-              ><input
-                type="checkbox"
-                :checked="!stereoInputEnabled && noiseSuppressionEnabled"
-                :disabled="stereoInputEnabled"
-                :aria-label="t('noiseSuppression')"
-                @change="onNoiseSuppressionToggle" /></label
+            ><div class="noise-settings">
+              <label class="mobile-noise-toggle noise-settings-toggle">
+                <span>
+                  <strong>{{ t("inputNoiseSuppression") }}</strong>
+                  <small>{{ t("inputNoiseSuppressionHint") }}</small>
+                </span>
+                <input
+                  type="checkbox"
+                  :checked="!stereoInputEnabled && noiseSuppressionEnabled"
+                  :disabled="stereoInputEnabled"
+                  :aria-label="t('inputNoiseSuppression')"
+                  aria-describedby="input-noise-status"
+                  @change="onNoiseSuppressionToggle"
+                />
+              </label>
+              <label class="settings-label" for="input-noise-level">{{ t("noiseSuppressionLevel") }}</label>
+              <select
+                id="input-noise-level"
+                class="settings-select noise-level-select"
+                :value="noiseSuppressionLevel"
+                :disabled="stereoInputEnabled || !noiseSuppressionEnabled"
+                :aria-label="t('inputNoiseSuppressionLevel')"
+                aria-describedby="input-noise-level-hint"
+                @change="onNoiseSuppressionLevelChange"
+              >
+                <option value="light">{{ t("noiseSuppressionLight") }}</option>
+                <option value="medium">{{ t("noiseSuppressionMedium") }}</option>
+                <option value="heavy">{{ t("noiseSuppressionHeavy") }}</option>
+              </select>
+              <p id="input-noise-level-hint" class="settings-hint">{{ t(noiseSuppressionLevelHintKey) }}</p>
+              <p id="input-noise-status" class="noise-settings-status" :class="{ 'settings-error': inputNoiseSuppressionStatusKey === 'noiseSuppressionFailed' }" role="status">
+                {{ t(inputNoiseSuppressionStatusKey) }}
+                <span v-if="inputNoiseSuppressionStatusKey === 'noiseSuppressionFailed'">{{ t("noiseSuppressionFailedHint") }}</span>
+              </p>
+            </div
             ><template v-if="isMobileViewport"
               ><div class="settings-range-row"
                 ><label class="settings-label">{{ t("inputVolume") }}</label
@@ -211,6 +234,40 @@
                 name="info"
                 :size="16"
               /><span>{{ t("outputDeviceUnsupported") }}</span></p
+            ><div class="noise-settings">
+              <label class="mobile-noise-toggle noise-settings-toggle">
+                <span>
+                  <strong>{{ t("receiveNoiseSuppression") }}</strong>
+                  <small>{{ t("receiveNoiseSuppressionHint") }}</small>
+                </span>
+                <input
+                  type="checkbox"
+                  :checked="receiveNoiseSuppressionEnabled"
+                  :aria-label="t('receiveNoiseSuppression')"
+                  aria-describedby="receive-noise-status"
+                  @change="onReceiveNoiseSuppressionToggle"
+                />
+              </label>
+              <label class="settings-label" for="receive-noise-level">{{ t("noiseSuppressionLevel") }}</label>
+              <select
+                id="receive-noise-level"
+                class="settings-select noise-level-select"
+                :value="receiveNoiseSuppressionLevel"
+                :disabled="!receiveNoiseSuppressionEnabled"
+                :aria-label="t('receiveNoiseSuppressionLevel')"
+                aria-describedby="receive-noise-level-hint"
+                @change="onReceiveNoiseSuppressionLevelChange"
+              >
+                <option value="light">{{ t("noiseSuppressionLight") }}</option>
+                <option value="medium">{{ t("noiseSuppressionMedium") }}</option>
+                <option value="heavy">{{ t("noiseSuppressionHeavy") }}</option>
+              </select>
+              <p id="receive-noise-level-hint" class="settings-hint">{{ t(receiveNoiseSuppressionLevelHintKey) }}</p>
+              <p id="receive-noise-status" class="noise-settings-status" :class="{ 'settings-error': receiveNoiseSuppressionStatusKey === 'noiseSuppressionFailed' }" role="status">
+                {{ t(receiveNoiseSuppressionStatusKey) }}
+                <span v-if="receiveNoiseSuppressionStatusKey === 'noiseSuppressionFailed'">{{ t("noiseSuppressionFailedHint") }}</span>
+              </p>
+            </div
             ><template v-if="isMobileViewport"
               ><div class="settings-range-row"
                 ><label class="settings-label">{{ t("speakers") }}</label
@@ -251,6 +308,16 @@
               v-if="microphoneError"
               class="settings-error"
               >{{ localizedMessage(microphoneError) }}</p
+            ><div class="noise-settings">
+              <label class="mobile-noise-toggle noise-settings-toggle">
+                <span><strong>{{ t("peerVoice") }}</strong><small>{{ t("peerVoiceHint") }}</small></span>
+                <input type="checkbox" :checked="peerVoiceEnabled" :disabled="!peerVoiceAvailable || !peerVoiceSupported"
+                  :aria-label="t('peerVoice')" aria-describedby="peer-voice-hint"
+                  @change="setPeerVoiceEnabled(($event.target as HTMLInputElement).checked)" />
+              </label>
+              <p id="peer-voice-hint" class="settings-hint">{{ t("peerVoiceCost") }}</p>
+              <p class="noise-settings-status" role="status">{{ t(`peerVoice_${peerVoiceStatus}`, { count: peerVoiceConnectedPeers }) }}</p>
+            </div
             ><div class="mode-note"
               ><Icon
                 name="shield"
@@ -278,6 +345,7 @@ import type { useVoiceWebSocket } from "../../composables/useVoiceWebSocket.js";
 import type { useWebClientAudioControls } from "../../composables/useWebClientAudioControls.js";
 
 type AudioSettingsState = Pick<ReturnType<typeof useVoiceWebSocket>,
+  | "peerVoiceEnabled" | "peerVoiceAvailable" | "peerVoiceSupported" | "peerVoiceStatus" | "peerVoiceConnectedPeers" | "setPeerVoiceEnabled"
   | "inputDevices"
   | "outputDevices"
   | "selectedInputDeviceId"
@@ -287,6 +355,9 @@ type AudioSettingsState = Pick<ReturnType<typeof useVoiceWebSocket>,
   | "audioContextState"
   | "microphoneMuted"
   | "noiseSuppressionEnabled"
+  | "noiseSuppressionLevel"
+  | "receiveNoiseSuppressionEnabled"
+  | "receiveNoiseSuppressionLevel"
   | "stereoInputEnabled"
   | "microphoneProcessing"
   | "inputVolume"
@@ -303,6 +374,13 @@ type AudioSettingsControls = Pick<ReturnType<typeof useWebClientAudioControls>,
   | "settingsError"
   | "onInputVolume"
   | "onNoiseSuppressionToggle"
+  | "onNoiseSuppressionLevelChange"
+  | "onReceiveNoiseSuppressionToggle"
+  | "onReceiveNoiseSuppressionLevelChange"
+  | "inputNoiseSuppressionStatusKey"
+  | "receiveNoiseSuppressionStatusKey"
+  | "noiseSuppressionLevelHintKey"
+  | "receiveNoiseSuppressionLevelHintKey"
   | "onStereoInputChange"
   | "onOutputVolume"
   | "onVoxThreshold"
@@ -329,6 +407,7 @@ const { onDialogKeydown } = useDialogFocus(dialog, () => emit("close"));
 
 // The page owns the stable voice refs and audio controller; this dialog only presents them.
 const {
+  peerVoiceEnabled, peerVoiceAvailable, peerVoiceSupported, peerVoiceStatus, peerVoiceConnectedPeers, setPeerVoiceEnabled,
   inputDevices,
   outputDevices,
   selectedInputDeviceId,
@@ -338,6 +417,9 @@ const {
   audioContextState,
   microphoneMuted,
   noiseSuppressionEnabled,
+  noiseSuppressionLevel,
+  receiveNoiseSuppressionEnabled,
+  receiveNoiseSuppressionLevel,
   stereoInputEnabled,
   microphoneProcessing,
   inputVolume,
@@ -354,6 +436,13 @@ const {
   settingsError: audioSettingsError,
   onInputVolume,
   onNoiseSuppressionToggle,
+  onNoiseSuppressionLevelChange,
+  onReceiveNoiseSuppressionToggle,
+  onReceiveNoiseSuppressionLevelChange,
+  inputNoiseSuppressionStatusKey,
+  receiveNoiseSuppressionStatusKey,
+  noiseSuppressionLevelHintKey,
+  receiveNoiseSuppressionLevelHintKey,
   onStereoInputChange,
   onOutputVolume,
   onVoxThreshold,
@@ -366,3 +455,36 @@ const {
   toggleMicrophone,
 } = props.controls;
 </script>
+
+<style scoped>
+.noise-settings {
+  margin-block: 20px;
+}
+
+.noise-settings-toggle {
+  min-height: 44px;
+}
+
+.noise-settings-toggle input:disabled,
+.noise-level-select:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.noise-settings .noise-level-select {
+  margin-bottom: 8px;
+}
+
+.noise-settings-status {
+  margin: 8px 0 0;
+  color: var(--text-secondary, var(--text-primary));
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.noise-settings-status span {
+  display: block;
+  margin-top: 4px;
+}
+</style>

@@ -1,3 +1,5 @@
+import { PeerVoiceCoordinator } from "./peer-voice-coordinator.js";
+import { parsePeerVoiceClientMessage } from "../shared/peer-voice.js";
 import { SessionAudioTransport } from "./session-audio.js";
 import { SessionEventCoordinator, type SessionDirectoryState } from "./session-events.js";
 import { ScreenShareCoordinator } from "./screen-share-coordinator.js";
@@ -95,6 +97,7 @@ interface WebClientEntry extends SessionDirectoryState {
 export class VoiceBridge {
   private readonly sessionManager = new SessionManager();
   private readonly entries = new Map<string, WebClientEntry>();
+  private readonly peerVoice: PeerVoiceCoordinator;
   private readonly screenShares: ScreenShareCoordinator;
   private readonly identityLeases = new IdentityLeaseStore();
   private wss: WebSocketServer | null = null;
@@ -108,6 +111,10 @@ export class VoiceBridge {
     private readonly dependencies: VoiceBridgeDependencies = {},
   ) {
     this.logger = logger.child({ component: "voice-bridge" });
+    this.peerVoice = new PeerVoiceCoordinator(this.entries, (entryId, message) => {
+      const entry = this.entries.get(entryId);
+      if (entry?.ws.readyState === WebSocket.OPEN && entry.session.state === "connected") entry.ws.send(JSON.stringify(message));
+    });
     this.screenShares = new ScreenShareCoordinator(this.entries, (entryId, message) => {
       const entry = this.entries.get(entryId);
       if (entry?.ws.readyState === WebSocket.OPEN) entry.ws.send(JSON.stringify(message));
@@ -230,6 +237,7 @@ export class VoiceBridge {
         entry.audioTransport = new SessionAudioTransport({
           audio: entry.audio, socket: ws, client: tsClient,
           isCurrent: () => this.entries.get(entryId) === entry,
+          directVoice: clientId => this.peerVoice.route(entryId, clientId),
           isReady: () => tsReady && session.state === "connected",
           selfId: () => entry!.events?.selfId ?? 0,
           peer: () => entry!.webrtc,
@@ -286,6 +294,7 @@ export class VoiceBridge {
           serverEventLog: entry!.eventLog,
           whisperTargetIds: [...entry!.whisperTargetIds],
           whisperActive: entry!.whisperActive,
+          peerVoiceAvailable: true,
           webrtcAvailable: this.getWebRtcOptions()?.enabled === true,
           webRtcStunServer: this.getWebRtcOptions()?.stunServer ?? "",
           screenShareIceServers: this.getScreenShareIceServers(),
@@ -299,6 +308,7 @@ export class VoiceBridge {
 
       const resetDirectoryForReconnect = () => {
         tsReady = false;
+        this.peerVoice.remove(entryId);
         events.reset();
         void this.stopWebRtc(entry!);
         initialStateSent = false;
@@ -409,9 +419,17 @@ export class VoiceBridge {
         sendJson, addEvent: addServerEvent, onDirectoryReady: sendInitialState,
         onClientLeave: id => {
           this.screenShares.onClientLeave(entry!, id);
+          this.peerVoice.refresh();
           entry!.webrtc?.setMemberVolume(id, 1);
         },
-        onClientMove: (id, channelId) => this.screenShares.onClientMove(entry!, id, channelId),
+        onClientMove: (id, channelId) => {
+          this.screenShares.onClientMove(entry!, id, channelId);
+          // Retire the moving participant immediately, even before SDK directory convergence.
+          for (const candidate of this.entries.values()) {
+            if (teamSpeakTargetKey(candidate.target) === teamSpeakTargetKey(entry!.target) && candidate.tsClient.getClientId() === id) this.peerVoice.remove(candidate.id);
+          }
+          this.peerVoice.refresh();
+        },
         onNotification: notification => this.screenShares.handleNotification(entry!, notification),
         onVoice: data => entry!.audioTransport?.receiveTeamSpeak(data),
         onAvatarError: (clientId, uid, error) => this.logger.debug({
@@ -449,6 +467,11 @@ export class VoiceBridge {
         }
 
         const rawMessage = typeof data === "string" ? data : data.toString("utf-8");
+        const peerVoiceMessage = parsePeerVoiceClientMessage(rawMessage);
+        if (peerVoiceMessage) {
+          if (tsReady && session.state === "connected" && !entry!.webrtc) this.peerVoice.handle(entry!, peerVoiceMessage);
+          return;
+        }
         const webRtcMessage = parseWebRtcClientMessage(rawMessage);
         if (webRtcMessage?.type === "webrtcOffer") {
           if (this.getWebRtcOptions()?.enabled !== true) {
@@ -584,6 +607,7 @@ export class VoiceBridge {
   }
 
   private async cleanupEntry(entry: WebClientEntry, reason: SessionTeardownReason): Promise<void> {
+    this.peerVoice.remove(entry.id);
     this.screenShares.removePeer(entry.id);
     if (this.entries.get(entry.id) === entry) this.entries.delete(entry.id);
     entry.events?.close();

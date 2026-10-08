@@ -1,8 +1,16 @@
 import { computed, onScopeDispose, ref, watch, type Ref } from "vue";
+import type { NoiseSuppressionLevel, NoiseSuppressionState } from "../voice/noise-suppression.js";
 
 interface UseWebClientAudioControlsOptions {
   settingsOpen: Ref<boolean>;
   microphoneMuted: Readonly<Ref<boolean>>;
+  noiseSuppressionEnabled: Readonly<Ref<boolean>>;
+  noiseSuppressionLevel: Readonly<Ref<NoiseSuppressionLevel>>;
+  receiveNoiseSuppressionEnabled: Readonly<Ref<boolean>>;
+  receiveNoiseSuppressionLevel: Readonly<Ref<NoiseSuppressionLevel>>;
+  microphoneNoiseSuppressionState: Readonly<Ref<NoiseSuppressionState | "off">>;
+  receiveNoiseSuppressionState: Readonly<Ref<NoiseSuppressionState | "off">>;
+  stereoInputEnabled: Readonly<Ref<boolean>>;
   inputVolume: Readonly<Ref<number>>;
   voxThreshold: Readonly<Ref<number>>;
   notificationVolume: Readonly<Ref<number>>;
@@ -14,6 +22,9 @@ interface UseWebClientAudioControlsOptions {
   prepareInputDevices: () => Promise<void>;
   setInputVolume: (value: number) => void;
   setNoiseSuppressionEnabled: (enabled: boolean) => Promise<void>;
+  setNoiseSuppressionLevel: (level: NoiseSuppressionLevel) => Promise<void>;
+  setReceiveNoiseSuppressionEnabled: (enabled: boolean) => Promise<void>;
+  setReceiveNoiseSuppressionLevel: (level: NoiseSuppressionLevel) => Promise<void>;
   setStereoInputEnabled: (enabled: boolean) => Promise<void>;
   setOutputVolume: (value: number) => void;
   setVoxThreshold: (value: number) => void;
@@ -34,6 +45,13 @@ interface UseWebClientAudioControlsOptions {
 export function useWebClientAudioControls({
   settingsOpen,
   microphoneMuted,
+  noiseSuppressionEnabled,
+  noiseSuppressionLevel,
+  receiveNoiseSuppressionEnabled,
+  receiveNoiseSuppressionLevel,
+  microphoneNoiseSuppressionState,
+  receiveNoiseSuppressionState,
+  stereoInputEnabled,
   inputVolume,
   voxThreshold,
   notificationVolume,
@@ -45,6 +63,9 @@ export function useWebClientAudioControls({
   prepareInputDevices,
   setInputVolume,
   setNoiseSuppressionEnabled,
+  setNoiseSuppressionLevel,
+  setReceiveNoiseSuppressionEnabled,
+  setReceiveNoiseSuppressionLevel,
   setStereoInputEnabled,
   setOutputVolume,
   setVoxThreshold,
@@ -64,8 +85,17 @@ export function useWebClientAudioControls({
   const settingsError = ref("");
   const whisperPttActive = ref(false);
   const micMeterBars = computed(() => Math.round(micLevel.value * 24));
+  const inputNoiseSuppressionStatusKey = computed(() => stereoInputEnabled.value
+    ? "noiseSuppressionStereoBypass"
+    : noiseSuppressionStatusKey(noiseSuppressionEnabled.value, microphoneNoiseSuppressionState.value));
+  const receiveNoiseSuppressionStatusKey = computed(() => noiseSuppressionStatusKey(
+    receiveNoiseSuppressionEnabled.value, receiveNoiseSuppressionState.value,
+  ));
+  const noiseSuppressionLevelHintKey = computed(() => levelHintKey(noiseSuppressionLevel.value));
+  const receiveNoiseSuppressionLevelHintKey = computed(() => levelHintKey(receiveNoiseSuppressionLevel.value));
   let settingsGeneration = 0;
   let settingsRequest = 0;
+  let disposed = false;
   let whisperPointer: { id: number; target: HTMLElement } | null = null;
   let whisperKey: string | null = null;
 
@@ -93,8 +123,69 @@ export function useWebClientAudioControls({
     setInputVolume(Number((event.target as HTMLInputElement).value) / 100);
   }
 
-  function onNoiseSuppressionToggle(event: Event): void {
-    void setNoiseSuppressionEnabled((event.target as HTMLInputElement).checked);
+  function noiseSuppressionStatusKey(enabled: boolean, state: NoiseSuppressionState | "off"): string {
+    if (!enabled) return "noiseSuppressionDisabled";
+    if (state === "loading") return "noiseSuppressionLoading";
+    if (state === "active") return "noiseSuppressionActive";
+    if (state === "failed") return "noiseSuppressionFailed";
+    return "noiseSuppressionWaiting";
+  }
+
+  function levelHintKey(level: NoiseSuppressionLevel): string {
+    return level === "heavy" ? "noiseSuppressionHeavyHint"
+      : level === "light" ? "noiseSuppressionLightHint" : "noiseSuppressionMediumHint";
+  }
+
+  function selectedNoiseLevel(event: Event): NoiseSuppressionLevel | null {
+    const value = (event.target as HTMLSelectElement).value;
+    return value === "light" || value === "medium" || value === "heavy" ? value : null;
+  }
+
+  async function changeNoiseSetting(change: () => Promise<void>): Promise<void> {
+    const generation = settingsGeneration;
+    const request = ++settingsRequest;
+    const wasOpen = settingsOpen.value;
+    settingsError.value = "";
+    try {
+      await change();
+    } catch {
+      if (disposed || generation !== settingsGeneration || request !== settingsRequest) return;
+      const message = t("noiseSuppressionChangeFailed");
+      if (wasOpen && settingsOpen.value) settingsError.value = message;
+      else if (!wasOpen && !settingsOpen.value) showToast(message);
+    }
+  }
+
+  async function onNoiseSuppressionToggle(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    if (stereoInputEnabled.value) {
+      input.checked = false;
+      return;
+    }
+    const enabled = input.checked;
+    await changeNoiseSetting(() => setNoiseSuppressionEnabled(enabled));
+    input.checked = !stereoInputEnabled.value && noiseSuppressionEnabled.value;
+  }
+
+  async function onNoiseSuppressionLevelChange(event: Event): Promise<void> {
+    const level = selectedNoiseLevel(event);
+    if (!level || stereoInputEnabled.value) return;
+    await changeNoiseSetting(() => setNoiseSuppressionLevel(level));
+    (event.target as HTMLSelectElement).value = noiseSuppressionLevel.value;
+  }
+
+  async function onReceiveNoiseSuppressionToggle(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const enabled = input.checked;
+    await changeNoiseSetting(() => setReceiveNoiseSuppressionEnabled(enabled));
+    input.checked = receiveNoiseSuppressionEnabled.value;
+  }
+
+  async function onReceiveNoiseSuppressionLevelChange(event: Event): Promise<void> {
+    const level = selectedNoiseLevel(event);
+    if (!level) return;
+    await changeNoiseSetting(() => setReceiveNoiseSuppressionLevel(level));
+    (event.target as HTMLSelectElement).value = receiveNoiseSuppressionLevel.value;
   }
 
   async function onStereoInputChange(event: Event): Promise<void> {
@@ -237,6 +328,7 @@ export function useWebClientAudioControls({
     }
   }, { flush: "sync" });
   onScopeDispose(() => {
+    disposed = true;
     settingsGeneration++;
     stopMicrophoneTest();
     stopWhisperTalk();
@@ -248,6 +340,13 @@ export function useWebClientAudioControls({
     micMeterBars,
     onInputVolume,
     onNoiseSuppressionToggle,
+    onNoiseSuppressionLevelChange,
+    onReceiveNoiseSuppressionToggle,
+    onReceiveNoiseSuppressionLevelChange,
+    inputNoiseSuppressionStatusKey,
+    receiveNoiseSuppressionStatusKey,
+    noiseSuppressionLevelHintKey,
+    receiveNoiseSuppressionLevelHintKey,
     onStereoInputChange,
     onOutputVolume,
     onVoxThreshold,

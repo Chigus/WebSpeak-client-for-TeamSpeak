@@ -1,7 +1,4 @@
-import { RnnoiseWorkletNode, loadRnnoise } from "@sapphi-red/web-noise-suppressor";
-import rnnoiseSimdWasmUrl from "@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?url";
-import rnnoiseWasmUrl from "@sapphi-red/web-noise-suppressor/rnnoise.wasm?url";
-import rnnoiseWorkletUrl from "@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?url";
+import { createNoiseSuppression, type NoiseSuppression, type NoiseSuppressionLevel, type NoiseSuppressionState } from "./noise-suppression.js";
 
 export interface MicrophoneProcessingSettings {
   echoCancellation: boolean | null;
@@ -16,8 +13,10 @@ export interface MicrophoneProcessingSettings {
 export interface MicrophoneCapture {
   processedStream: MediaStream;
   processing: MicrophoneProcessingSettings;
+  readonly noiseSuppressionState: NoiseSuppressionState | "off";
   activate(): void;
   setVolume(value: number): void;
+  setNoiseSuppressionLevel(level: NoiseSuppressionLevel): void;
   stopCapture(): void;
   dispose(): void;
 }
@@ -27,6 +26,8 @@ interface CaptureOptions {
   stream: MediaStream;
   channels?: 1 | 2;
   noiseSuppression: boolean;
+  noiseSuppressionLevel?: NoiseSuppressionLevel;
+  onNoiseSuppressionState?(state: NoiseSuppressionState | "off"): void;
   volume: number;
   signal: AbortSignal;
   assertCurrent(): void;
@@ -35,9 +36,9 @@ interface CaptureOptions {
 
 // Each prepared graph owns its stream and nodes. It cannot publish PCM before
 // activation, and aborting preparation never touches the currently live graph.
-export function createMicrophoneCaptureFactory() {
+export function createMicrophoneCaptureFactory(dependencies: { createNoiseSuppression?: typeof createNoiseSuppression } = {}) {
   const modules = new WeakMap<AudioContext, Map<string, Promise<void>>>();
-  let wasmPromise: Promise<ArrayBuffer> | null = null;
+  const createDenoiser = dependencies.createNoiseSuppression ?? createNoiseSuppression;
   function loadModule(ctx: AudioContext, url: string): Promise<void> {
     let cache = modules.get(ctx);
     if (!cache) { cache = new Map(); modules.set(ctx, cache); }
@@ -57,7 +58,10 @@ export function createMicrophoneCaptureFactory() {
     const { context: ctx, stream, assertCurrent } = options;
     const channels = options.channels ?? 1;
     let source: MediaStreamAudioSourceNode | null = null;
-    let denoiser: RnnoiseWorkletNode | null = null;
+    let denoiser: NoiseSuppression | null = null;
+    let denoiserState: NoiseSuppressionState | "off" = "off";
+    const currentDenoiserState = (): NoiseSuppressionState | "off" => denoiserState;
+    let processing: MicrophoneProcessingSettings | null = null;
     let destination: MediaStreamAudioDestinationNode | null = null;
     let gain: GainNode | null = null;
     let silent: GainNode | null = null;
@@ -66,6 +70,12 @@ export function createMicrophoneCaptureFactory() {
     let active = false;
     let disposed = false;
     const clean = (operation: () => void) => { try { operation(); } catch { /* release the other resources too */ } };
+    function onDenoiserState(state: NoiseSuppressionState | "off") {
+      if (disposed) return;
+      denoiserState = state;
+      if (processing) processing.rnnoise = state === "active";
+      clean(() => options.onNoiseSuppressionState?.(state));
+    }
     function stopCapture() {
       active = false;
       if (worklet) { clean(() => worklet!.port.close()); clean(() => worklet!.disconnect()); }
@@ -78,7 +88,7 @@ export function createMicrophoneCaptureFactory() {
       if (disposed) return;
       disposed = true;
       stopCapture();
-      if (denoiser) { clean(() => denoiser!.destroy()); clean(() => denoiser!.disconnect()); }
+      if (denoiser) clean(() => denoiser!.destroy());
       if (source) clean(() => source!.disconnect());
       if (destination) {
         clean(() => destination!.disconnect());
@@ -104,21 +114,22 @@ export function createMicrophoneCaptureFactory() {
       }
       source = ctx.createMediaStreamSource(stream);
       const supportsWorklet = typeof AudioWorkletNode !== "undefined" && Boolean(ctx.audioWorklet);
-      if (channels === 1 && options.noiseSuppression && supportsWorklet) {
-        try {
-          if (!wasmPromise) wasmPromise = loadRnnoise({ url: rnnoiseWasmUrl, simdUrl: rnnoiseSimdWasmUrl }).catch(error => {
-            wasmPromise = null;
-            throw error;
-          });
-          const [wasmBinary] = await Promise.all([wasmPromise, loadModule(ctx, rnnoiseWorkletUrl)]);
-          assertCurrent();
-          denoiser = new RnnoiseWorkletNode(ctx, { maxChannels: 1, wasmBinary });
-        } catch {
-          assertCurrent(); // RNNoise is optional; cancellation is not a fallback.
+      if (channels === 1 && options.noiseSuppression) {
+        if (!supportsWorklet) onDenoiserState("failed");
+        else {
+          try {
+            denoiser = createDenoiser(ctx, { channels: 1, level: options.noiseSuppressionLevel ?? "medium", onState: onDenoiserState });
+            source.connect(denoiser.input);
+          } catch {
+            if (denoiser) clean(() => denoiser!.destroy());
+            denoiser = null;
+            clean(() => source!.disconnect());
+            onDenoiserState("failed");
+            assertCurrent(); // Optional processing must not swallow cancellation.
+          }
         }
       }
-      const processedSource = denoiser ?? source;
-      if (denoiser) source.connect(denoiser);
+      const processedSource = denoiser?.output ?? source;
       destination = ctx.createMediaStreamDestination();
       destination.channelCount = channels;
       destination.channelCountMode = "explicit";
@@ -185,20 +196,23 @@ export function createMicrophoneCaptureFactory() {
       silent.connect(ctx.destination);
       assertCurrent();
       if (track.readyState !== "live") throw new DOMException("Microphone track ended", "NotReadableError");
-      return {
-        processedStream: destination.stream,
-        processing: {
+      processing = {
           echoCancellation: typeof settings.echoCancellation === "boolean" ? settings.echoCancellation : null,
           noiseSuppression: typeof settings.noiseSuppression === "boolean" ? settings.noiseSuppression : null,
           autoGainControl: typeof settings.autoGainControl === "boolean" ? settings.autoGainControl : null,
-          rnnoise: Boolean(denoiser),
+          rnnoise: currentDenoiserState() === "active",
           sourceChannelCount,
           sourceSampleRate: typeof settings.sampleRate === "number" && Number.isFinite(settings.sampleRate) && settings.sampleRate > 0
             ? settings.sampleRate : null,
           captureChannelCount: channels,
-        },
+      };
+      return {
+        processedStream: destination.stream,
+        processing,
+        get noiseSuppressionState() { return denoiserState; },
         activate() { if (!disposed && (worklet || script)) active = true; },
         setVolume(value) { if (gain) gain.gain.value = value; },
+        setNoiseSuppressionLevel(level) { if (!disposed) denoiser?.setLevel(level); },
         stopCapture,
         dispose,
       };

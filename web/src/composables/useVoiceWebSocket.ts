@@ -1,6 +1,8 @@
 import { createRemotePlayback } from "../voice/remote-playback.js";
 import { createMicrophoneTest } from "../voice/microphone-test.js";
 import { createMicrophoneCaptureFactory, type MicrophoneCapture, type MicrophoneProcessingSettings } from "../voice/microphone-capture.js";
+import { createPeerVoice } from "../voice/peer-voice.js";
+import type { NoiseSuppressionLevel, NoiseSuppressionState } from "../voice/noise-suppression.js";
 export type { MicrophoneProcessingSettings } from "../voice/microphone-capture.js";
 import { createAudioSinkRouter } from "../voice/audio-sink.js";
 import { createAccompaniment, type AccompanimentErrorCode } from "../voice/accompaniment.js";
@@ -257,6 +259,21 @@ export function useVoiceWebSocket() {
     },
     onError: code => { accompanimentErrorCode.value = code; },
   });
+  const peerVoice = createPeerVoice({
+    send: message => { if (ws.value?.readyState === WebSocket.OPEN) ws.value.send(JSON.stringify(message)); },
+    onPcm(clientId, pcm, channels) {
+      if (!state.connected || clientId === state.tsClientId) return false;
+      const success = remotePlayback.playPcm(clientId, pcm, channels);
+      if (success) { markSpeaking(clientId); audioDiagnostics.count("framesReceived"); }
+      return success;
+    },
+    onRetired: clientId => remotePlayback.clear(clientId),
+  });
+  const peerVoiceEnabled = peerVoice.enabled;
+  const peerVoiceAvailable = peerVoice.available;
+  const peerVoiceSupported = peerVoice.supported;
+  const peerVoiceStatus = peerVoice.status;
+  const peerVoiceConnectedPeers = peerVoice.connectedPeers;
   const screenShare = createScreenShareController({
     isOpen: () => ws.value?.readyState === WebSocket.OPEN,
     send: message => ws.value?.send(JSON.stringify(message)),
@@ -291,7 +308,7 @@ export function useVoiceWebSocket() {
   const microphoneTestActive = ref(false);
   const testAudioUrl = ref("");
   const microphoneTest = createMicrophoneTest({
-    prepare: async () => { await prepareInputDevices(); return micStream; },
+    prepare: async () => { await prepareInputDevices(); return microphoneCapture?.processedStream ?? micStream; },
     onActive: active => { microphoneTestActive.value = active; },
     onUrl: url => { testAudioUrl.value = url; },
     onStopped: () => { if (!state.connected) stopMicrophone(); },
@@ -301,6 +318,14 @@ export function useVoiceWebSocket() {
   const noiseSuppressionEnabled = ref(true);
   let noiseSuppressionTouched = false;
   let committedNoiseSuppressionEnabled = noiseSuppressionEnabled.value;
+  const noiseSuppressionLevel = ref<NoiseSuppressionLevel>("medium");
+  let noiseSuppressionLevelTouched = false;
+  const receiveNoiseSuppressionEnabled = ref(false);
+  const receiveNoiseSuppressionLevel = ref<NoiseSuppressionLevel>("medium");
+  let receiveNoiseSuppressionTouched = false;
+  let receiveNoiseSuppressionLevelTouched = false;
+  const microphoneNoiseSuppressionState = ref<NoiseSuppressionState | "off">("off");
+  const receiveNoiseSuppressionState = ref<NoiseSuppressionState | "off">("off");
   const stereoInputEnabled = ref(false);
   let stereoInputTouched = false;
   let committedStereoInputEnabled = false;
@@ -333,6 +358,7 @@ export function useVoiceWebSocket() {
     getVolume: clientId => (volumes[clientId] ?? 1) * effectiveOutputVolume(),
     onDecodeError: () => audioDiagnostics.count("decodeErrors"),
     onDrop: () => audioDiagnostics.count("framesDropped"),
+    onNoiseSuppressionState: state => { receiveNoiseSuppressionState.value = state; },
   });
   let webRtcStunServer = "";
   const webrtc = createWebRtcTransport({
@@ -404,6 +430,9 @@ export function useVoiceWebSocket() {
       inputDeviceId: committedInputDeviceId,
       microphoneMuted: microphoneMuted.value,
       noiseSuppressionEnabled: committedNoiseSuppressionEnabled,
+      noiseSuppressionLevel: noiseSuppressionLevel.value,
+      receiveNoiseSuppressionEnabled: receiveNoiseSuppressionEnabled.value,
+      receiveNoiseSuppressionLevel: receiveNoiseSuppressionLevel.value,
       stereoInputEnabled: committedStereoInputEnabled,
       voxThreshold: voxThreshold.value,
       inputGain: inputVolume.value,
@@ -422,6 +451,10 @@ export function useVoiceWebSocket() {
     }
   }
 
+  function isNoiseSuppressionLevel(value: unknown): value is NoiseSuppressionLevel {
+    return value === "light" || value === "medium" || value === "heavy";
+  }
+
   const audioPreferencesReady = loadLocalPreferences().then((preferences) => {
     if (!inputDeviceTouched) {
       if (!selectedInputDeviceId.value) selectedInputDeviceId.value = preferences.preferredInputDeviceId ?? preferences.inputDeviceId ?? "";
@@ -432,6 +465,16 @@ export function useVoiceWebSocket() {
       noiseSuppressionEnabled.value = preferences.noiseSuppressionEnabled;
       committedNoiseSuppressionEnabled = preferences.noiseSuppressionEnabled;
     }
+    if (!noiseSuppressionLevelTouched && isNoiseSuppressionLevel(preferences.noiseSuppressionLevel)) {
+      noiseSuppressionLevel.value = preferences.noiseSuppressionLevel;
+    }
+    if (!receiveNoiseSuppressionTouched && typeof preferences.receiveNoiseSuppressionEnabled === "boolean") {
+      receiveNoiseSuppressionEnabled.value = preferences.receiveNoiseSuppressionEnabled;
+    }
+    if (!receiveNoiseSuppressionLevelTouched && isNoiseSuppressionLevel(preferences.receiveNoiseSuppressionLevel)) {
+      receiveNoiseSuppressionLevel.value = preferences.receiveNoiseSuppressionLevel;
+    }
+    remotePlayback.setNoiseSuppression(receiveNoiseSuppressionEnabled.value, receiveNoiseSuppressionLevel.value);
     if (!stereoInputTouched && typeof preferences.stereoInputEnabled === "boolean") {
       stereoInputEnabled.value = preferences.stereoInputEnabled;
       committedStereoInputEnabled = preferences.stereoInputEnabled;
@@ -579,7 +622,9 @@ export function useVoiceWebSocket() {
       sampleRate: { ideal: 48000 },
       channelCount: channels === 2 ? { exact: 2 } : { ideal: 1 },
       echoCancellation: channels === 1,
-      noiseSuppression: channels === 1 && noiseSuppressionEnabled.value,
+      // RNNoise owns denoising. Keep browser echo cancellation independent,
+      // rather than stacking two unrelated suppression algorithms.
+      noiseSuppression: false,
       // Keep the microphone's natural dynamics. Browser AGC can make speech
       // pump in volume, especially while background noise changes.
       autoGainControl: false,
@@ -659,12 +704,10 @@ export function useVoiceWebSocket() {
       accumLen = 0;
       return;
     }
-    const bufferedBytes = socket.bufferedAmount;
-    if (bufferedBytes > maxBufferedBytes) {
+    if (!peerVoiceEnabled.value && socket.bufferedAmount > maxBufferedBytes) {
       accumLen = 0;
       return;
     }
-
     if (convBuf.length < input.length) convBuf = new Int16Array(input.length);
     for (let i = 0; i < input.length; i++) {
       const sample = Math.max(-1, Math.min(1, input[i]!));
@@ -681,8 +724,12 @@ export function useVoiceWebSocket() {
     accumLen = need;
 
     let offset = 0;
-    while (offset + frameSamples <= accumLen && socket.readyState === WebSocket.OPEN && socket.bufferedAmount <= maxBufferedBytes) {
-      socket.send(accumBuf.slice(offset, offset + frameSamples).buffer);
+    while (offset + frameSamples <= accumLen && socket.readyState === WebSocket.OPEN) {
+      const frame = accumBuf.slice(offset, offset + frameSamples);
+      if (!whisperActive.value) peerVoice.sendPcm(frame, activeCaptureChannels);
+      // Direct peers must keep receiving when the TCP uplink is congested.
+      // Discard the stale fallback frame instead of accumulating TCP latency.
+      if (socket.bufferedAmount <= maxBufferedBytes) socket.send(frame.buffer);
       offset += frameSamples;
     }
     if (offset > 0) markSpeaking(state.tsClientId);
@@ -714,6 +761,14 @@ export function useVoiceWebSocket() {
       nextCapture = await microphoneCaptureFactory.prepare({
         context: ctx, stream: nextStream, signal: controller.signal, assertCurrent,
         channels, noiseSuppression: channels === 1 && noiseSuppressionEnabled.value,
+        noiseSuppressionLevel: noiseSuppressionLevel.value,
+        onNoiseSuppressionState(processingState) {
+          // Preparation and retired graphs cannot change the current UI state.
+          if (nextCapture && microphoneCapture === nextCapture && audioCtx === ctx) {
+            microphoneNoiseSuppressionState.value = processingState;
+            microphoneProcessing.rnnoise = processingState === "active";
+          }
+        },
         volume: inputVolume.value, onSamples: handleCaptureChunk,
       });
       assertCurrent();
@@ -724,6 +779,8 @@ export function useVoiceWebSocket() {
       microphoneCapture = nextCapture;
       activeCaptureChannels = channels;
       Object.assign(microphoneProcessing, nextCapture.processing);
+      microphoneNoiseSuppressionState.value = nextCapture.noiseSuppressionState;
+      nextCapture.setNoiseSuppressionLevel(noiseSuppressionLevel.value);
       nextCapture.setVolume(inputVolume.value);
       nextCapture.activate();
       // The fallback for a later failed change is this actual live graph, even
@@ -792,11 +849,12 @@ export function useVoiceWebSocket() {
   }
 
   async function startWebRtcTransport(sequence: number, socket: WebSocket): Promise<void> {
-    // The optional WebRTC mixer is mono; binaural capture stays on the stereo WSS route.
-    if (stereoInputEnabled.value) { await ensureMicrophone(); return; }
+    // Binaural capture and per-speaker denoising require the unmixed WSS route.
+    if (stereoInputEnabled.value || receiveNoiseSuppressionEnabled.value || peerVoiceEnabled.value) { await ensureMicrophone(); return; }
     await webrtc.start({
       isCurrent: () => sequence === voiceConnection.generation && ws.value === socket
-        && socket.readyState === WebSocket.OPEN && state.connected && !stereoInputEnabled.value,
+        && socket.readyState === WebSocket.OPEN && state.connected && !stereoInputEnabled.value
+        && !receiveNoiseSuppressionEnabled.value && !peerVoiceEnabled.value,
       send: message => socket.send(JSON.stringify(message)),
     });
   }
@@ -821,6 +879,8 @@ export function useVoiceWebSocket() {
     stopCaptureGraph();
     microphoneCapture?.dispose();
     microphoneCapture = null;
+    microphoneNoiseSuppressionState.value = "off";
+    microphoneProcessing.rnnoise = false;
     webrtc.releaseInput();
     micStream = null;
     if (closeContext) {
@@ -848,12 +908,12 @@ export function useVoiceWebSocket() {
     const sequence = voiceConnection.generation;
     const socket = ws.value;
     const isCurrent = () => generation === inputDeviceGeneration && sequence === voiceConnection.generation;
-    const shouldRestartWebRtc = !stereoInputEnabled.value && webrtc.active && Boolean(ws.value);
+    const shouldRestartWebRtc = !stereoInputEnabled.value && !receiveNoiseSuppressionEnabled.value && !peerVoiceEnabled.value && webrtc.active && Boolean(ws.value);
     try {
       // Keep the current peer alive until the replacement microphone is ready.
       if (micStream || pendingMicrophoneCapture) await startMicrophone();
       if (!isCurrent()) return;
-      if (stereoInputEnabled.value) {
+      if (stereoInputEnabled.value || receiveNoiseSuppressionEnabled.value || peerVoiceEnabled.value) {
         // Stop a pending or active mono peer only after a stereo graph commits.
         try { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "webrtcStop" })); }
         finally { webrtc.stop(); }
@@ -1065,6 +1125,7 @@ export function useVoiceWebSocket() {
     microphoneTest.dispose();
     audioDiagnostics.reset();
     commands.clear(new Error("语音连接已关闭"));
+    peerVoice.disconnect();
     screenShare.stopTransport(sendScreenStop);
     webrtc.stop();
     remotePlayback.clearAll();
@@ -1077,6 +1138,7 @@ export function useVoiceWebSocket() {
   function handleMessage(raw: unknown): void {
     const msg = parseServerMessage(raw);
     if (!msg || screenShare.handleMessage(msg) || sessionState.receive(msg)) return;
+    if (msg.type === "peerVoiceRoster" || msg.type === "peerVoiceSignal") { peerVoice.handleMessage(msg); return; }
     switch (msg.type) {
       case "connected":
         const wasReconnecting = state.reconnecting;
@@ -1094,6 +1156,7 @@ export function useVoiceWebSocket() {
         // as soon as the session is ready so a muted reconnect is visible to
         // native TeamSpeak users even before WebRTC negotiation completes.
         sendCmd("setMicrophoneMuted", { muted: microphoneMuted.value });
+        peerVoice.connect(msg.peerVoiceAvailable === true, msg.screenShareIceServers);
         screenShare.setIceServers(msg.screenShareIceServers);
         webRtcStunServer = msg.webRtcStunServer ?? "";
         sessionState.connected(msg);
@@ -1217,9 +1280,11 @@ export function useVoiceWebSocket() {
     }
     const clientId = (data[1] << 8) | data[2];
     if (clientId === state.tsClientId) return;
+    const codec = data[0]! & 0x7f;
+    if ((data[0]! & 0x80) && peerVoice.receiving(clientId)) return;
     audioDiagnostics.count("framesReceived");
     markSpeaking(clientId);
-    remotePlayback.play(clientId, data.slice(3), data[0]);
+    remotePlayback.play(clientId, data.slice(3), codec);
   }
 
   function sendCmd<K extends ClientCommandType>(type: K, payload: ClientCommandPayloads[K]): void {
@@ -1419,6 +1484,56 @@ export function useVoiceWebSocket() {
     }
   }
 
+  async function setNoiseSuppressionLevel(level: NoiseSuppressionLevel): Promise<void> {
+    if (stereoInputEnabled.value || !isNoiseSuppressionLevel(level) || noiseSuppressionLevel.value === level) return;
+    noiseSuppressionLevelTouched = true;
+    noiseSuppressionLevel.value = level;
+    // A level change keeps the microphone and its live PCM/WebRTC graph intact.
+    microphoneCapture?.setNoiseSuppressionLevel(level);
+    await saveAudioPreferences();
+  }
+
+  async function setReceiveNoiseSuppressionEnabled(enabled: boolean): Promise<void> {
+    if (receiveNoiseSuppressionEnabled.value === enabled) return;
+    const sequence = voiceConnection.generation;
+    receiveNoiseSuppressionTouched = true;
+    receiveNoiseSuppressionEnabled.value = enabled;
+    remotePlayback.setNoiseSuppression(enabled, receiveNoiseSuppressionLevel.value);
+    await saveAudioPreferences();
+    // Per-speaker processing requires unmixed WSS audio. This NAS already uses
+    // WSS; if another deployment enabled the optional mono mixer, leave it.
+    if (enabled && receiveNoiseSuppressionEnabled.value && sequence === voiceConnection.generation
+      && (webrtc.active || webrtc.peer)) {
+      const socket = ws.value;
+      try { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "webrtcStop" })); }
+      finally { webrtc.stop(); }
+      if (micStream) {
+        try { await startMicrophone(); }
+        catch (error) { setMicrophoneError(error); }
+      }
+    }
+  }
+
+  async function setReceiveNoiseSuppressionLevel(level: NoiseSuppressionLevel): Promise<void> {
+    if (!isNoiseSuppressionLevel(level) || receiveNoiseSuppressionLevel.value === level) return;
+    receiveNoiseSuppressionLevelTouched = true;
+    receiveNoiseSuppressionLevel.value = level;
+    remotePlayback.setNoiseSuppression(receiveNoiseSuppressionEnabled.value, level);
+    await saveAudioPreferences();
+  }
+
+  async function setPeerVoiceEnabled(enabled: boolean): Promise<void> {
+    peerVoice.setEnabled(enabled);
+    if (peerVoiceEnabled.value && (webrtc.active || webrtc.peer)) {
+      const socket = ws.value;
+      try { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "webrtcStop" })); }
+      finally { webrtc.stop(); }
+      try { if (micStream) await startMicrophone(); else await ensureMicrophone(); }
+      catch (error) { setMicrophoneError(error); }
+      // The server may have ignored opt-in while its mono mixer was closing.
+    }
+  }
+
   async function setStereoInputEnabled(enabled: boolean): Promise<void> {
     if (stereoInputEnabled.value === enabled) return;
     stereoInputTouched = true;
@@ -1460,7 +1575,13 @@ export function useVoiceWebSocket() {
     serverEvents,
     pokeNotifications,
     microphoneMuted,
+    peerVoiceEnabled, peerVoiceAvailable, peerVoiceSupported, peerVoiceStatus, peerVoiceConnectedPeers, setPeerVoiceEnabled,
     noiseSuppressionEnabled,
+    noiseSuppressionLevel,
+    receiveNoiseSuppressionEnabled,
+    receiveNoiseSuppressionLevel,
+    microphoneNoiseSuppressionState,
+    receiveNoiseSuppressionState,
     stereoInputEnabled,
     inputVolume,
     outputVolume,
@@ -1491,6 +1612,9 @@ export function useVoiceWebSocket() {
     setVolume,
     setInputVolume,
     setNoiseSuppressionEnabled,
+    setNoiseSuppressionLevel,
+    setReceiveNoiseSuppressionEnabled,
+    setReceiveNoiseSuppressionLevel,
     setStereoInputEnabled,
     setOutputVolume,
     toggleOutputMute,

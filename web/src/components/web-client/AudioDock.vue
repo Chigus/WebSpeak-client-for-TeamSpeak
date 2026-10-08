@@ -52,15 +52,30 @@
           <div class="dock-panel-divider"></div>
           <label class="dock-switch-row"
             ><span
-              ><strong>{{ t("noiseSuppression") }}</strong></span
+              ><strong>{{ t("inputNoiseSuppression") }}</strong></span
             ><input
               type="checkbox"
               :checked="!stereoInputEnabled && noiseSuppressionEnabled"
               :disabled="stereoInputEnabled"
               :title="stereoInputEnabled ? t('stereoInputHint') : ''"
-              :aria-label="t('noiseSuppression')"
+              :aria-label="t('inputNoiseSuppression')"
+              aria-describedby="dock-input-noise-status"
               @change="onNoiseSuppressionToggle"
           /></label>
+          <label class="dock-noise-label" for="dock-input-noise-level">{{ t("noiseSuppressionLevel") }}</label>
+          <select
+            id="dock-input-noise-level"
+            class="dock-noise-select"
+            :value="noiseSuppressionLevel"
+            :disabled="stereoInputEnabled || !noiseSuppressionEnabled"
+            :aria-label="t('inputNoiseSuppressionLevel')"
+            @change="onNoiseSuppressionLevelChange"
+          >
+            <option value="light">{{ t("noiseSuppressionLight") }}</option>
+            <option value="medium">{{ t("noiseSuppressionMedium") }}</option>
+            <option value="heavy">{{ t("noiseSuppressionHeavy") }}</option>
+          </select>
+          <p id="dock-input-noise-status" class="dock-noise-status" role="status">{{ t(inputNoiseSuppressionStatusKey) }}</p>
         </div>
       </div>
       <div
@@ -100,6 +115,31 @@
             :aria-label="t('overallVolume')"
             @input="onOutputVolume"
           />
+          <div class="dock-panel-divider"></div>
+          <label class="dock-switch-row">
+            <span><strong>{{ t("receiveNoiseSuppression") }}</strong></span>
+            <input
+              type="checkbox"
+              :checked="receiveNoiseSuppressionEnabled"
+              :aria-label="t('receiveNoiseSuppression')"
+              aria-describedby="dock-receive-noise-status"
+              @change="onReceiveNoiseSuppressionToggle"
+            />
+          </label>
+          <label class="dock-noise-label" for="dock-receive-noise-level">{{ t("noiseSuppressionLevel") }}</label>
+          <select
+            id="dock-receive-noise-level"
+            class="dock-noise-select"
+            :value="receiveNoiseSuppressionLevel"
+            :disabled="!receiveNoiseSuppressionEnabled"
+            :aria-label="t('receiveNoiseSuppressionLevel')"
+            @change="onReceiveNoiseSuppressionLevelChange"
+          >
+            <option value="light">{{ t("noiseSuppressionLight") }}</option>
+            <option value="medium">{{ t("noiseSuppressionMedium") }}</option>
+            <option value="heavy">{{ t("noiseSuppressionHeavy") }}</option>
+          </select>
+          <p id="dock-receive-noise-status" class="dock-noise-status" role="status">{{ t(receiveNoiseSuppressionStatusKey) }}</p>
         </div>
       </div>
       <button
@@ -134,12 +174,53 @@ import type { useVoiceWebSocket } from "../../composables/useVoiceWebSocket.js";
 import type { useWebClientAudioControls } from "../../composables/useWebClientAudioControls.js";
 
 const props = defineProps<{
-  model: Pick<ReturnType<typeof useVoiceWebSocket>, "microphoneMuted" | "inputVolume" | "outputVolume" | "outputMuted" | "noiseSuppressionEnabled" | "stereoInputEnabled" | "accompanimentActive">;
-  controls: Pick<ReturnType<typeof useWebClientAudioControls>, "toggleMicrophone" | "onInputVolume" | "onOutputVolume" | "onNoiseSuppressionToggle" | "toggleAccompaniment">;
+  model: Pick<ReturnType<typeof useVoiceWebSocket>, "microphoneMuted" | "inputVolume" | "outputVolume" | "outputMuted" | "noiseSuppressionEnabled" | "noiseSuppressionLevel" | "receiveNoiseSuppressionEnabled" | "receiveNoiseSuppressionLevel" | "stereoInputEnabled" | "accompanimentActive">;
+  controls: Pick<ReturnType<typeof useWebClientAudioControls>, "toggleMicrophone" | "onInputVolume" | "onOutputVolume" | "onNoiseSuppressionToggle" | "onNoiseSuppressionLevelChange" | "onReceiveNoiseSuppressionToggle" | "onReceiveNoiseSuppressionLevelChange" | "inputNoiseSuppressionStatusKey" | "receiveNoiseSuppressionStatusKey" | "toggleAccompaniment">;
   t: (key: string) => string;
   rangeStyle: (value: number, max: number) => Record<string, string>;
 }>();
-const { microphoneMuted, inputVolume, outputVolume, outputMuted, noiseSuppressionEnabled, stereoInputEnabled, accompanimentActive } = props.model;
-const { toggleMicrophone, onInputVolume, onOutputVolume, onNoiseSuppressionToggle, toggleAccompaniment } = props.controls;
+const { microphoneMuted, inputVolume, outputVolume, outputMuted, noiseSuppressionEnabled, noiseSuppressionLevel, receiveNoiseSuppressionEnabled, receiveNoiseSuppressionLevel, stereoInputEnabled, accompanimentActive } = props.model;
+const { toggleMicrophone, onInputVolume, onOutputVolume, onNoiseSuppressionToggle, onNoiseSuppressionLevelChange, onReceiveNoiseSuppressionToggle, onReceiveNoiseSuppressionLevelChange, inputNoiseSuppressionStatusKey, receiveNoiseSuppressionStatusKey, toggleAccompaniment } = props.controls;
 const emit = defineEmits<{ settings: []; outputMute: [] }>();
 </script>
+
+<style scoped>
+.dock-noise-label {
+  display: block;
+  margin: 12px 0 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.dock-noise-select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 8px;
+  color: var(--text-primary);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.dock-noise-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.dock-noise-select:disabled,
+.dock-switch-row input:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.dock-noise-status {
+  margin: 8px 0 0;
+  color: var(--text-secondary, var(--text-primary));
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+</style>

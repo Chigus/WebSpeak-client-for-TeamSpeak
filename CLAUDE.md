@@ -98,6 +98,26 @@ The accompaniment controller owns both active and pending captures. Stop, discon
 
 Microphone metering is optional and must not interrupt voice. Its nodes and timer belong to one meter instance; a queued old tick cannot read the next session's analyser or publish a level. Allocation, connection and read failures release all meter resources and clear level/speaking presentation, while preserving the capture stream and peer. Keep the 512-sample analyser and 50 ms cadence unless audio validation justifies changing them.
 
+## Direct voice and AI suppression
+
+`src/shared/peer-voice.ts` validates the opt-in direct-voice protocol;
+`src/server/peer-voice-coordinator.ts` owns authenticated same-target/channel
+rosters, rate bounds and expiring receive leases. `web/src/voice/peer-voice.ts`
+owns deterministic WebRTC DataChannel negotiation, small-mesh limits and
+late-packet/retired-peer guards. Ordinary TeamSpeak and whispers retain server
+routing. Only opted-in receiver fallback envelopes use codec high bit `0x80`;
+low seven bits remain the actual Opus codec. Keep whispered PCM out of the mesh.
+Do not stop direct transmission merely because the TCP fallback uplink is full.
+
+`web/src/voice/noise-suppression.ts` provides stable dry/processed endpoints with
+actual model readiness, bounded asset loading and failure restoration;
+`web/public/voice-noise-suppression-worklet.js` owns RNNoise state per ear and
+live strength changes. Input stereo raw mode bypasses suppression; received
+suppression remains an explicit independent preference. Never describe an enabled
+setting as successful processing until the actual model is active. Optional mono
+WebRTC mixing must retire before direct PCM or per-speaker suppression activates.
+See `docs/PEER_VOICE_AND_DENOISING.zh-CN.md` for limits and verification scopes.
+
 ## Audio and screen sharing
 
 The compatibility voice path captures 48 kHz PCM using an AudioWorklet, with a ScriptProcessor fallback. Each 20 ms frame has 960 samples per channel: 1,920 Int16 bytes for ordinary mono speech, or 3,840 bytes of LR-interleaved Int16 for optional binaural/stereo input. Strict frame length selects the gateway encoder; stereo uses Opus Music (codec 5), 192 kbps constant bitrate and two forced channels, while mono retains Opus Voice (codec 4). Set stereo VBR off explicitly: each 20 ms Opus payload must be 480 bytes, keeping transient frames within the TeamSpeak voice packet budget. Preserve the ordinary mono codec defaults. Incoming Opus uses a three-byte header containing codec and client ID; browser playback selects one or two channels from the codec and retires the decoder safely when it changes. Stereo capture disables voice processing and gating and stays on WSS; this deployment keeps the optional mono WebRTC mixer disabled for all listeners.

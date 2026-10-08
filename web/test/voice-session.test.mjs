@@ -34,7 +34,8 @@ class TestTrack extends EventTarget {
 class AudioNodeStub {
   gain = { value: 1 };
   disconnects = 0;
-  connect() {}
+  connections = [];
+  connect(node) { this.connections.push(node); }
   disconnect() { this.disconnects++; }
 }
 class AudioSourceStub extends EventTarget {
@@ -687,6 +688,27 @@ async function connectWebRtc() {
   assert.ok(socket.messages.some(message => message.type === "webrtcOffer"));
   return { socket, peer: TestPeer.instances.at(-1) };
 }
+
+test("opting into direct voice retires the mono mixer and restores an active PCM graph", async () => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1, webrtcAvailable: true, peerVoiceAvailable: true });
+  await nextTurn();
+  const peer = TestPeer.instances.at(-1);
+  assert.ok(socket.messages.some(message => message.type === "webrtcOffer"));
+  socket.receive({ type: "webrtcAnswer", payload: { sdp: { type: "answer", sdp: "v=0" } } });
+  await nextTurn();
+  await voice.setPeerVoiceEnabled(true);
+  assert.equal(peer.connectionState, "closed");
+  const capture = AudioContextStub.processors.at(-1);
+  const sample = { inputBuffer: { numberOfChannels: 1, getChannelData: () => new Float32Array(1024).fill(0.3) } };
+  const before = socket.messages.filter(message => message instanceof ArrayBuffer).length;
+  for (let frame = 0; frame < 5; frame++) capture.onaudioprocess(sample);
+  assert.ok(socket.messages.filter(message => message instanceof ArrayBuffer).length > before, "PCM fallback remains active after mixer retirement");
+  assert.ok(socket.messages.some(message => message.type === "peerVoiceJoin" && message.enabled));
+  voice.disconnect();
+  assert.equal(voice.peerVoiceAvailable.value, false);
+  assert.equal(voice.peerVoiceConnectedPeers.value, 0);
+});
 
 function enableMicrophoneMeter(t) {
   const analysers = [];
@@ -1890,18 +1912,19 @@ test("remote playback preserves member volume through output mute and decoder re
   voice.setOutputVolume(0.5);
   receiveAudio(socket, 7);
   receiveAudio(socket, 8);
-  assert.deepEqual(AudioContextStub.gains.map(node => node.gain.value), [0.2, 0.5]);
+  const volumeGains = () => AudioContextStub.gains.filter(node => node.connections.includes(AudioContextStub.instances.at(-1).destination));
+  assert.deepEqual(volumeGains().map(node => node.gain.value), [0.2, 0.5]);
   voice.toggleOutputMute();
-  assert.deepEqual(AudioContextStub.gains.map(node => node.gain.value), [0, 0]);
+  assert.deepEqual(volumeGains().map(node => node.gain.value), [0, 0]);
   const old = AudioDecoderStub.instances[0];
   receiveAudio(socket, 7, 5);
   const replacement = AudioDecoderStub.instances.at(-1);
   old.callbacks.error(new Error("stale decoder error"));
   assert.equal(replacement.closed, 0);
-  assert.equal(AudioContextStub.gains.at(-1).gain.value, 0);
+  assert.equal(volumeGains().at(-1).gain.value, 0);
   voice.toggleOutputMute();
-  assert.equal(AudioContextStub.gains.at(-1).gain.value, 0.2);
-  assert.equal(AudioContextStub.gains[1].gain.value, 0.5);
+  assert.equal(volumeGains().at(-1).gain.value, 0.2);
+  assert.equal(volumeGains()[1].gain.value, 0.5);
 });
 
 test("WSS audio remains bounded through overload and resumes without resetting scheduled playback", async t => {
@@ -2531,7 +2554,7 @@ test("stereo capture requests the selected two-channel input with all speech pro
   await voice.setStereoInputEnabled(false);
   assert.deepEqual(requests.at(-1).channelCount, { ideal: 1 });
   assert.equal(requests.at(-1).echoCancellation, true);
-  assert.equal(requests.at(-1).noiseSuppression, true, "leaving stereo restores the existing mono preference");
+  assert.equal(requests.at(-1).noiseSuppression, false, "RNNoise owns suppression; browser DSP remains disabled in mono too");
 });
 
 test("stereo sends separate left and right PCM continuously below the voice threshold", async () => {

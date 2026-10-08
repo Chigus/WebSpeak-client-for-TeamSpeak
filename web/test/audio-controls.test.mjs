@@ -21,9 +21,14 @@ function mount(t, extra = {}) {
   const scope = effectScope(), settingsOpen = ref(false), stops = [];
   const controls = scope.run(() => useWebClientAudioControls({
     settingsOpen, microphoneMuted: ref(false), inputVolume: ref(1), voxThreshold: ref(.01),
+    noiseSuppressionEnabled: ref(true), noiseSuppressionLevel: ref("medium"),
+    receiveNoiseSuppressionEnabled: ref(false), receiveNoiseSuppressionLevel: ref("medium"),
+    microphoneNoiseSuppressionState: ref("off"), receiveNoiseSuppressionState: ref("off"), stereoInputEnabled: ref(false),
     notificationVolume: ref(1), micLevel: ref(0), microphoneTestActive: ref(false),
     accompanimentActive: ref(false), accompanimentErrorCode: ref(""), whisperTargetIds: new Set(),
     prepareInputDevices: async () => {}, setStereoInputEnabled: async () => {}, stopMicrophoneTest: () => stops.push("stop"),
+    setNoiseSuppressionEnabled: async () => {}, setNoiseSuppressionLevel: async () => {},
+    setReceiveNoiseSuppressionEnabled: async () => {}, setReceiveNoiseSuppressionLevel: async () => {},
     localizedMessage: value => value, t: key => key, ...extra,
   }));
   t.after(() => scope.stop());
@@ -180,4 +185,129 @@ test("closing settings suppresses a pending stereo selection's late failure", as
   selection.reject(new DOMException("Input busy", "NotReadableError"));
   await pending;
   assert.equal(controls.settingsError.value, "");
+});
+
+test("input and received noise controls dispatch independently and reject unknown levels", async t => {
+  const changes = [];
+  const { controls } = mount(t, {
+    setNoiseSuppressionEnabled: async enabled => changes.push(["input", enabled]),
+    setReceiveNoiseSuppressionEnabled: async enabled => changes.push(["receive", enabled]),
+    setNoiseSuppressionLevel: async level => changes.push(["input-level", level]),
+    setReceiveNoiseSuppressionLevel: async level => changes.push(["receive-level", level]),
+  });
+  await controls.onNoiseSuppressionToggle({ target: { checked: false } });
+  await controls.onReceiveNoiseSuppressionToggle({ target: { checked: true } });
+  for (const level of ["light", "medium", "heavy"]) {
+    await controls.onNoiseSuppressionLevelChange({ target: { value: level } });
+    await controls.onReceiveNoiseSuppressionLevelChange({ target: { value: level } });
+  }
+  await controls.onNoiseSuppressionLevelChange({ target: { value: "invalid" } });
+  await controls.onReceiveNoiseSuppressionLevelChange({ target: { value: "invalid" } });
+  assert.deepEqual(changes, [
+    ["input", false], ["receive", true],
+    ["input-level", "light"], ["receive-level", "light"],
+    ["input-level", "medium"], ["receive-level", "medium"],
+    ["input-level", "heavy"], ["receive-level", "heavy"],
+  ]);
+});
+
+test("stereo input bypasses only input suppression while received controls remain available", async t => {
+  const changes = [], inputEvent = { target: { checked: true } };
+  const { controls } = mount(t, {
+    stereoInputEnabled: ref(true),
+    setNoiseSuppressionEnabled: async () => changes.push("input"),
+    setNoiseSuppressionLevel: async () => changes.push("input-level"),
+    setReceiveNoiseSuppressionEnabled: async value => changes.push(["receive", value]),
+    setReceiveNoiseSuppressionLevel: async value => changes.push(["receive-level", value]),
+  });
+  await controls.onNoiseSuppressionToggle(inputEvent);
+  await controls.onNoiseSuppressionLevelChange({ target: { value: "heavy" } });
+  await controls.onReceiveNoiseSuppressionToggle({ target: { checked: true } });
+  await controls.onReceiveNoiseSuppressionLevelChange({ target: { value: "heavy" } });
+  assert.equal(inputEvent.target.checked, false);
+  assert.equal(controls.inputNoiseSuppressionStatusKey.value, "noiseSuppressionStereoBypass");
+  assert.deepEqual(changes, [["receive", true], ["receive-level", "heavy"]]);
+});
+
+test("noise status distinguishes requested settings from actual processing on each side", t => {
+  const inputState = ref("off"), receiveState = ref("off"), receiveEnabled = ref(true), stereoEnabled = ref(false);
+  const { controls } = mount(t, {
+    microphoneNoiseSuppressionState: inputState, receiveNoiseSuppressionState: receiveState,
+    receiveNoiseSuppressionEnabled: receiveEnabled, stereoInputEnabled: stereoEnabled,
+  });
+  assert.equal(controls.inputNoiseSuppressionStatusKey.value, "noiseSuppressionWaiting");
+  assert.equal(controls.receiveNoiseSuppressionStatusKey.value, "noiseSuppressionWaiting");
+  inputState.value = "loading";
+  receiveState.value = "active";
+  assert.equal(controls.inputNoiseSuppressionStatusKey.value, "noiseSuppressionLoading");
+  assert.equal(controls.receiveNoiseSuppressionStatusKey.value, "noiseSuppressionActive");
+  inputState.value = "active";
+  receiveState.value = "failed";
+  assert.equal(controls.inputNoiseSuppressionStatusKey.value, "noiseSuppressionActive");
+  assert.equal(controls.receiveNoiseSuppressionStatusKey.value, "noiseSuppressionFailed");
+  receiveEnabled.value = false;
+  assert.equal(controls.receiveNoiseSuppressionStatusKey.value, "noiseSuppressionDisabled");
+  stereoEnabled.value = true;
+  assert.equal(controls.inputNoiseSuppressionStatusKey.value, "noiseSuppressionStereoBypass");
+});
+
+test("failed suppression changes report inside the open dialog and restore the committed control value", async t => {
+  const event = { target: { checked: true } }, toasts = [];
+  const { controls } = mount(t, {
+    noiseSuppressionEnabled: ref(false), showToast: message => toasts.push(message),
+    setNoiseSuppressionEnabled: async () => { throw new Error("failed"); },
+  });
+  await controls.onNoiseSuppressionToggle(event);
+  assert.equal(event.target.checked, false);
+  assert.equal(controls.settingsError.value, "noiseSuppressionChangeFailed");
+  assert.deepEqual(toasts, []);
+});
+
+test("a dock suppression failure is handled and shown as a toast", async t => {
+  const toasts = [];
+  const { controls, settingsOpen } = mount(t, {
+    showToast: message => toasts.push(message),
+    setReceiveNoiseSuppressionEnabled: async () => { throw new Error("failed"); },
+  });
+  settingsOpen.value = false;
+  await controls.onReceiveNoiseSuppressionToggle({ target: { checked: true } });
+  assert.equal(controls.settingsError.value, "");
+  assert.deepEqual(toasts, ["noiseSuppressionChangeFailed"]);
+});
+
+test("a newer noise choice retires a previous input failure", async t => {
+  const pending = deferred();
+  const { controls } = mount(t, { setNoiseSuppressionLevel: () => pending.promise });
+  const old = controls.onNoiseSuppressionLevelChange({ target: { value: "heavy" } });
+  await controls.onReceiveNoiseSuppressionLevelChange({ target: { value: "light" } });
+  pending.reject(new Error("old"));
+  await old;
+  assert.equal(controls.settingsError.value, "");
+});
+
+test("closing and reopening settings retires a pending suppression error", async t => {
+  const pending = deferred(), toasts = [];
+  const { controls, settingsOpen } = mount(t, {
+    setReceiveNoiseSuppressionEnabled: () => pending.promise, showToast: message => toasts.push(message),
+  });
+  const old = controls.onReceiveNoiseSuppressionToggle({ target: { checked: true } });
+  settingsOpen.value = false;
+  settingsOpen.value = true;
+  pending.reject(new Error("old"));
+  await old;
+  assert.equal(controls.settingsError.value, "");
+  assert.deepEqual(toasts, []);
+});
+
+test("unmount retires a dock suppression failure without sending a late toast", async t => {
+  const pending = deferred(), toasts = [];
+  const { controls, settingsOpen, scope } = mount(t, {
+    setNoiseSuppressionEnabled: () => pending.promise, showToast: message => toasts.push(message),
+  });
+  settingsOpen.value = false;
+  const old = controls.onNoiseSuppressionToggle({ target: { checked: false } });
+  scope.stop();
+  pending.reject(new Error("old"));
+  await old;
+  assert.deepEqual(toasts, []);
 });
