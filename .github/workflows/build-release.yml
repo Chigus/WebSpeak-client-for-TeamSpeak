@@ -54,6 +54,12 @@ jobs:
           if ((node -p "process.arch") -eq "arm64") {
             $env:npm_config_node_gyp = Join-Path (Get-Location) "node_modules/node-gyp/bin/node-gyp.js"
             $opusDirectory = Join-Path (Get-Location) "node_modules/@discordjs/opus"
+            $opusWindowsConfig = Join-Path (Get-Location) "node_modules/@discordjs/opus/deps/config/opus/win"
+            $arm64Config = Join-Path $opusWindowsConfig "arm64/config.h"
+            if (-not (Test-Path $arm64Config)) {
+              New-Item -ItemType Directory -Force -Path (Split-Path -Parent $arm64Config) | Out-Null
+              Copy-Item -LiteralPath (Join-Path $opusWindowsConfig "x64/config.h") -Destination $arm64Config
+            }
             Push-Location $opusDirectory
             try {
               node ..\node-pre-gyp\bin\node-pre-gyp install --fallback-to-build
