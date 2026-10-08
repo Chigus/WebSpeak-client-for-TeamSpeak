@@ -129,7 +129,7 @@ class TestPeer extends EventTarget {
   localDescription = null;
   remoteDescription = null;
   sender = { track: null, replaceTrack: async track => { this.sender.track = track; } };
-  constructor() { super(); TestPeer.instances.push(this); }
+  constructor(config) { super(); this.config = config; TestPeer.instances.push(this); }
   addTrack(track) { this.sender.track = track; }
   getSenders() { return [this.sender]; }
   async createOffer() { return { type: "offer", sdp: "test-offer" }; }
@@ -355,13 +355,81 @@ function chatView(t, overrides = {}) {
     messages: voice.chatMessages, members: voice.members,
     currentChannel: ref({ id: "1", parentID: "0", name: "Lobby" }), currentChannelName: ref("Lobby"),
     selectedChannelId: ref("1"), clientId: computed(() => voice.state.tsClientId),
-    connected: computed(() => voice.state.connected), sessionEpoch: voice.sessionEpoch,
+    connected: computed(() => voice.state.connected), sessionEpoch: voice.sessionEpoch, serverKey: ref("example.test:9987"),
     memberConversationKey: id => voice.memberConversationKey(id),
     isMobileViewport: ref(false), mobileSection: ref("chat"), closeMemberMenu() {}, notifyPrivateMessage() {},
     sendTextMessage: voice.sendTextMessage, sendServerMessage: voice.sendServerMessage, sendPrivateMessage: voice.sendPrivateMessage,
     t: key => key, ...overrides,
   }));
 }
+
+function chatScroller(chat) {
+  const calls = [];
+  chat.listElement.value = {
+    scrollHeight: 1200, clientHeight: 400, scrollTop: 800,
+    scrollTo(options) { calls.push(options); this.scrollTop = this.scrollHeight - this.clientHeight; },
+  };
+  return calls;
+}
+
+test("incoming chat preserves history reading and follows again when the reader returns to the bottom", async t => {
+  const chat = chatView(t);
+  const calls = chatScroller(chat);
+  chat.listElement.value.scrollTop = 100;
+  chat.onScroll();
+  voice.chatMessages.push({ id: "incoming-1", scope: "channel", message: "Hello", timestamp: 1 });
+  await nextTick();
+  await nextTick();
+  assert.equal(calls.length, 0);
+  chat.scrollIfFollowing(); // Keyboard resizing must also preserve the reading position.
+  await nextTick();
+  assert.equal(calls.length, 0);
+  chat.listElement.value.scrollTop = 800;
+  chat.onScroll();
+  voice.chatMessages.push({ id: "incoming-2", scope: "channel", message: "Latest", timestamp: 2 });
+  await nextTick();
+  await nextTick();
+  assert.deepEqual(calls, [{ top: 1200, behavior: "auto" }]);
+});
+
+test("own messages and conversation switches reveal the latest message, unrelated chat does not move the list", async t => {
+  const chat = chatView(t);
+  const calls = chatScroller(chat);
+  chat.listElement.value.scrollTop = 100;
+  chat.onScroll();
+  voice.chatMessages.push({ id: "elsewhere", scope: "server", message: "Other conversation", timestamp: 1 });
+  await nextTick();
+  await nextTick();
+  assert.equal(calls.length, 0);
+  voice.chatMessages.push({ id: "own", scope: "channel", message: "Sent", timestamp: 2, isSelf: true });
+  await nextTick();
+  await nextTick();
+  assert.equal(calls.length, 1);
+  chat.listElement.value.scrollTop = 100;
+  chat.onScroll();
+  chat.tab.value = "server";
+  await nextTick();
+  await nextTick();
+  assert.ok(calls.length > 1);
+  assert.equal(chat.listElement.value.scrollTop, 800);
+});
+
+test("hidden mobile chat defers scrolling until shown and ignores zero-height scroll events", async t => {
+  const section = ref("voice");
+  const chat = chatView(t, { isMobileViewport: ref(true), mobileSection: section });
+  const calls = chatScroller(chat);
+  chat.listElement.value.clientHeight = 0;
+  chat.onScroll();
+  voice.chatMessages.push({ id: "mobile", scope: "channel", message: "Hello", timestamp: 1 });
+  await nextTick();
+  await nextTick();
+  assert.equal(calls.length, 0);
+  chat.listElement.value.clientHeight = 400;
+  section.value = "chat";
+  await nextTick();
+  await nextTick();
+  assert.equal(calls.length, 1);
+});
 
 test("chat cannot create a local success while disconnected or recovering", async () => {
   await assert.rejects(async () => voice.sendServerMessage("Offline"));
@@ -2360,4 +2428,17 @@ test("disconnect while initial device labels load still cancels microphone readi
   enumeration.resolve(availableDevices);
   await assert.rejects(readiness, error => error.name === "AbortError");
   assert.equal(voice.state.microphoneErrorCode, "");
+});
+
+
+test("voice STUN configuration reaches the browser peer and resets on a legacy connection", async () => {
+  let socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1, webrtcAvailable: true, webRtcStunServer: "stun:stun.example.com:3478" });
+  await nextTurn();
+  assert.deepEqual(TestPeer.instances.at(-1).config.iceServers, [{ urls: "stun:stun.example.com:3478" }]);
+  voice.disconnect();
+  socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 2, webrtcAvailable: true });
+  await nextTurn();
+  assert.deepEqual(TestPeer.instances.at(-1).config.iceServers, []);
 });

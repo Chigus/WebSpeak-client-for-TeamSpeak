@@ -1,5 +1,6 @@
 import { computed, nextTick, onScopeDispose, ref, watch, type Ref } from "vue";
 import type { ChannelInfo, ChannelMember, ChatMessage } from "./useVoiceWebSocket.js";
+import { loadChatHistory, normalizeChatHistoryServerKey, saveChatHistoryMessage } from "../services/local-persistence.js";
 
 export type WebClientChatTab = "channel" | "server" | "private" | "events";
 
@@ -19,7 +20,7 @@ interface UseWebClientChatOptions {
   clientId: Readonly<Ref<number>>;
   connected: Readonly<Ref<boolean>>;
   sessionEpoch: Readonly<Ref<number>>;
-  memberConversationKey: (id: number) => string | undefined;
+  serverKey: Readonly<Ref<string>>;
   isMobileViewport: Readonly<Ref<boolean>>;
   mobileSection: Ref<"channels" | "chat" | "voice" | "more">;
   closeMemberMenu: () => void;
@@ -39,7 +40,7 @@ export function useWebClientChat({
   clientId,
   connected,
   sessionEpoch,
-  memberConversationKey,
+  serverKey,
   isMobileViewport,
   mobileSection,
   closeMemberMenu,
@@ -60,12 +61,24 @@ export function useWebClientChat({
   const pending = new Map<string, object>();
   const errors = new Map<string, string>();
   let disposed = false;
-  const recipient = computed(() => members.find(member => member.id === privateClientId.value && memberConversationKey(member.id) === privateConversationKey.value));
+  let followingLatest = true;
+  let scrollGeneration = 0;
+  let historyGeneration = 0;
+  const persistedMessageIds = new Set<string>();
+  const memberKey = (member: ChannelMember) => member.uid ? `uid:${member.uid}` : `client:${JSON.stringify([member.id, member.nickname])}`;
+  const recipient = computed(() => members.find(member => member.id === privateClientId.value && memberKey(member) === privateConversationKey.value));
   const destination = computed(() => `${sessionEpoch.value}:${tab.value}:${tab.value === "private" ? privateConversationKey.value : tab.value === "channel" ? currentChannel.value?.id ?? selectedChannelId.value : ""}`);
   const canSend = computed(() => connected.value && !sending.value && tab.value !== "events" && (tab.value !== "private" || Boolean(recipient.value)));
   const status = computed(() => sendError.value ? t(sendError.value) : sending.value ? t("chatSending")
     : !connected.value ? t("chatNotConnected") : tab.value === "private" && !recipient.value ? t("chatTargetUnavailable") : "");
-  const messageKey = (message: ChatMessage) => message.conversationKey ?? `legacy:${message.id}`;
+  const messageKey = (message: ChatMessage) => {
+    if (message.scope !== "private") return `legacy:${message.id}`;
+    if (message.conversationKey?.startsWith("uid:")) return message.conversationKey;
+    if (message.senderUid && !message.isSelf) return `uid:${message.senderUid}`;
+    const id = Number(message.conversationId) || message.senderId || 0;
+    const name = message.conversationName || (message.isSelf ? "" : message.invokerName);
+    return id ? `client:${JSON.stringify([id, name])}` : `legacy:${message.id}`;
+  };
 
   const conversations = computed<PrivateConversation[]>(() => {
     const byConversation = new Map<string, PrivateConversation>();
@@ -74,7 +87,7 @@ export function useWebClientChat({
       const id = Number(message.conversationId);
       if (!id) continue;
       const key = messageKey(message);
-      const member = members.find(candidate => memberConversationKey(candidate.id) === key);
+      const member = members.find(candidate => memberKey(candidate) === key);
       const existing = byConversation.get(key);
       byConversation.set(key, {
         id: member?.id ?? id, key,
@@ -105,13 +118,29 @@ export function useWebClientChat({
 
   function scrollToEnd(): void {
     const list = listElement.value;
-    if (!disposed && list) list.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
+    if (!disposed && list && (!isMobileViewport.value || mobileSection.value === "chat")) {
+      followingLatest = true;
+      list.scrollTo({ top: list.scrollHeight, behavior: "auto" });
+    }
+  }
+
+  function onScroll(): void {
+    const list = listElement.value;
+    if (list && list.clientHeight > 0) followingLatest = list.scrollHeight - list.scrollTop - list.clientHeight < 48;
+  }
+
+  function scrollIfFollowing(): void {
+    if (!followingLatest) return;
+    const generation = scrollGeneration;
+    void nextTick(() => {
+      if (generation === scrollGeneration && followingLatest) scrollToEnd();
+    });
   }
 
   function openPrivateChat(targetClientId: number): void {
     const member = members.find(candidate => candidate.id === targetClientId);
-    const key = memberConversationKey(targetClientId);
-    if (!member || !key || targetClientId === clientId.value) return;
+    if (!member || targetClientId === clientId.value) return;
+    const key = memberKey(member);
     openConversation({ id: targetClientId, key, name: member.nickname, lastMessage: 0 });
   }
 
@@ -122,7 +151,8 @@ export function useWebClientChat({
     tab.value = "private";
     if (isMobileViewport.value) mobileSection.value = "chat";
     closeMemberMenu();
-    void nextTick(scrollToEnd);
+    followingLatest = true;
+    scrollIfFollowing();
   }
 
   async function submitMessage(): Promise<void> {
@@ -161,12 +191,17 @@ export function useWebClientChat({
   }
 
   watch(destination, (next, previous) => {
+    scrollGeneration++;
+    followingLatest = true;
+    scrollIfFollowing();
     drafts.set(previous, messageDraft.value);
     messageDraft.value = drafts.get(next) ?? "";
     sending.value = pending.has(next);
     sendError.value = errors.get(next) ?? "";
   }, { flush: "sync" });
   watch(sessionEpoch, () => {
+    historyGeneration++;
+    persistedMessageIds.clear();
     drafts.clear();
     pending.clear();
     errors.clear();
@@ -180,7 +215,34 @@ export function useWebClientChat({
   }, { flush: "sync" });
   onScopeDispose(() => { disposed = true; drafts.clear(); pending.clear(); errors.clear(); sending.value = false; });
 
-  watch([() => messages.length, tab, privateClientId], () => { void nextTick(scrollToEnd); });
+  watch([connected, sessionEpoch, serverKey], async ([isConnected, _epoch, target]) => {
+    const generation = ++historyGeneration;
+    persistedMessageIds.clear();
+    if (!isConnected || !target) return;
+    const normalizedKey = normalizeChatHistoryServerKey(target);
+    const history = await loadChatHistory(normalizedKey);
+    if (disposed || generation !== historyGeneration || !connected.value || normalizeChatHistoryServerKey(serverKey.value) !== normalizedKey) return;
+    const existingIds = new Set(messages.map(message => message.id));
+    const additions = history.filter(message => !existingIds.has(message.id));
+    if (additions.length) messages.splice(0, messages.length, ...[...messages, ...additions].sort((left, right) => left.timestamp - right.timestamp));
+    for (const message of messages) if (!message.isHistory) persistedMessageIds.add(message.id);
+  }, { immediate: true });
+
+  watch(() => messages.length, () => {
+    if (!connected.value || !serverKey.value) return;
+    const key = normalizeChatHistoryServerKey(serverKey.value);
+    for (const message of messages) {
+      if (message.isHistory || message.scope === "system" || persistedMessageIds.has(message.id)) continue;
+      persistedMessageIds.add(message.id);
+      void saveChatHistoryMessage(key, message);
+    }
+  }, { flush: "sync" });
+
+  watch(() => visibleMessages.value.at(-1)?.id, () => {
+    if (visibleMessages.value.at(-1)?.isSelf) followingLatest = true;
+    scrollIfFollowing();
+  });
+  watch(mobileSection, (section) => { if (section === "chat") scrollIfFollowing(); });
   watch(() => messages.length, (length, previousLength) => {
     const latest = messages[length - 1];
     if (latest && length > previousLength && latest.scope === "private" && !latest.isSelf) notifyPrivateMessage();
@@ -202,5 +264,7 @@ export function useWebClientChat({
     openConversation,
     submitMessage,
     scrollToEnd,
+    onScroll,
+    scrollIfFollowing,
   };
 }

@@ -10,6 +10,9 @@ export interface AdminSettingsInput {
   welcomeTextRu?: string;
   welcomeTextJa?: string;
   webRtcEnabled: boolean;
+  webRtcPublicHost?: string;
+  webRtcIpv6Enabled?: boolean;
+  webRtcStunServer?: string;
   webRtcUdpStart?: number;
   webRtcUdpEnd?: number;
   relaySettingsAction?: "keep" | "replace" | "remove";

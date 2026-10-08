@@ -39,7 +39,10 @@ function screenStreamKey(targetKey: string, streamId: string): string {
 /** Coordinates channel-scoped browser/native sharing; media stays peer-to-peer. */
 export class ScreenShareCoordinator {
   private readonly screenStreams = new Map<string, ScreenStreamRecord>();
-  private readonly discoveredClients = new Map<string, Set<number>>();
+  private readonly discoveries = new Map<string, {
+    pendingEntry: ScreenShareParticipant | undefined;
+    completion: Promise<void>;
+  }>();
 
   constructor(
     private readonly entries: ReadonlyMap<string, ScreenShareParticipant>,
@@ -164,29 +167,49 @@ export class ScreenShareCoordinator {
    * A gateway session can connect after a native TeamSpeak stream has already
    * started. TS6 does not replay that stream in the normal welcome snapshot;
    * requeststreaminfo is the official client-protocol query for this case.
-   * Query each visible client once per TeamSpeak target, then let the normal
-   * raw notification path announce the discovered stream to web viewers.
+   * Rescan on each connection. Concurrent requests for the same server share
+   * one running pass and one pending pass using the latest session directory.
    */
-  async discoverExistingStreams(entry: ScreenShareParticipant): Promise<void> {
+  discoverExistingStreams(entry: ScreenShareParticipant): Promise<void> {
     const targetKey = teamSpeakTargetKey(entry.target);
-    let discovered = this.discoveredClients.get(targetKey);
-    if (!discovered) this.discoveredClients.set(targetKey, discovered = new Set());
-    const clientIds = [...entry.members.keys()].filter((clientId) => Number.isInteger(clientId) && clientId > 0);
-    for (const clientId of clientIds) {
-      if (this.entries.get(entry.id) !== entry || !entry.tsClient.isConnected()) return;
-      if (discovered.has(clientId)) continue;
-      discovered.add(clientId);
-      try {
-        await entry.tsClient.sendProtocolCommand(`requeststreaminfo clid=${clientId}`);
-      } catch (error: unknown) {
-        discovered.delete(clientId);
-        this.logger.debug({
-          target: formatTeamSpeakTarget(entry.target),
-          clientId,
-          err: error instanceof Error ? error.message : String(error),
-        }, "Could not query existing TeamSpeak screen stream");
-      }
+    const active = this.discoveries.get(targetKey);
+    if (active) {
+      active.pendingEntry = entry;
+      return active.completion;
     }
+    const discovery = {
+      pendingEntry: entry as ScreenShareParticipant | undefined,
+      completion: Promise.resolve(),
+    };
+    discovery.completion = Promise.resolve().then(async () => {
+      try {
+        while (discovery.pendingEntry) {
+          const requestedEntry = discovery.pendingEntry;
+          discovery.pendingEntry = undefined;
+          const queryEntry = this.entries.get(requestedEntry.id) === requestedEntry && requestedEntry.tsClient.isConnected()
+            ? requestedEntry
+            : [...this.entries.values()].find(candidate => teamSpeakTargetKey(candidate.target) === targetKey && candidate.tsClient.isConnected());
+          if (!queryEntry) continue;
+          const clientIds = [...queryEntry.members.keys()].filter(clientId => Number.isInteger(clientId) && clientId > 0);
+          for (const clientId of clientIds) {
+            if (this.entries.get(queryEntry.id) !== queryEntry || !queryEntry.tsClient.isConnected()) break;
+            try {
+              await queryEntry.tsClient.sendProtocolCommand(`requeststreaminfo clid=${clientId}`);
+            } catch (error: unknown) {
+              this.logger.debug({
+                target: formatTeamSpeakTarget(queryEntry.target),
+                clientId,
+                err: error instanceof Error ? error.message : String(error),
+              }, "Could not query existing TeamSpeak screen stream");
+            }
+          }
+        }
+      } finally {
+        this.discoveries.delete(targetKey);
+      }
+    });
+    this.discoveries.set(targetKey, discovery);
+    return discovery.completion;
   }
 
   private describeScreenStream(stream: ScreenStreamRecord): ScreenShareStreamDescription {
@@ -466,7 +489,6 @@ export class ScreenShareCoordinator {
     if (!departing) return;
     const targetKey = teamSpeakTargetKey(departing.target);
     if (![...this.entries.values()].some(entry => entry.id !== entryId && teamSpeakTargetKey(entry.target) === targetKey)) {
-      this.discoveredClients.delete(targetKey);
       // Native notifications are not observed while no session is attached.
       // Rediscover on the next connection instead of retaining stale cards.
       for (const stream of [...this.screenStreams.values()]) {
@@ -502,7 +524,6 @@ export class ScreenShareCoordinator {
 
   onClientLeave(entry: ScreenShareParticipant, clientId: number): void {
     const targetKey = teamSpeakTargetKey(entry.target);
-    this.discoveredClients.get(targetKey)?.delete(clientId);
     for (const stream of [...this.screenStreams.values()]) {
       if (stream.targetKey === targetKey && stream.source === "teamspeak" && stream.sourceClientId === clientId) {
         this.stopScreenStream(stream, "source-left");
@@ -558,12 +579,27 @@ export class ScreenShareCoordinator {
         void publisherEntry.tsClient.sendProtocolCommand(buildTeamSpeakCommand("stopstream", { id: streamId, reason: "1" })).catch(() => undefined);
         return;
       }
-      const sourceChannel = entry.channelTree.find(channel => channel.members?.some(member => member.id === sourceClientId));
+      // Prefer the observer's directory; another connection can still be
+      // processing an older snapshot of the same source.
+      const sourceChannel = [entry, ...this.entries.values()]
+        .filter(candidate => teamSpeakTargetKey(candidate.target) === targetKey && candidate.tsClient.isConnected())
+        .map(candidate => candidate.channelTree.find(channel => channel.id !== "0" && channel.members?.some(member => member.id === sourceClientId)))
+        .find(channel => channel !== undefined);
       // Do not guess a channel from the observer, or from a colliding client id
       // on another server. Discovery will retry after the directory is ready.
       if (!sourceChannel) return;
       const key = screenStreamKey(targetKey, streamId);
-      const current = this.screenStreams.get(key);
+      let current = this.screenStreams.get(key);
+      if (current && current.channelId !== BigInt(sourceChannel.id)) {
+        // Retire the old channel's card and memberships before announcing the
+        // corrected source. Never carry viewers across a channel boundary.
+        for (const viewerId of current.viewerEntryIds.keys()) {
+          const viewer = this.entries.get(viewerId);
+          if (viewer) this.leaveScreenStream(viewer, current);
+        }
+        this.stopScreenStream(current, "source-moved-channel");
+        current = undefined;
+      }
       const stream: ScreenStreamRecord = current ?? {
         streamId,
         source: "teamspeak",

@@ -12,6 +12,7 @@ import { createAudioDiagnostics, type AudioPermission, type VoiceAudioStatusSamp
 export type { AudioPermission, BrowserVoiceAudioStats, VoiceAudioStatusSample } from "../voice/audio-diagnostics.js";
 import type { SinkAudioElement } from "../voice/webrtc-playback.js";
 import { createScreenShareController } from "../voice/screen-share.js";
+import { requestMediaBeforeAudioResume } from "../services/microphone-start.js";
 export type { ScreenShareOutputSettings, ScreenShareCaptureStats, ScreenSharePeerStats, ScreenShareWebRtcStats } from "../voice/screen-share.js";
 import { parseServerMessage } from "../../../src/shared/server-messages.js";
 import type { ChatMessage } from "../../../src/shared/voice-models.js";
@@ -323,7 +324,9 @@ export function useVoiceWebSocket() {
     onDecodeError: () => audioDiagnostics.count("decodeErrors"),
     onDrop: () => audioDiagnostics.count("framesDropped"),
   });
+  let webRtcStunServer = "";
   const webrtc = createWebRtcTransport({
+    stunServer: () => webRtcStunServer,
     prepareMicrophone: async () => {
       await ensureMicrophone();
       return micStream ? { context: getAudioCtx(), stream: micStream,
@@ -677,11 +680,10 @@ export function useVoiceWebSocket() {
     let nextCapture: MicrophoneCapture | null = null;
     let factoryOwnsStream = false;
     try {
-      if (ctx.state === "suspended") {
-        try { await ctx.resume(); } catch { /* the audio context notice explains the silence */ }
-      }
-      assertCurrent();
-      nextStream = await navigator.mediaDevices.getUserMedia({ audio: microphoneConstraints() });
+      nextStream = await requestMediaBeforeAudioResume(
+        () => navigator.mediaDevices.getUserMedia({ audio: microphoneConstraints() }),
+        () => ctx.state === "suspended" ? ctx.resume() : Promise.resolve(),
+      );
       assertCurrent();
       audioPermission.value = "granted";
       factoryOwnsStream = true;
@@ -1051,6 +1053,7 @@ export function useVoiceWebSocket() {
         // native TeamSpeak users even before WebRTC negotiation completes.
         sendCmd("setMicrophoneMuted", { muted: microphoneMuted.value });
         screenShare.setIceServers(msg.screenShareIceServers);
+        webRtcStunServer = msg.webRtcStunServer ?? "";
         sessionState.connected(msg);
         applyWhisperState(msg.whisperTargetIds, msg.whisperActive);
         if (typeof msg.identity === "string" && msg.identity.length <= 8192) {

@@ -42,6 +42,32 @@ test("a stale partial snapshot cannot bring back a departed client before an exp
   assert.deepEqual(directory.getSnapshot()?.clients.find((client) => client.id === 2), member(2, 2n, { uid: "new-uid" }));
 });
 
+test("a status refresh enriches current clients without adding clients or restoring departures", () => {
+  const directory = new DirectorySynchronizer();
+  directory.applySnapshot(snapshot(member(1), member(2)));
+  directory.applyClientLeave(2);
+  directory.applyClientListSnapshot([
+    member(1, 1n, { away: true, inputMuted: true, outputMuted: false }),
+    member(2, 1n, { away: false, inputMuted: false }),
+    member(3, 1n, { inputMuted: true }),
+  ]);
+  assert.deepEqual(directory.getSnapshot()?.clients, [
+    member(1, 1n, { away: true, inputMuted: true, outputMuted: false }),
+  ]);
+});
+
+test("a status snapshot received before the welcome directory is merged after queued enter and leave events", () => {
+  const directory = new DirectorySynchronizer();
+  directory.applyClientEnter(member(3));
+  directory.applyClientLeave(2);
+  directory.applyClientListSnapshot([member(2, 1n, { inputMuted: true }), member(3, 1n, { inputMuted: true })]);
+  directory.applySnapshot(snapshot(member(1), member(2)));
+  assert.deepEqual(directory.getSnapshot()?.clients, [
+    member(1),
+    member(3, 1n, { inputMuted: true }),
+  ]);
+});
+
 test("clearing the directory drops pending events and departure history for a new connection", () => {
   const directory = new DirectorySynchronizer();
   directory.applyClientLeave(1);

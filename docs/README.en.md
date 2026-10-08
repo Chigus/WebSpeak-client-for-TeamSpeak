@@ -64,6 +64,14 @@ WebRTC moves browser voice to a realtime media path and also enables desktop acc
 
 The port range is locked while WebRTC is enabled. Disable and save WebRTC before changing it, then update the firewall rules. Public deployments also need HTTPS.
 
+### Voice WebRTC behind a reverse proxy or TCP tunnel
+
+The WebRTC advanced settings now include a **public media address**, **IPv6 candidates**, and a **voice STUN server**. The media address must be a gateway IP or hostname reachable over UDP, without a scheme, path or port. It overrides the address inferred from `Origin`, `X-Forwarded-Host`, or `Host`; DNS names are resolved into IP candidates. IPv6 is opt-in and retains IPv4 candidates.
+
+Set a UDP STUN URL such as `stun:turn.teamspeak.com:3478` to use the same discovery service in the browser and gateway. Empty preserves the previous behavior: the gateway library uses its built-in STUN service while the browser has none. The gateway requires an IPv4-reachable UDP STUN hostname or IPv4 address; IPv6 literals and TURN credentials are not accepted. IPv6 media candidates work independently of STUN. Save and reconnect to apply changes.
+
+HTTP/WebSocket reachability does not imply media reachability. Allow the complete configured UDP range and preserve port numbers when using static port forwarding. STUN discovers mappings but cannot relay audio or traverse every NAT. Deployments with only a TCP tunnel and no usable UDP/IPv6 path still fall back to compatibility transport.
+
 ### Screen-share ICE candidates
 
 Screen-share media still prefers a direct browser-to-browser path; WebSpeak only relays negotiation signaling. By default it uses TeamSpeak's public STUN services to discover server-reflexive candidates; STUN does not carry media. If the deployment has an authorized external TURN service, set `WEBSPEAK_SCREEN_SHARE_ICE_SERVERS` before starting WebSpeak with a JSON array, for example:

@@ -213,4 +213,28 @@ onUnmounted(() => document.removeEventListener("pointerdown", onDocumentPointerD
   .skin-switcher.join-skin-switcher .skin-trigger > span,
   .skin-switcher.join-skin-switcher .skin-trigger > .ui-icon:last-child { display: none; }
 }
+
+@media (max-width: 740px) {
+  .skin-switcher.mobile-skin-switcher .skin-dropdown {
+    position: static;
+    width: 100%;
+    min-width: 0;
+    max-height: min(45vh, 280px);
+    margin-top: 8px;
+    overflow-y: auto;
+    box-sizing: border-box;
+  }
+}
+
+@media (max-width: 740px) {
+  .skin-switcher.mobile-skin-switcher .skin-dropdown {
+    position: static;
+    width: 100%;
+    min-width: 0;
+    max-height: min(45vh, 280px);
+    margin-top: 8px;
+    overflow-y: auto;
+    box-sizing: border-box;
+  }
+}
 </style>

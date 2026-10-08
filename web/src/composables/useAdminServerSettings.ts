@@ -13,11 +13,11 @@ interface Options { api: AdminApi; errorMessage: Ref<string>; errorText(code?: s
 function emptyForm() {
   return { address: "", port: "9987", serverPassword: "", passwordAction: "keep" as SecretAction, hasPassword: false,
     accessMode: "fixed" as "fixed" | "open", siteName: "WebSpeak", welcomeText: "", welcomeTextEn: "", welcomeTextDe: "", welcomeTextRu: "", welcomeTextJa: "",
-    welcomeDefaults: { ...DEFAULT_WELCOME_TEXTS }, webRtcEnabled: false, webRtcUdpStart: 40000, webRtcUdpEnd: 40099,
+    welcomeDefaults: { ...DEFAULT_WELCOME_TEXTS }, webRtcPublicHost: "", webRtcIpv6Enabled: false, webRtcStunServer: "", webRtcEnabled: false, webRtcUdpStart: 40000, webRtcUdpEnd: 40099,
     relayNodes: [] as RelayNodeForm[], lastTestAt: null as string | null, lastTestLatencyMs: null as number | null };
 }
 type ServerForm = ReturnType<typeof emptyForm>;
-const editable = ["address", "port", "accessMode", "siteName", "welcomeText", "welcomeTextEn", "welcomeTextDe", "welcomeTextRu", "welcomeTextJa", "webRtcEnabled", "webRtcUdpStart", "webRtcUdpEnd"] as const;
+const editable = ["address", "port", "accessMode", "siteName", "welcomeText", "welcomeTextEn", "welcomeTextDe", "welcomeTextRu", "welcomeTextJa", "webRtcEnabled", "webRtcPublicHost", "webRtcIpv6Enabled", "webRtcStunServer", "webRtcUdpStart", "webRtcUdpEnd"] as const;
 const snapshot = (form: ServerForm): ServerForm => JSON.parse(JSON.stringify(form));
 
 export function useAdminServerSettings(options: Options) {
@@ -97,6 +97,7 @@ export function useAdminServerSettings(options: Options) {
     return { target: combineTeamSpeakTarget(serverForm.address, serverForm.port), serverPassword: serverForm.passwordAction === "replace" ? serverForm.serverPassword : undefined,
       passwordAction: serverForm.passwordAction, accessMode: serverForm.accessMode, siteName: serverForm.siteName,
       welcomeText: serverForm.welcomeText, welcomeTextEn: serverForm.welcomeTextEn, welcomeTextDe: serverForm.welcomeTextDe, welcomeTextRu: serverForm.welcomeTextRu, welcomeTextJa: serverForm.welcomeTextJa,
+      webRtcPublicHost: serverForm.webRtcPublicHost, webRtcIpv6Enabled: serverForm.webRtcIpv6Enabled, webRtcStunServer: serverForm.webRtcStunServer,
       webRtcEnabled: serverForm.webRtcEnabled, webRtcUdpStart: serverForm.webRtcUdpStart, webRtcUdpEnd: serverForm.webRtcUdpEnd,
       relayNodes: serverForm.relayNodes.map(node => ({ id: node.id, name: node.name, target: node.target, enabled: node.enabled, tokenAction: node.tokenAction, ...(node.tokenAction === "replace" ? { token: node.token } : {}) })) };
   }

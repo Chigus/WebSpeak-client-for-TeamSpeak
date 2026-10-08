@@ -3,12 +3,12 @@ import { listInstalledSkins, loadLocalPreferences, saveLocalPreferences } from "
 import { BUILTIN_SKIN_CATALOG, getPublicDefaultSkinId, isPublicSkinEnabled, listPublicSkins, type SkinCatalogEntry } from "../services/skin-catalog.js";
 import { activateSkin, BUILTIN_DARK_SKIN, BUILTIN_LIGHT_SKIN, clearCustomSkinStyle, getStoredSkinId } from "../services/skin-runtime.js";
 import { createSkinOperation } from "../services/skin-operation.js";
-import { applyTheme, getStoredTheme, isDarkTheme, saveTheme } from "../services/theme.js";
+import { getStoredTheme, isDarkTheme, saveTheme, type ThemeMode } from "../services/theme.js";
 import type { InstalledSkin } from "../services/skin-pack.js";
 
 interface PublicSkinOptions {
   activeSkin?: Ref<InstalledSkin | null>;
-  themeMode?: Ref<"light" | "dark">;
+  themeMode?: Ref<ThemeMode>;
   appVersion?: () => string;
   timeoutMs?: number;
 }
@@ -34,7 +34,7 @@ export function usePublicSkin(options: PublicSkinOptions = {}) {
   }
   onScopeDispose(() => { disposed = true; cancel(); });
 
-  async function apply(id: string, operation: ReturnType<typeof createSkinOperation>, persist = true) {
+  async function apply(id: string, operation: ReturnType<typeof createSkinOperation>, persist = true, updateTheme = false) {
     operation.check();
     const entry = catalogSkins.value.find(skin => skin.id === id);
     const skin = await operation.wait(activateSkin(id, entry?.version, options.appVersion?.(), { signal: operation.signal }));
@@ -43,9 +43,12 @@ export function usePublicSkin(options: PublicSkinOptions = {}) {
     activeSkinId.value = skin?.id ?? (builtin(id) ? id : fallbackId());
     const mode = activeSkinId.value === BUILTIN_LIGHT_SKIN ? "light"
       : activeSkinId.value === BUILTIN_DARK_SKIN ? "dark" : isDarkTheme(getStoredTheme()) ? "dark" : "light";
-    if (options.themeMode) options.themeMode.value = mode;
+    if (options.themeMode && updateTheme) {
+      options.themeMode.value = mode;
+      saveTheme(mode);
+    }
     if (persist) void saveLocalPreferences({ schemaVersion: 1, skinId: activeSkinId.value,
-      ...(options.themeMode ? { theme: mode } : {}) }, operation.signal).catch(() => undefined);
+      ...(options.themeMode && updateTheme ? { theme: mode } : {}) }, operation.signal).catch(() => undefined);
   }
   async function recover(error: unknown, operation: ReturnType<typeof createSkinOperation>) {
     if (!owns(operation) || (error as { name?: string })?.name === "AbortError") return;
@@ -66,7 +69,7 @@ export function usePublicSkin(options: PublicSkinOptions = {}) {
       installedSkins.value = installed;
       catalogSkins.value = available;
       if (options.themeMode && !localStorage.getItem("webspeak:theme")) {
-        if (preferences.theme) options.themeMode.value = isDarkTheme(preferences.theme) ? "dark" : "light";
+        if (preferences.theme) options.themeMode.value = preferences.theme;
         saveTheme(options.themeMode.value);
       }
       // Only an explicit user choice overrides the instance default.
@@ -80,7 +83,7 @@ export function usePublicSkin(options: PublicSkinOptions = {}) {
     const operation = begin();
     try {
       try { localStorage.setItem("webspeak:skin-choice", id); } catch { /* Optional storage. */ }
-      await apply(id, operation);
+      await apply(id, operation, true, true);
     } catch (error) { await recover(error, operation); }
     finally { if (owns(operation)) skinReady.value = true; operation.finish(); }
   }
@@ -91,10 +94,11 @@ export function usePublicSkin(options: PublicSkinOptions = {}) {
     activeSkin.value = null;
     installedSkins.value = [];
     catalogSkins.value = [...BUILTIN_SKIN_CATALOG];
-    const mode = isDarkTheme("system") ? "dark" : "light";
+    const mode: ThemeMode = "system";
     if (options.themeMode) options.themeMode.value = mode;
-    applyTheme(mode);
-    activeSkinId.value = mode === "dark" ? BUILTIN_DARK_SKIN : BUILTIN_LIGHT_SKIN;
+    saveTheme(mode);
+    const builtInMode = isDarkTheme(mode) ? "dark" : "light";
+    activeSkinId.value = builtInMode === "dark" ? BUILTIN_DARK_SKIN : BUILTIN_LIGHT_SKIN;
     skinReady.value = true;
     try { catalogSkins.value = await operation.wait(listPublicSkins({ signal: operation.signal })); }
     catch { /* Reset remains usable even if refreshing the optional catalog fails. */ }

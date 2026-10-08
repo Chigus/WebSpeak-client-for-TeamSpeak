@@ -1,9 +1,42 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createSocket } from "node:dgram";
 import pino from "pino";
 import { RTCPeerConnection, useOPUS, usePCMU, type RtpPacket } from "werift";
 import { OpusEncoder } from "./opus-codec.js";
 import { WebRtcAudioSession } from "./webrtc-audio.js";
+
+test("configured STUN is actually queried and contributes srflx candidates", async t => {
+  const stun = createSocket("udp4");
+  await new Promise<void>(resolve => stun.bind(0, "127.0.0.1", resolve));
+  t.after(() => stun.close());
+  let requests = 0;
+  stun.on("message", (request, remote) => {
+    if (request.length < 20 || request.readUInt16BE(0) !== 1) return;
+    requests++;
+    const response = Buffer.alloc(32);
+    response.writeUInt16BE(0x0101, 0);
+    response.writeUInt16BE(12, 2);
+    request.copy(response, 4, 4, 20);
+    response.writeUInt16BE(0x0020, 20); // XOR-MAPPED-ADDRESS
+    response.writeUInt16BE(8, 22);
+    response[25] = 1;
+    response.writeUInt16BE(remote.port ^ 0x2112, 26);
+    remote.address.split(".").map(Number).forEach((octet, index) => { response[28 + index] = octet ^ request[4 + index]!; });
+    stun.send(response, remote.port, remote.address);
+  });
+  const session = new WebRtcAudioSession({ connectionId: "configured-ice", logger: pino({ enabled: false }),
+    stunServer: `stun:127.0.0.1:${stun.address().port}`, ipv6Enabled: true, publicAddresses: ["127.0.0.1"],
+    onVoiceFrame() {}, onVoiceActivity() {} });
+  const source = new RTCPeerConnection({ iceServers: [], codecs: { audio: [useOPUS()] } });
+  t.after(async () => { await session.close(); await source.close(); });
+  source.addTransceiver("audio", { direction: "sendrecv" });
+  const offer = await source.createOffer();
+  const answer = await session.createAnswer({ type: "offer", sdp: offer.sdp });
+  assert.ok(requests > 0);
+  assert.match(answer.sdp, / typ srflx /);
+  assert.equal(session.peer.iceTransports[0]!.connection.options.useIpv6, true);
+});
 
 test("WebRTC rejects an offer without negotiated audio instead of returning an empty answer", async t => {
   const session = new WebRtcAudioSession({ connectionId: "invalid-offer", logger: pino({ enabled: false }), onVoiceFrame() {}, onVoiceActivity() {} });

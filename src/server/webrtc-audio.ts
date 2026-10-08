@@ -35,11 +35,17 @@ const SPEAKER_ACTIVITY_RMS = 160;
 // change it in the admin console before enabling WebRTC.
 export interface WebRtcAudioOptions {
   enabled: boolean;
+  publicHost?: string;
+  ipv6Enabled?: boolean;
+  stunServer?: string;
   udpPortRange?: [number, number];
 }
 
 export interface WebRtcAudioSessionOptions {
   connectionId: string;
+  publicAddresses?: string[];
+  ipv6Enabled?: boolean;
+  stunServer?: string;
   publicHost?: string;
   udpPortRange?: [number, number];
   logger: LoggerType;
@@ -140,15 +146,15 @@ export class WebRtcAudioSession {
     this.accompanimentActive = options.accompanimentActive === true;
     this.outgoingTrack = new MediaStreamTrack({ kind: "audio" });
 
-    const iceAdditionalHostAddresses = options.publicHost ? [options.publicHost] : undefined;
+    const iceAdditionalHostAddresses = options.publicAddresses ?? (options.publicHost ? [options.publicHost] : undefined);
     const udpPortRange = options.udpPortRange ?? WEBRTC_UDP_PORT_RANGE;
     this.peer = new RTCPeerConnection({
       // Both audio routes carry Opus; accepting PCMU would label Opus output
       // as another codec and silently discard the peer's incoming audio.
       codecs: { audio: [useOPUS()] },
-      iceServers: [],
+      iceServers: options.stunServer ? [{ urls: options.stunServer }] : [],
       iceUseIpv4: true,
-      iceUseIpv6: false,
+      iceUseIpv6: options.ipv6Enabled === true,
       iceUseTcp: false,
       icePortRange: [...udpPortRange] as [number, number],
       ...(iceAdditionalHostAddresses ? { iceAdditionalHostAddresses } : {}),

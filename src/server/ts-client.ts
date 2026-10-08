@@ -194,6 +194,23 @@ export class TSClient extends EventEmitter {
     this.emit("connected", this.clientId);
   }
 
+  /** Refresh optional member status fields omitted by some client-enter events. */
+  async refreshDirectoryClients(): Promise<void> {
+    const client = this.client;
+    const generation = this.connectionGeneration;
+    if (!client || !this.connected) return;
+    try {
+      const clients = await tsListClients(client);
+      if (this.client === client && this.connected && this.connectionGeneration === generation) {
+        this.emit("directoryClientsSnapshot", clients);
+      }
+    } catch (error: unknown) {
+      if (this.client === client && this.connected && this.connectionGeneration === generation) {
+        this.logger.warn({ err: error instanceof Error ? error.message : String(error) }, "Could not refresh TeamSpeak member statuses");
+      }
+    }
+  }
+
   /**
    * Load a visible client's TeamSpeak avatar through the client protocol.
    *

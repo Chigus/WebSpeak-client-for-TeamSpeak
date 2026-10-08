@@ -36,6 +36,8 @@ export interface ChatMessage {
   message: string;
   timestamp: number;
   isSelf?: boolean;
+  /** Message came from browser-local history rather than the active session. */
+  isHistory?: boolean;
 }
 
 export interface ServerEvent {

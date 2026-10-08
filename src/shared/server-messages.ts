@@ -1,6 +1,7 @@
 import type { ChannelMember, ChannelInfo, ServerEvent, VoiceAudioBridgeStats } from "./voice-models.js";
 import { normalizeScreenShareIceServers, parseScreenShareSignal, type ScreenShareIceServer, type ScreenSharePeerSignal, type ScreenShareStreamDescription, type ScreenShareViewerDescription } from "./screen-share.js";
 
+import { normalizeVoiceStunServer } from "./voice-ice.js";
 import { isSessionDescription, type SessionDescription } from "./webrtc.js";
 export type { SessionDescription } from "./webrtc.js";
 
@@ -11,7 +12,7 @@ type ChatFields = { invokerId?: number; invokerName?: string; message: string; t
 
 /** Public JSON messages. Internal sockets, SDK clients and media objects stay out. */
 export type ServerMessage =
-  | Message<"connected", { tsClientId: number; members?: ChannelMember[]; serverEventLog?: ServerEvent[]; identity?: string; webrtcAvailable?: boolean; whisperTargetIds?: number[]; whisperActive?: boolean; screenShareIceServers?: ScreenShareIceServer[]; accelerated?: boolean }>
+  | Message<"connected", { tsClientId: number; members?: ChannelMember[]; serverEventLog?: ServerEvent[]; identity?: string; webrtcAvailable?: boolean; webRtcStunServer?: string; whisperTargetIds?: number[]; whisperActive?: boolean; screenShareIceServers?: ScreenShareIceServer[]; accelerated?: boolean }>
   | Message<"memberEnter", ChannelMember>
   | Message<"memberLeave", { id: number }>
   | Message<"memberAvatar", { id: number; uid?: string; avatar?: string }>
@@ -109,7 +110,7 @@ export function parseScreenShareStream(value: unknown): ScreenShareStreamDescrip
 
 const valid: Record<ServerMessage["type"], (message: RecordValue) => boolean> = {
   connected: m => clientId(m.tsClientId) && optional(m.members, v => arrayOf(v, member)) && optional(m.serverEventLog, v => arrayOf(v, event))
-    && optional(m.identity, v => text(v) && v.length <= 8192) && optional(m.webrtcAvailable, boolean)
+    && optional(m.identity, v => text(v) && v.length <= 8192) && optional(m.webrtcAvailable, boolean) && optional(m.webRtcStunServer, v => normalizeVoiceStunServer(v) !== null)
     && optional(m.whisperTargetIds, v => arrayOf(v, clientId)) && optional(m.whisperActive, boolean) && optional(m.accelerated, boolean),
   memberEnter: member,
   memberLeave: m => clientId(m.id),
@@ -156,7 +157,7 @@ export function parseServerMessage(value: unknown): ServerMessage | null {
   if (!valid[value.type as ServerMessage["type"]](value)) return null;
   let result = value;
   if (value.type === "connected") {
-    result = { ...value, screenShareIceServers: normalizeScreenShareIceServers(Array.isArray(value.screenShareIceServers) ? value.screenShareIceServers : undefined) };
+    result = { ...value, ...(value.webRtcStunServer === undefined ? {} : { webRtcStunServer: normalizeVoiceStunServer(value.webRtcStunServer)! }), screenShareIceServers: normalizeScreenShareIceServers(Array.isArray(value.screenShareIceServers) ? value.screenShareIceServers : undefined) };
   } else if (value.type === "audioStats") {
     result = { ...value, stats: parseVoiceAudioBridgeStats(value.stats) };
   } else if (value.type === "screenShareList") {

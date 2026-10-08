@@ -46,6 +46,7 @@ interface UseWebClientConnectionOptions {
   saveNickname: (nickname: string) => void;
   showToast: (message: string) => void;
   t: (key: string) => string;
+  beforeConnect?: () => void;
 }
 
 export function useWebClientConnection({
@@ -77,6 +78,7 @@ export function useWebClientConnection({
   saveNickname,
   showToast,
   t,
+  beforeConnect,
 }: UseWebClientConnectionOptions) {
   const canJoin = computed(() => Boolean(
     initialized.value
@@ -90,6 +92,7 @@ export function useWebClientConnection({
 
   function doConnect(): void {
     if (!canJoin.value || isConnecting.value) return;
+    beforeConnect?.();
     clearError();
     nickname.value = nickname.value.trim();
     saveNickname(nickname.value);

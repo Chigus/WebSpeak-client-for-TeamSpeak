@@ -23,6 +23,11 @@
             id="server-address"
             v-model="serverHost"
             autocomplete="url"
+            inputmode="url"
+            autocapitalize="none"
+            autocorrect="off"
+            :spellcheck="false"
+            enterkeyhint="next"
             :placeholder="t('serverAddressPlaceholder')" /></div
       ></label>
       <label
@@ -39,6 +44,7 @@
             id="server-port"
             v-model="serverPort"
             inputmode="numeric"
+            enterkeyhint="next"
             type="text"
             maxlength="5"
             :placeholder="t('serverPortPlaceholder')" /></div
@@ -157,29 +163,7 @@
         autocomplete="nickname"
         maxlength="30"
         :placeholder="t('nicknamePlaceholder')"
-        autofocus
-      />
-    </div>
-
-    <label
-      class="field-label"
-      data-ws-part="home.field-label"
-      for="channel"
-      >{{ t("targetChannel") }} <span>{{ t("optional") }}</span></label
-    >
-    <div
-      class="field-wrap"
-      data-ws-part="home.field"
-    >
-      <Icon
-        name="hash"
-        :size="17"
-      />
-      <input
-        id="channel"
-        v-model="channel"
-        :placeholder="t('emptyDefault')"
-        @keyup.enter="emit('connect')"
+        :autofocus="autofocusNickname"
       />
     </div>
 
@@ -187,6 +171,17 @@
       class="identity-options"
       data-ws-part="home.identity"
       ><summary>{{ t("identityOptions") }}</summary
+      ><label
+        class="field-label"
+        data-ws-part="home.field-label"
+        for="channel"
+        >{{ t("targetChannel") }} <span>{{ t("optional") }}</span></label
+      ><div class="field-wrap" data-ws-part="home.field"><Icon name="hash" :size="17" /><input
+        id="channel"
+        v-model="channel"
+        :placeholder="t('emptyDefault')"
+        @keyup.enter="emit('connect')"
+      /></div
       ><div class="identity-controls"
         ><label class="remember-identity"
           ><input
@@ -261,6 +256,7 @@ const rememberIdentity = defineModel<boolean>("rememberIdentity", { required: tr
 const accelerationRelayId = defineModel<string>("accelerationRelayId", { required: true });
 
 defineProps<{
+  autofocusNickname?: boolean;
   accessMode: "fixed" | "open";
   openTargetPrefillBlocked: boolean;
   accelerationRelays: ReadonlyArray<{ id: string; name: string }>;

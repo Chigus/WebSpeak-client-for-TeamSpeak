@@ -11,6 +11,7 @@ import { hashAdminPassword, validateAdminPassword, verifyAdminPassword } from ".
 import { decryptSecret, encryptSecret } from "../security/secret-crypto.js";
 import { probeTeamSpeak, TeamSpeakProbeError } from "../server/teamspeak-probe.js";
 import { pingTeamSpeakHost } from "../server/network-probe.js";
+import { normalizeVoiceMediaHost, normalizeVoiceStunServer } from "../shared/voice-ice.js";
 import type { WebRtcAudioOptions } from "../server/webrtc-audio.js";
 import { DEFAULT_ACCELERATION_RELAY_PORT, type ConfiguredAccelerationRelay } from "../server/acceleration-relay.js";
 import { DEFAULT_WEBRTC_UDP_PORT_RANGE, WEBRTC_UDP_PORT_MAX, WEBRTC_UDP_PORT_MIN } from "../server/webrtc-config.js";
@@ -118,6 +119,9 @@ export class AdminService {
       lastTestLatencyMs: settings.lastTestLatencyMs,
       lastTestError: settings.lastTestError,
       webRtcEnabled: settings.webRtcEnabled,
+      webRtcPublicHost: settings.webRtcPublicHost,
+      webRtcIpv6Enabled: settings.webRtcIpv6Enabled,
+      webRtcStunServer: settings.webRtcStunServer,
       webRtcUdpStart: settings.webRtcUdpStart,
       webRtcUdpEnd: settings.webRtcUdpEnd,
       relayConfigured: settings.relayConfigured,
@@ -135,6 +139,9 @@ export class AdminService {
     const settings = this.database.getSettings();
     return {
       enabled: settings.webRtcEnabled,
+      publicHost: settings.webRtcPublicHost,
+      ipv6Enabled: settings.webRtcIpv6Enabled,
+      stunServer: settings.webRtcStunServer,
       udpPortRange: [settings.webRtcUdpStart, settings.webRtcUdpEnd],
     };
   }
@@ -341,6 +348,12 @@ export class AdminService {
     if (typeof input.webRtcEnabled !== "boolean") {
       throw new AdminInputError("INVALID_WEBRTC_ENABLED", "WebRTC enabled value is invalid");
     }
+    const webRtcPublicHost = normalizeVoiceMediaHost(input.webRtcPublicHost === undefined ? current.webRtcPublicHost : input.webRtcPublicHost);
+    const webRtcStunServer = normalizeVoiceStunServer(input.webRtcStunServer === undefined ? current.webRtcStunServer : input.webRtcStunServer);
+    const webRtcIpv6Enabled = input.webRtcIpv6Enabled === undefined ? current.webRtcIpv6Enabled : input.webRtcIpv6Enabled;
+    if (webRtcPublicHost === null) throw new AdminInputError("INVALID_WEBRTC_PUBLIC_HOST", "Use an IP address or hostname without a scheme, path or port");
+    if (webRtcStunServer === null) throw new AdminInputError("INVALID_WEBRTC_STUN_SERVER", "Use a UDP STUN URL: stun:host:port");
+    if (typeof webRtcIpv6Enabled !== "boolean") throw new AdminInputError("INVALID_WEBRTC_IPV6", "WebRTC IPv6 value must be boolean");
     const webRtcUdpStart = input.webRtcUdpStart ?? current.webRtcUdpStart ?? DEFAULT_WEBRTC_UDP_PORT_RANGE[0];
     const webRtcUdpEnd = input.webRtcUdpEnd ?? current.webRtcUdpEnd ?? DEFAULT_WEBRTC_UDP_PORT_RANGE[1];
     if (!Number.isInteger(webRtcUdpStart) || webRtcUdpStart < WEBRTC_UDP_PORT_MIN || webRtcUdpStart > WEBRTC_UDP_PORT_MAX) {
@@ -421,6 +434,7 @@ export class AdminService {
       tsPort: target.port,
       tsPasswordEncrypted: encryptedPassword,
       webRtcEnabled: input.webRtcEnabled,
+      webRtcPublicHost, webRtcIpv6Enabled, webRtcStunServer,
       webRtcUdpStart,
       webRtcUdpEnd,
       relayConfigured,
@@ -538,6 +552,9 @@ export class AdminService {
       tsPort: settings.tsPort,
       tsPasswordEncrypted: settings.tsPasswordEncrypted,
       webRtcEnabled: settings.webRtcEnabled,
+      webRtcPublicHost: settings.webRtcPublicHost,
+      webRtcIpv6Enabled: settings.webRtcIpv6Enabled,
+      webRtcStunServer: settings.webRtcStunServer,
       webRtcUdpStart: settings.webRtcUdpStart,
       webRtcUdpEnd: settings.webRtcUdpEnd,
       relayConfigured: settings.relayConfigured,
@@ -566,6 +583,9 @@ export class AdminService {
         tsPort: legacy.tsPort,
         tsPasswordEncrypted: legacy.tsServerPassword ? encryptSecret(legacy.tsServerPassword, this.masterSecret) : null,
         webRtcEnabled: current.webRtcEnabled,
+        webRtcPublicHost: current.webRtcPublicHost,
+        webRtcIpv6Enabled: current.webRtcIpv6Enabled,
+        webRtcStunServer: current.webRtcStunServer,
         webRtcUdpStart: current.webRtcUdpStart,
         webRtcUdpEnd: current.webRtcUdpEnd,
         relayConfigured: current.relayConfigured,

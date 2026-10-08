@@ -18,6 +18,7 @@ interface UseWebClientMembersOptions {
   setWhisperTargets: (clientIds: number[]) => void;
   sendPoke: (clientId: number, message: string) => void;
   setAway: (away: boolean, message: string) => void;
+  onManualStatusChange?: () => void;
   stopWhisperTalk: () => void;
   localizedMessage: (message: string) => string;
   showToast: (message: string) => void;
@@ -34,6 +35,7 @@ export function useWebClientMembers({
   setWhisperTargets,
   sendPoke,
   setAway,
+  onManualStatusChange,
   stopWhisperTalk,
   localizedMessage,
   showToast,
@@ -243,9 +245,16 @@ export function useWebClientMembers({
   }
 
   function toggleAway(): void {
+    onManualStatusChange?.();
     away.value = !away.value;
     awayMessage.value = away.value ? (window.prompt(t("awayPrompt"), awayMessage.value) ?? "") : "";
     setAway(away.value, awayMessage.value);
+  }
+
+  function setAutomaticAway(value: boolean): void {
+    away.value = value;
+    if (!value) awayMessage.value = "";
+    setAway(value, awayMessage.value);
   }
 
   function isSpeaking(member: ChannelMember): boolean {
@@ -268,6 +277,7 @@ export function useWebClientMembers({
     memberMoveMenuOtherChannels,
     openMemberMenu,
     openMemberActions,
+    setAutomaticAway,
     toggleMemberMoveMenu,
     moveMemberDirect,
     onMemberDragStart,

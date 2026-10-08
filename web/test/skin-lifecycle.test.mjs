@@ -192,10 +192,12 @@ test("normal initialization uses the instance default and cached custom content"
   const item = { ...skin("sample.a"), author: "test", license: "MIT", contentData: { title: "custom" } };
   installed.set(item.id, item);
   handler = async () => json({ skins: [item], defaultSkinId: item.id });
-  const view = page({ timeoutMs: 1_000 }); await view.initialize();
+  const themeMode = ref("system");
+  const view = page({ timeoutMs: 1_000, themeMode }); await view.initialize();
   assert.equal(view.skinReady.value, true);
   assert.equal(view.activeSkinId.value, item.id);
   assert.deepEqual(view.activeSkin.value.contentData, item.contentData);
+  assert.equal(themeMode.value, "system", "initializing a default custom skin must not override the saved system theme");
   assert.equal(storage.has("webspeak:skin-choice"), false);
   assert.equal(root.dataset.wsSkin, item.id);
 });

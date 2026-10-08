@@ -1564,6 +1564,12 @@
   line-height: 1.5;
 }
 
+:deep(.webrtc-network-field) {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
 :deep(.toggle-choice) {
   margin: 0;
 }

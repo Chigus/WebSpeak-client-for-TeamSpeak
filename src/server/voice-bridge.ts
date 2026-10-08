@@ -6,6 +6,7 @@ import { createAudioFlowStats, snapshotAudioStats, type AudioFlowStats } from ".
 export type { AudioFlowStats } from "./audio-stats.js";
 import type { ServerMessage } from "../shared/server-messages.js";
 import { parseWebRtcClientMessage } from "../shared/webrtc.js";
+import { resolveVoiceMediaAddresses } from "./webrtc-config.js";
 import type { ServerEvent as SharedServerEvent } from "../shared/voice-models.js";
 import { WebSocketServer, WebSocket } from "ws";
 import type { IncomingMessage, Server } from "node:http";
@@ -281,6 +282,7 @@ export class VoiceBridge {
           whisperTargetIds: [...entry!.whisperTargetIds],
           whisperActive: entry!.whisperActive,
           webrtcAvailable: this.getWebRtcOptions()?.enabled === true,
+          webRtcStunServer: this.getWebRtcOptions()?.stunServer ?? "",
           screenShareIceServers: this.getScreenShareIceServers(),
           accelerated: Boolean(entry!.acceleration),
           ...(entry!.rememberIdentity ? { identity: tsClient.getIdentityString() } : {}),
@@ -353,7 +355,9 @@ export class VoiceBridge {
           tsReady = true;
           events.syncSelf();
           sendInitialState();
-          void this.screenShares.discoverExistingStreams(entry!);
+          void this.screenShares.discoverExistingStreams(entry!).catch((error: unknown) => {
+            this.logger.debug({ entryId, err: error instanceof Error ? error.message : String(error) }, "Could not discover existing TeamSpeak screen streams");
+          });
         } catch (error: unknown) {
           const normalized = normalizeTeamSpeakError(error);
           const failureCode = clientConnectionFailureCode(normalized, serverPassword);
@@ -700,9 +704,14 @@ export class VoiceBridge {
     let peer: WebRtcAudioSession | null = null;
     const isCurrentPeer = (): boolean => isCurrent() && peer !== null && entry.webrtc === peer;
     try {
+      const publicAddresses = await resolveVoiceMediaAddresses(config.publicHost || entry.webrtcPublicHost, config.ipv6Enabled === true);
+      if (!isCurrent()) return;
       peer = this.createWebRtcSession({
         connectionId: entry.id,
-        ...(entry.webrtcPublicHost ? { publicHost: entry.webrtcPublicHost } : {}),
+        publicAddresses,
+        ...(config.publicHost || entry.webrtcPublicHost ? { publicHost: config.publicHost || entry.webrtcPublicHost } : {}),
+        ipv6Enabled: config.ipv6Enabled,
+        stunServer: config.stunServer,
         udpPortRange: config.udpPortRange,
         logger: this.logger,
         microphoneMuted: muted,

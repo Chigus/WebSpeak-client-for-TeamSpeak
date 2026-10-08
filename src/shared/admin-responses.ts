@@ -30,6 +30,9 @@ const settings = object({
   welcomeText: text, welcomeTextEn: text, welcomeTextDe: text, welcomeTextRu: text, welcomeTextJa: text,
   welcomeDefaults: welcomeTexts, lastTestAt: nullable(text), lastTestLatencyMs: nullable(number), lastTestError: nullable(text),
   webRtcEnabled: boolean, webRtcUdpStart: number, webRtcUdpEnd: number,
+  webRtcPublicHost: value => value === undefined ? "" : text(value),
+  webRtcIpv6Enabled: value => value === undefined ? false : boolean(value),
+  webRtcStunServer: value => value === undefined ? "" : text(value),
   relayConfigured: boolean, relayEnabled: boolean, relayName: text, relayTarget: text, hasRelayToken: boolean,
   relayNodes: array(relayNode), internalPort: number, updatedAt: text,
 });

@@ -92,6 +92,7 @@
       ref="chatListEl"
       class="message-list"
       data-ws-part="voice.chat.messages"
+      @scroll.passive="onScroll"
     >
       <div v-if="chatTab === 'events'">
         <article
@@ -160,11 +161,16 @@
       v-if="chatTab !== 'events'"
       class="message-composer"
       data-ws-part="voice.chat.composer"
-      @submit.prevent="submitMessage"
+      @submit.prevent="!composing && submitMessage()"
     >
       <input
         v-model="messageDraft"
         maxlength="500"
+        enterkeyhint="send"
+        autocomplete="off"
+        @compositionstart="composing = true"
+        @compositionend="composing = false"
+        @keydown.enter="guardComposition"
         :placeholder="chatPlaceholder"
         :aria-label="t('send')"
       />
@@ -173,6 +179,7 @@
         type="submit"
         :disabled="!canSendChat || !messageDraft.trim()"
         :title="t('send')"
+        :aria-label="t('send')"
         ><Icon
           name="send"
           :size="18"
@@ -189,7 +196,7 @@
 </template>
 
 <script setup lang="ts">
-import type { CSSProperties } from "vue";
+import { ref, type CSSProperties } from "vue";
 import Icon from "../Icon.vue";
 import type { useWebClientChat } from "../../composables/useWebClientChat.js";
 import type { ChatMessage, ServerEvent } from "../../composables/useVoiceWebSocket.js";
@@ -197,7 +204,7 @@ import type { ChatMessage, ServerEvent } from "../../composables/useVoiceWebSock
 type ChatPanelModel = Pick<ReturnType<typeof useWebClientChat>,
   | "tab" | "privateConversationKey" | "canSend" | "status" | "messageDraft"
   | "listElement" | "conversations" | "visibleMessages" | "tabLabel" | "title"
-  | "placeholder" | "openConversation" | "submitMessage"
+  | "placeholder" | "openConversation" | "submitMessage" | "onScroll"
 >;
 
 const props = defineProps<{
@@ -228,5 +235,12 @@ const {
   placeholder: chatPlaceholder,
   openConversation,
   submitMessage,
+  onScroll,
 } = props.model;
+
+const composing = ref(false);
+function guardComposition(event: KeyboardEvent): void {
+  // Android IME and Safari can confirm a candidate with Enter; that is not Send.
+  if (composing.value || event.isComposing || event.keyCode === 229) event.preventDefault();
+}
 </script>

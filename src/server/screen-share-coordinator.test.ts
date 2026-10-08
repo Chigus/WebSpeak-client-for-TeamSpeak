@@ -130,6 +130,149 @@ test("native discovery runs again when the last session on a target has left", a
   assert.ok(f.commands.some(({ from, command }) => from === second.id && command === "requeststreaminfo clid=2"));
 });
 
+test("a later session rediscovers a previously queried source and announces it only once", async () => {
+  const f = fixture();
+  const first = f.participant("first", 1);
+  first.members = new Map([[17, {}]]);
+  first.channelTree[0]!.members!.push({ id: 17, nickname: "Native" });
+  await f.coordinator.discoverExistingStreams(first);
+  const later = f.participant("later", 2);
+  later.members = first.members;
+  later.channelTree = first.channelTree;
+  let queries = 0;
+  later.tsClient.sendProtocolCommand = async command => {
+    assert.equal(command, "requeststreaminfo clid=17");
+    queries++;
+    f.coordinator.handleNotification(later, { name: "notifystreaminfo", params: { id: "native", clid: "17" } });
+  };
+  await f.coordinator.discoverExistingStreams(later);
+  await f.coordinator.discoverExistingStreams(later);
+  assert.equal(queries, 2);
+  assert.equal(f.list(later)[0]?.streamId, "native");
+  assert.equal(f.messages.filter(({ to, message }) => to === later.id && message.type === "screenShareStarted").length, 1);
+});
+
+test("overlapping discovery uses one trailing pass with the latest directory and does not block another server", async () => {
+  const f = fixture();
+  const first = f.participant("first", 1);
+  first.members = new Map([[17, {}]]);
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  let firstQueries = 0;
+  first.tsClient.sendProtocolCommand = async () => { firstQueries++; await blocked; };
+  const running = f.coordinator.discoverExistingStreams(first);
+  await nextTurn();
+  const second = f.participant("second", 2);
+  const latest = f.participant("latest", 3);
+  latest.members = new Map([[17, {}], [18, {}]]);
+  const pending = f.coordinator.discoverExistingStreams(second);
+  const coalesced = f.coordinator.discoverExistingStreams(latest);
+  const other = f.participant("other", 4, 1n, "second.example");
+  await f.coordinator.discoverExistingStreams(other);
+  assert.deepEqual(f.commands, [{ from: "other", command: "requeststreaminfo clid=4" }]);
+  release();
+  await Promise.all([running, pending, coalesced]);
+  assert.equal(firstQueries, 1);
+  assert.deepEqual(f.commands.slice(1), [
+    { from: "latest", command: "requeststreaminfo clid=17" },
+    { from: "latest", command: "requeststreaminfo clid=18" },
+  ]);
+});
+
+test("discovery abandons a removed connection and falls back when its queued session also leaves", async () => {
+  const f = fixture();
+  const first = f.participant("first", 1);
+  first.members = new Map([[17, {}], [18, {}]]);
+  let release!: () => void;
+  let firstQueries = 0;
+  first.tsClient.sendProtocolCommand = async () => {
+    firstQueries++;
+    await new Promise<void>(resolve => { release = resolve; });
+  };
+  const running = f.coordinator.discoverExistingStreams(first);
+  await nextTurn();
+  const leaving = f.participant("leaving", 2);
+  const pending = f.coordinator.discoverExistingStreams(leaving);
+  f.participant("other-server", 3, 1n, "second.example");
+  const survivor = f.participant("survivor", 4);
+  survivor.members = first.members;
+  f.entries.delete(first.id);
+  f.entries.delete(leaving.id);
+  release();
+  await Promise.all([running, pending]);
+  assert.equal(firstQueries, 1);
+  assert.deepEqual(f.commands, [
+    { from: "survivor", command: "requeststreaminfo clid=17" },
+    { from: "survivor", command: "requeststreaminfo clid=18" },
+  ]);
+});
+
+test("a failed native query does not suppress later clients or future discovery passes", async () => {
+  const f = fixture();
+  const entry = f.participant("viewer", 1);
+  entry.members = new Map([[17, {}], [18, {}]]);
+  const queries: string[] = [];
+  entry.tsClient.sendProtocolCommand = async command => {
+    queries.push(command);
+    if (queries.length === 1) throw new Error("query failed");
+  };
+  await f.coordinator.discoverExistingStreams(entry);
+  await f.coordinator.discoverExistingStreams(entry);
+  assert.deepEqual(queries, [17, 18, 17, 18].map(id => `requeststreaminfo clid=${id}`));
+});
+
+test("native lookup can use a connected directory on the same server when the observer lacks the source", () => {
+  const f = fixture();
+  const collision = f.participant("collision", 3, 99n, "second.example");
+  collision.channelTree[0]!.members!.push({ id: 17, nickname: "Collision" });
+  const offline = f.participant("offline", 4, 88n);
+  offline.channelTree[0]!.members!.push({ id: 17, nickname: "Stale" });
+  offline.tsClient.isConnected = () => false;
+  const observer = f.participant("observer", 1);
+  const viewer = f.participant("viewer", 2, 2n);
+  viewer.channelTree[0]!.members!.push({ id: 17, nickname: "Native" });
+  f.coordinator.handleNotification(observer, { name: "notifystreaminfo", params: { id: "native", clid: "17" } });
+  assert.deepEqual(f.messages.filter(({ message }) => message.type === "screenShareStarted").map(({ to }) => to), [viewer.id]);
+  assert.equal(f.list(observer).length, 0);
+  assert.equal(f.list(viewer)[0]?.streamId, "native");
+});
+
+test("an unknown native source never inherits the observer's channel", () => {
+  const f = fixture();
+  const viewer = f.participant("viewer", 1);
+  const collision = f.participant("collision", 2, 1n, "second.example");
+  collision.channelTree[0]!.members!.push({ id: 17, nickname: "Other source" });
+  f.coordinator.handleNotification(viewer, { name: "notifystreaminfo", params: { id: "native", clid: "17" } });
+  assert.equal(f.list(viewer).length, 0);
+});
+
+test("channel correction retires old viewers before announcing the native stream in its current channel", async () => {
+  const f = fixture();
+  const oldViewer = f.participant("old-viewer", 1);
+  oldViewer.channelTree[0]!.members!.push({ id: 17, nickname: "Native" });
+  const newViewer = f.participant("new-viewer", 2, 2n);
+  f.coordinator.handleNotification(oldViewer, { name: "notifystreaminfo", params: { id: "native", clid: "17" } });
+  f.handle(oldViewer, { type: "screenShareJoin", streamId: "native" });
+  assert.equal(f.list(oldViewer)[0]?.viewerCount, 1);
+  await nextTurn();
+  f.messages.length = 0;
+  // A fresh directory corrects the source channel without a clientMoved event.
+  // The observer must take precedence over the first session's stale snapshot.
+  newViewer.channelTree[0]!.members!.push({ id: 17, nickname: "Native" });
+  f.coordinator.handleNotification(newViewer, { name: "notifystreaminfo", params: { id: "native", clid: "17" } });
+  const stopped = f.messages.findIndex(({ to, message }) => to === oldViewer.id && message.type === "screenShareStopped");
+  const started = f.messages.findIndex(({ to, message }) => to === newViewer.id && message.type === "screenShareStarted");
+  assert.ok(stopped >= 0 && started > stopped);
+  assert.ok(f.commands.some(({ from, command }) => from === oldViewer.id && command === "removeclientfromstream id=native clid=1 reason=1"));
+  assert.equal(f.list(oldViewer).length, 0);
+  assert.equal(f.list(newViewer)[0]?.viewerCount, 0);
+  f.messages.length = 0;
+  f.coordinator.handleNotification(oldViewer, { name: "notifyrespondjoinstreamrequest", params: { id: "native", offer: "late-offer" } });
+  assert.equal(f.messages.some(({ message }) => message.type === "screenShareSignal"), false);
+  f.handle(newViewer, { type: "screenShareJoin", streamId: "native" });
+  assert.equal(f.list(newViewer)[0]?.viewerCount, 1);
+});
+
 test("owner removal is idempotent and clears the stream from remaining viewers", async () => {
   const f = fixture();
   const owner = f.participant("owner", 1);

@@ -1,9 +1,20 @@
 const DB_NAME = "webspeak-local";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const CURRENT_IDENTITY_KEY = "current";
 const PREFERENCES_KEY = "singleton";
 
 import type { InstalledSkin } from "./skin-pack.js";
+import type { ChatMessage } from "../../../src/shared/voice-models.js";
+
+const MAX_CHAT_HISTORY_MESSAGES_PER_CONVERSATION = 200;
+
+interface ChatHistoryRecord {
+  id: string;
+  serverKey: string;
+  conversationKey: string;
+  messages: ChatMessage[];
+  updatedAt: number;
+}
 
 export interface StoredIdentity {
   id: string;
@@ -69,6 +80,10 @@ function openDatabase(): Promise<IDBDatabase> {
       if (!database.objectStoreNames.contains("favorites")) database.createObjectStore("favorites", { keyPath: "id" });
       if (!database.objectStoreNames.contains("recent")) database.createObjectStore("recent", { keyPath: "id" });
       if (!database.objectStoreNames.contains("skins")) database.createObjectStore("skins", { keyPath: "id" });
+      if (!database.objectStoreNames.contains("chatHistory")) {
+        const store = database.createObjectStore("chatHistory", { keyPath: "id" });
+        store.createIndex("serverKey", "serverKey", { unique: false });
+      }
     };
     request.onsuccess = () => {
       const database = request.result;
@@ -288,6 +303,66 @@ export async function recordRecentServer(server: RecentServer): Promise<void> {
   }
 }
 
+export function normalizeChatHistoryServerKey(target: string): string {
+  return target.trim().toLowerCase() || "__default__";
+}
+
+export function getChatHistoryConversationKey(message: ChatMessage): string | null {
+  if (message.scope === "channel") return `channel:${message.targetId || "unknown"}`;
+  if (message.scope === "server") return "server";
+  if (message.scope !== "private") return null;
+  if (message.conversationKey?.startsWith("uid:")) return `private:${message.conversationKey}`;
+  if (message.senderUid && !message.isSelf) return `private:uid:${message.senderUid}`;
+  const clientId = message.conversationId || message.senderId;
+  const peerName = message.conversationName || (message.isSelf ? "" : message.invokerName);
+  return clientId ? `private:client:${JSON.stringify([clientId, peerName])}` : null;
+}
+
+export async function loadChatHistory(serverKey: string): Promise<ChatMessage[]> {
+  if (!serverKey) return [];
+  try {
+    const records = await request<ChatHistoryRecord[]>("chatHistory", "readonly", (store, resolve, reject) => {
+      const get = store.index("serverKey").getAll(serverKey);
+      get.onsuccess = () => resolve(get.result as ChatHistoryRecord[]);
+      get.onerror = () => reject(get.error);
+    });
+    return records.flatMap(record => record.messages).sort((left, right) => left.timestamp - right.timestamp)
+      .map(message => ({ ...message, isHistory: true }));
+  } catch {
+    return [];
+  }
+}
+
+export async function saveChatHistoryMessage(serverKey: string, message: ChatMessage): Promise<void> {
+  const conversationKey = getChatHistoryConversationKey(message);
+  if (!serverKey || !conversationKey) return;
+  try {
+    const database = await openDatabase();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction("chatHistory", "readwrite");
+      const store = transaction.objectStore("chatHistory");
+      const id = JSON.stringify([serverKey, conversationKey]);
+      const get = store.get(id);
+      get.onerror = () => reject(get.error ?? new Error("Could not read local chat history"));
+      get.onsuccess = () => {
+        const existing = get.result as ChatHistoryRecord | undefined;
+        const messages = (existing?.messages ?? []).filter(item => item.id !== message.id);
+        const storedMessage = { ...message };
+        delete storedMessage.isHistory;
+        messages.push(storedMessage);
+        messages.sort((left, right) => left.timestamp - right.timestamp);
+        if (messages.length > MAX_CHAT_HISTORY_MESSAGES_PER_CONVERSATION) messages.splice(0, messages.length - MAX_CHAT_HISTORY_MESSAGES_PER_CONVERSATION);
+        store.put({ id, serverKey, conversationKey, messages, updatedAt: Date.now() } satisfies ChatHistoryRecord);
+      };
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error("Local chat history transaction failed"));
+      transaction.onabort = () => reject(transaction.error ?? new Error("Local chat history transaction aborted"));
+    });
+  } catch {
+    // Local chat history is best effort and must never interrupt a voice session.
+  }
+}
+
 async function removeRecentServer(id: string): Promise<void> {
   await request("recent", "readwrite", (store, resolve, reject) => {
     const remove = store.delete(id);
@@ -299,7 +374,7 @@ async function removeRecentServer(id: string): Promise<void> {
 export async function clearLocalData(): Promise<void> {
   try {
     const database = await openDatabase();
-    await Promise.all(["identities", "preferences", "favorites", "recent", "skins"].map((storeName) => new Promise<void>((resolve, reject) => {
+    await Promise.all(["identities", "preferences", "favorites", "recent", "skins", "chatHistory"].map((storeName) => new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(storeName, "readwrite");
       transaction.objectStore(storeName).clear();
       transaction.oncomplete = () => resolve();

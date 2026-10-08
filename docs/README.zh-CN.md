@@ -64,6 +64,16 @@ WebRTC 将浏览器语音切换到实时媒体通道，也支持桌面端伴奏�
 
 WebRTC 启用后端口范围会锁定。要修改端口，先关闭 WebRTC 并保存，再修改端口并同步防火墙规则。公网使用还需要 HTTPS。
 
+### 反向代理 / TCP 隧道下的语音 WebRTC
+
+在管理后台的 WebRTC 高级参数中可设置：
+
+- **公网媒体地址**：WebSpeak 网关可被 UDP 访问的 IP 或域名，不含协议、路径或端口。优先于网页入口推断；留空时按 `Origin`、`X-Forwarded-Host`、`Host` 推断。域名会解析为 IP 候选。反代域名不一定是媒体地址。
+- **启用 IPv6 候选**：默认关闭；开启后保留 IPv4，同时收集 IPv6。需确保 IPv6 路由及 UDP 防火墙放行。
+- **语音 STUN 服务**：可设置 `stun:turn.teamspeak.com:3478`，浏览器和网关使用同一服务发现公网映射。留空保留旧行为：werift 网关仍使用库内置 STUN，浏览器不配置 STUN。当前字段仅支持可通过 IPv4 访问的 UDP STUN 域名或 IPv4 地址，不接受 IPv6 字面量、TURN 或凭据；IPv6 媒体候选独立于 STUN 开关。
+
+保存后重新连接。网页和 WebSocket 经反代可达，不代表媒体 UDP 可达；STUN 仅发现地址，不中继音频，也不保证穿透所有 NAT。只有 TCP 隧道而无可用 UDP/IPv6 路径时，仍会回退兼容传输。应开放配置的整个 UDP 端口范围；静态端口转发需保持相同端口映射。
+
 ### 屏幕共享的 ICE 候选
 
 屏幕共享媒体仍优先走浏览器之间的直连，WebSpeak 只转发协商信令。默认使用 TeamSpeak 官方 STUN 服务发现公网候选地址；STUN 不承载媒体。若部署者有合规的外部 TURN 服务，可在启动 WebSpeak 前设置 `WEBSPEAK_SCREEN_SHARE_ICE_SERVERS`，值为 JSON 数组，例如：

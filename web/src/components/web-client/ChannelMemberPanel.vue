@@ -109,13 +109,13 @@
               data-ws-part="voice.member-row.copy"
               ><strong>{{ memberDisplayName(member) }}</strong
               ><span>{{
-                member.away
+                member.away === true
                   ? t("away")
                   : isSpeaking(member)
                     ? t("speaking")
-                    : member.isSelf
-                      ? t("yourDevice")
-                      : t("memberOnline")
+                    : member.away === false
+                      ? member.isSelf ? t("yourDevice") : t("memberOnline")
+                      : t("statusUnknown")
               }}</span></div
             >
             <div
@@ -130,7 +130,13 @@
                   name="clock"
                   :size="13" /></span
               ><span
-                v-if="member.inputMuted"
+                v-if="member.inputMuted === undefined"
+                class="unknown"
+                :title="t('statusUnknown')"
+                :aria-label="t('statusUnknown')"
+                ><Icon name="info" :size="13" /></span
+              ><span
+                v-else-if="member.inputMuted"
                 :title="t('inputMuted')"
                 :aria-label="t('inputMuted')"
                 ><Icon

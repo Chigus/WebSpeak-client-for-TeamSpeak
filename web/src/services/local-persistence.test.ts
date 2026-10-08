@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { before, after, beforeEach, test } from "node:test";
 import { setImmediate as nextTurn } from "node:timers/promises";
-import { loadLocalPreferences, saveInstalledSkin, saveLocalPreferences } from "./local-persistence.js";
+import { getChatHistoryConversationKey, loadLocalPreferences, normalizeChatHistoryServerKey, saveInstalledSkin, saveLocalPreferences } from "./local-persistence.js";
 import type { InstalledSkin } from "./skin-pack.js";
 
 // Control IndexedDB's request and transaction completion separately. These tests
@@ -23,6 +23,14 @@ class Transaction {
 }
 const database = { transaction: () => { const tx = new Transaction(); transactions.push(tx); return tx; } };
 const sample = { id: "sample.a", css: "", assets: {} } as InstalledSkin;
+
+test("chat history keys isolate server targets and group private messages by stable conversation", () => {
+  assert.equal(normalizeChatHistoryServerKey(" Example.COM:9987 "), "example.com:9987");
+  const privateMessage = { id: "m1", scope: "private", conversationKey: "uid:peer", invokerName: "Peer", message: "hi", timestamp: 1 } as const;
+  assert.equal(getChatHistoryConversationKey(privateMessage), "private:uid:peer");
+  assert.equal(getChatHistoryConversationKey({ ...privateMessage, conversationKey: "unknown-member-session-1", conversationId: "7", conversationName: "Peer" }), 'private:client:["7","Peer"]');
+  assert.equal(getChatHistoryConversationKey({ ...privateMessage, scope: "channel", targetId: "42" }), "channel:42");
+});
 before(() => Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: {
   open: () => opening = { result: database },
 } }));

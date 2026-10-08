@@ -261,7 +261,21 @@
                       min="1024"
                       max="65535"
                       :disabled="serverForm.webRtcEnabled" /></label></div></div
-              ><small class="field-help">{{ tr("webrtcApplyHint") }}</small></section
+              ><label class="webrtc-network-field">
+                <span>{{ tr("webrtcPublicHost") }}</span>
+                <input v-model="serverForm.webRtcPublicHost" type="text" maxlength="253" autocomplete="off" :spellcheck="false" placeholder="media.example.com" />
+                <small class="field-help">{{ tr("webrtcPublicHostLead") }}</small>
+              </label>
+              <label class="choice toggle-choice" :class="{ selected: serverForm.webRtcIpv6Enabled }">
+                <input v-model="serverForm.webRtcIpv6Enabled" type="checkbox" />
+                <span><strong>{{ tr("webrtcIpv6") }}</strong><small>{{ tr("webrtcIpv6Lead") }}</small></span>
+              </label>
+              <label class="webrtc-network-field">
+                <span>{{ tr("webrtcStunServer") }}</span>
+                <input v-model="serverForm.webRtcStunServer" type="text" maxlength="300" autocomplete="off" :spellcheck="false" placeholder="stun:turn.teamspeak.com:3478" />
+                <small class="field-help">{{ tr("webrtcStunServerLead") }}</small>
+              </label>
+              <small class="field-help">{{ tr("webrtcApplyHint") }}</small></section
             >
             <section class="settings-subsection relay-card"
               ><header class="settings-subsection-heading"

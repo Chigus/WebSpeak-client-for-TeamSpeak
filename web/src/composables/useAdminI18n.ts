@@ -30,6 +30,7 @@ const eventLabels: Record<string, AdminTranslationKey> = {
 };
 const errorLabels: Record<string, AdminTranslationKey> = {
   INVALID_PASSWORD: "invalidPassword", INVALID_ADMIN_PASSWORD: "setupPasswordShort", PASSWORD_CHANGE_REQUIRED: "changePasswordLead", RATE_LIMITED: "rateLimited",
+  INVALID_WEBRTC_PUBLIC_HOST: "invalidWebRtcNetworkError", INVALID_WEBRTC_STUN_SERVER: "invalidWebRtcNetworkError", INVALID_WEBRTC_IPV6: "invalidWebRtcNetworkError",
   INVALID_WEBRTC_PORT_RANGE: "invalidWebRtcPortRangeError", WEBRTC_PORT_LOCKED: "webRtcPortLockedError",
   INVALID_RELAY_NAME: "invalidRelayNameError", INVALID_RELAY_TARGET: "invalidRelayTargetError", INVALID_RELAY_TOKEN: "invalidRelayTokenError",
   INVALID_TARGET: "invalidTargetError", PING_UNAVAILABLE: "icmpUnavailableError", HOST_NOT_FOUND: "probeHostNotFoundError",

@@ -5,7 +5,8 @@ type DirectoryDelta =
   | { type: "clientEnter"; info: ClientInfo }
   | { type: "clientLeave"; id: number }
   | { type: "clientMoved"; id: number; channelID: bigint }
-  | { type: "clientUpdated"; info: DirectoryClientInfo };
+  | { type: "clientUpdated"; info: DirectoryClientInfo }
+  | { type: "clientListSnapshot"; clients: DirectoryClientInfo[] };
 
 /**
  * Merges staged welcome snapshots with events received while the snapshot is
@@ -52,6 +53,10 @@ export class DirectorySynchronizer {
     this.applyOrQueue({ type: "clientUpdated", info });
   }
 
+  applyClientListSnapshot(clients: DirectoryClientInfo[]): void {
+    this.applyOrQueue({ type: "clientListSnapshot", clients });
+  }
+
   getSnapshot(): TSDirectorySnapshot | null {
     if (!this.snapshot) return null;
     return {
@@ -90,6 +95,15 @@ export class DirectorySynchronizer {
       if (this.departedClientIds.has(delta.info.id)) return;
       const current = this.clients.get(delta.info.id);
       this.clients.set(delta.info.id, current ? { ...current, ...delta.info } : delta.info);
+      return;
+    }
+    if (delta.type === "clientListSnapshot") {
+      for (const info of delta.clients) {
+        const current = this.clients.get(info.id);
+        // A refresh enriches known members; it must not resurrect someone who
+        // left while the asynchronous list request was in flight.
+        if (current && !this.departedClientIds.has(info.id)) this.clients.set(info.id, { ...current, ...info });
+      }
       return;
     }
     const current = this.clients.get(delta.id);

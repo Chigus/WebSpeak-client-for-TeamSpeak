@@ -176,6 +176,30 @@ test("a successful settings save clears submitted secrets and updates their stor
   assert.equal(state.errorMessage, "");
 });
 
+test("ICE settings load, submit and preserve edits made during a pending save", async () => {
+  await mount();
+  const network = { webRtcPublicHost: "media.example.com", webRtcIpv6Enabled: true, webRtcStunServer: "stun:stun.example.com:3478" };
+  handler = path => Promise.resolve(json(path === "/server" ? settings(network) : defaults(path)));
+  await serverModel.loadServerSettings();
+  for (const [key, value] of Object.entries(network)) assert.equal(serverModel.serverForm[key], value);
+  const save = deferred();
+  handler = (path, init) => {
+    if (path !== "/server" || init.method !== "PUT") return Promise.resolve(json(defaults(path)));
+    const submitted = JSON.parse(init.body);
+    for (const [key, value] of Object.entries(network)) assert.equal(submitted[key], value);
+    return save.promise;
+  };
+  const pending = serverModel.saveServerSettings();
+  serverModel.serverForm.webRtcPublicHost = "new-media.example.com";
+  serverModel.serverForm.webRtcIpv6Enabled = false;
+  serverModel.serverForm.webRtcStunServer = "";
+  save.resolve(json({ ok: true, settings: settings(network) }));
+  await pending;
+  assert.equal(serverModel.serverForm.webRtcPublicHost, "new-media.example.com");
+  assert.equal(serverModel.serverForm.webRtcIpv6Enabled, false);
+  assert.equal(serverModel.serverForm.webRtcStunServer, "");
+});
+
 test("settings saves preserve relay edits, removals and additions made while awaiting the server", async () => {
   await mount();
   serverModel.addRelayNode(); serverModel.addRelayNode();

@@ -4,8 +4,9 @@
       'web-client',
       'ws-skin-root',
       `language-${language}`,
-      { 'skin-initializing': !skinReady },
+      { 'skin-initializing': !skinReady, 'keyboard-open': mobileViewport.keyboardOpen },
     ]"
+    :style="{ '--ws-viewport-height': `${mobileViewport.height}px`, '--ws-viewport-top': `${mobileViewport.top}px` }"
     data-ws-part="app"
     :data-ws-page="
       voiceState.connected || voiceState.reconnecting || voiceState.reconnectFailed
@@ -188,6 +189,7 @@
 
           <JoinForm
             v-if="initialized"
+            :autofocus-nickname="!isMobileViewport"
             v-model:server-host="serverHost"
             v-model:server-port="serverPort"
             v-model:server-password="serverPassword"
@@ -379,6 +381,7 @@
             />
             <button
               class="disconnect-button"
+              :aria-label="t('exit')"
               @click="doDisconnect"
               ><Icon
                 name="door"
@@ -415,7 +418,7 @@
               v-if="voiceState.reconnectFailed"
               type="button"
               class="secondary-button"
-              @click="reconnectNow"
+              @click="reconnectMobile"
               >{{ t("reconnectNow") }}</button
             ><button
               type="button"
@@ -529,21 +532,26 @@
                   type="button"
                   class="mobile-voice-toggle"
                   :class="{ muted: microphoneMuted }"
+                  :aria-label="t('microphone')"
+                  :title="microphoneMuted ? t('microphoneMuted') : t('microphoneActive')"
                   :aria-pressed="!microphoneMuted"
                   @click="toggleMicrophone"
                   ><Icon
                     :name="microphoneMuted ? 'mic-off' : 'mic'"
                     :size="18"
-                  /><span>{{ microphoneMuted ? t("unmuteMic") : t("muteMic") }}</span></button
+                  /><span>{{ t("microphone") }}</span></button
                 >
                 <button
                   type="button"
-                  class="mobile-voice-settings"
-                  @click="settingsOpen = true"
-                  ><Icon
-                    name="settings"
-                    :size="17"
-                  /><span>{{ t("audioSettings") }}</span></button
+                  class="mobile-voice-toggle"
+                  :class="{ muted: outputMuted }"
+                  :aria-label="t('speaker')"
+                  :title="outputMuted ? t('outputMuted') : t('speaker')"
+                  :aria-pressed="!outputMuted"
+                  @click="toggleOutputMute"
+                  ><Icon :name="outputMuted ? 'volume-off' : 'volume'" :size="18" /><span>{{ t("speaker") }}</span></button
+                >
+                <button type="button" class="mobile-voice-leave" :aria-label="t('exit')" :title="t('exit')" @click="doDisconnect"><Icon name="door" :size="17" /></button
                 >
               </div>
             </section>
@@ -578,6 +586,11 @@
         @select-channel="selectChannel"
         @volume-input="onVolInput"
       >
+        <div v-if="isMobileViewport" class="mobile-member-controls" role="toolbar" :aria-label="t('desktopAudioControls')">
+          <button type="button" class="mobile-voice-toggle" :class="{ muted: microphoneMuted }" :aria-label="t('microphone')" :title="microphoneMuted ? t('microphoneMuted') : t('microphoneActive')" :aria-pressed="!microphoneMuted" @click="toggleMicrophone"><Icon :name="microphoneMuted ? 'mic-off' : 'mic'" :size="20" /><span>{{ t('microphone') }}</span></button>
+          <button type="button" class="mobile-voice-toggle" :class="{ muted: outputMuted }" :aria-label="t('speaker')" :title="outputMuted ? t('outputMuted') : t('speaker')" :aria-pressed="!outputMuted" @click="toggleOutputMute"><Icon :name="outputMuted ? 'volume-off' : 'volume'" :size="20" /><span>{{ t('speaker') }}</span></button>
+          <button type="button" class="mobile-member-leave" :aria-label="t('exit')" :title="t('exit')" @click="doDisconnect"><Icon name="door" :size="18" /></button>
+        </div>
         <AudioDock
           v-if="!isMobileViewport"
           :model="audioDockState"
@@ -651,7 +664,8 @@
         <button
           type="button"
           :class="{ active: mobileSection === 'channels' }"
-          @click="mobileSection = 'channels'"
+          :aria-current="mobileSection === 'channels' ? 'page' : undefined"
+          @click="selectMobileSection('channels')"
           ><Icon
             name="volume"
             :size="18"
@@ -660,7 +674,8 @@
         <button
           type="button"
           :class="{ active: mobileSection === 'chat' }"
-          @click="mobileSection = 'chat'"
+          :aria-current="mobileSection === 'chat' ? 'page' : undefined"
+          @click="selectMobileSection('chat')"
           ><Icon
             name="message"
             :size="18"
@@ -669,7 +684,8 @@
         <button
           type="button"
           :class="{ active: mobileSection === 'voice' }"
-          @click="mobileSection = 'voice'"
+          :aria-current="mobileSection === 'voice' ? 'page' : undefined"
+          @click="selectMobileSection('voice')"
           ><Icon
             name="mic"
             :size="18"
@@ -678,7 +694,8 @@
         <button
           type="button"
           :class="{ active: mobileSection === 'more' }"
-          @click="mobileSection = 'more'"
+          :aria-current="mobileSection === 'more' ? 'page' : undefined"
+          @click="selectMobileSection('more')"
           ><Icon
             name="more"
             :size="18"
@@ -747,6 +764,7 @@
 </template>
 
 <script setup lang="ts">
+import { observeMobileViewport } from "../services/mobile-viewport.js";
 import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from "vue";
 import Icon from "../components/Icon.vue";
 import VoiceMemberCards from "../components/web-client/VoiceMemberCards.vue";
@@ -784,8 +802,10 @@ import { clearLocalData as clearStoredLocalData, isLocalPersistenceAvailable, lo
 import type { InstalledSkin, SkinHomeCopy } from "../services/skin-pack.js";
 import { isPublicSkinEnabled } from "../services/skin-catalog.js";
 import { BUILTIN_DARK_SKIN, BUILTIN_LIGHT_SKIN } from "../services/skin-runtime.js";
-import { applyTheme, getStoredTheme, isDarkTheme, saveTheme, type ThemeMode } from "../services/theme.js";
-import { DEFAULT_TEAM_SPEAK_PORT, splitTeamSpeakTarget } from "../services/teamspeak-target.js";
+import { applyTheme, getStoredTheme, type ThemeMode } from "../services/theme.js";
+import { createScreenWakeLockController, getScreenWakeLockApi, type ScreenWakeLockController, type ScreenWakeLockSnapshot } from "../services/screen-wake-lock.js";
+import { createMobileAwayController, type MobileAwayController } from "../services/mobile-away.js";
+import { combineTeamSpeakTarget, DEFAULT_TEAM_SPEAK_PORT, splitTeamSpeakTarget } from "../services/teamspeak-target.js";
 
 const {
   state: voiceState,
@@ -893,7 +913,13 @@ const toast = ref("");
 const localPersistenceAvailable = isLocalPersistenceAvailable();
 const identityReady = ref(!localPersistenceAvailable);
 const mobileSection = ref<"channels" | "chat" | "voice" | "more">("channels");
-const isMobileViewport = ref(false);
+const isMobileViewport = ref(window.matchMedia("(max-width: 740px)").matches);
+let mobileAwayController: MobileAwayController | undefined;
+const shouldKeepScreenAwake = computed(() => isMobileViewport.value && (voiceState.connected || voiceState.connecting || voiceState.reconnecting));
+const screenWakeLockState = ref<ScreenWakeLockSnapshot>({ supported: false, enabled: false, active: false, requesting: false, unavailable: false });
+let screenWakeLockController: ScreenWakeLockController | undefined;
+const mobileViewport = reactive({ height: window.innerHeight, top: 0, keyboardOpen: false });
+let stopViewportObservation: (() => void) | undefined;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
 const language = ref<Language>(getInitialLanguage());
@@ -937,14 +963,8 @@ const {
   localizedWelcomeText,
   loadPublicConfig,
 } = useWebClientPublicConfig({ serverHost, serverPort, accelerationRelayId, language, t });
-type SkinMode = Exclude<ThemeMode, "system">;
-function resolveSkinMode(theme: ThemeMode): SkinMode {
-  return theme === "system" ? (isDarkTheme(theme) ? "dark" : "light") : theme;
-}
-
-const themeMode = ref<SkinMode>(resolveSkinMode(getStoredTheme()));
+const themeMode = ref<ThemeMode>(getStoredTheme());
 applyTheme(themeMode.value);
-if (localStorage.getItem("webspeak:theme") === "system") saveTheme(themeMode.value);
 const publicSkin = usePublicSkin({ activeSkin, themeMode, appVersion: () => appVersion.value });
 const { activeSkinId, skinReady, installedSkins, catalogSkins, select: onSkinChange, initialize: initializeSkin } = publicSkin;
 const skinOptions = computed<SkinOption[]>(() => [
@@ -1009,6 +1029,13 @@ const audioControls = useWebClientAudioControls({
   showToast,
   t,
 });
+function enableScreenWakeLockForSession(): void {
+  if (isMobileViewport.value) screenWakeLockController?.enable();
+}
+function reconnectMobile(): void {
+  enableScreenWakeLockForSession();
+  reconnectNow();
+}
 const { toggleMicrophone, stopWhisperTalk } = audioControls;
 const audioDockState = { microphoneMuted, inputVolume, outputVolume, outputMuted, noiseSuppressionEnabled, accompanimentActive };
 const audioSettingsState = {
@@ -1090,12 +1117,13 @@ const memberControls = useWebClientMembers({
   setWhisperTargets,
   sendPoke,
   setAway,
+  onManualStatusChange: () => mobileAwayController?.preserveManualStatus(),
   stopWhisperTalk,
   localizedMessage,
   showToast,
   t,
 });
-const { away, memberMenu, clearWhisperTargets, isSpeaking, openMemberActions } = memberControls;
+const { away, memberMenu, clearWhisperTargets, isSpeaking, openMemberActions, setAutomaticAway } = memberControls;
 const chat = useWebClientChat({
   messages: chatMessages,
   members,
@@ -1105,7 +1133,7 @@ const chat = useWebClientChat({
   clientId: computed(() => voiceState.tsClientId),
   connected: computed(() => voiceState.connected),
   sessionEpoch,
-  memberConversationKey,
+  serverKey: computed(() => combineTeamSpeakTarget(serverHost.value, serverPort.value)),
   isMobileViewport,
   mobileSection,
   closeMemberMenu: () => { memberMenu.value = null; },
@@ -1115,6 +1143,7 @@ const chat = useWebClientChat({
   notifyPrivateMessage: () => playNotification("private"),
   t,
 });
+watch(() => mobileViewport.height, () => chat.scrollIfFollowing(), { flush: "post" });
 const { tab: chatTab, openPrivateChat } = chat;
 const {
   canJoin,
@@ -1149,6 +1178,7 @@ const {
   channelPasswordDialog,
   serverPasswordDialog,
   chatTab,
+  beforeConnect: enableScreenWakeLockForSession,
   connect,
   disconnect,
   switchChannel,
@@ -1197,12 +1227,32 @@ watch(() => voiceState.reconnecting, (reconnecting, wasReconnecting) => {
 watch(() => voiceState.reconnectFailed, (failed, wasFailed) => {
   if (failed && !wasFailed) playNotification("reconnectFailed");
 });
+watch(shouldKeepScreenAwake, (keepAwake) => {
+  if (!screenWakeLockController) return;
+  if (keepAwake) screenWakeLockController.enable();
+  else screenWakeLockController.disable();
+});
+watch([() => voiceState.connected, isMobileViewport], () => mobileAwayController?.sync());
+watch(screenWakeLockState, (state, previous) => {
+  if (!state.unavailable || previous.unavailable || !shouldKeepScreenAwake.value) return;
+  showToast(t(state.supported ? "screenWakeLockUnavailable" : "screenWakeLockUnsupported"));
+});
 
 let deviceChangeHandler: (() => void) | undefined;
 let viewportMediaQuery: MediaQueryList | undefined;
 let viewportChangeHandler: (() => void) | undefined;
 
 onMounted(() => {
+  mobileAwayController = createMobileAwayController(document, window, {
+    isMobileClient: () => isMobileViewport.value,
+    isConnected: () => voiceState.connected,
+    isAway: () => away.value,
+    setAway: setAutomaticAway,
+  });
+  mobileAwayController.sync();
+  screenWakeLockController = createScreenWakeLockController(getScreenWakeLockApi(), document, state => { screenWakeLockState.value = state; });
+  if (shouldKeepScreenAwake.value) screenWakeLockController.enable();
+  stopViewportObservation = observeMobileViewport(window, value => Object.assign(mobileViewport, value));
   // The selected skin is applied to this public root, never to the admin DOM.
   applyTheme(themeMode.value);
   browserError.value = checkSupport() ?? "";
@@ -1230,11 +1280,20 @@ onMounted(() => {
   viewportMediaQuery.addEventListener?.("change", viewportChangeHandler);
 });
 onUnmounted(() => {
+  mobileAwayController?.dispose();
+  screenWakeLockController?.dispose();
+  stopViewportObservation?.();
   disconnect();
   if (deviceChangeHandler) navigator.mediaDevices?.removeEventListener("devicechange", deviceChangeHandler);
   if (viewportMediaQuery && viewportChangeHandler) viewportMediaQuery.removeEventListener?.("change", viewportChangeHandler);
   if (toastTimer) clearTimeout(toastTimer);
 });
+
+function selectMobileSection(section: typeof mobileSection.value): void {
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  memberMenu.value = null;
+  mobileSection.value = section;
+}
 
 function channelLabel(item: TreeChannel) {
   return `${"　".repeat(item.depth)}${item.name}`;
@@ -1335,3 +1394,5 @@ function resolveSkinMessages(skin: InstalledSkin | null, locale: Language): Reco
 </script>
 
 <style scoped src="../styles/web-client.css"></style>
+
+<style scoped src="../styles/web-client-mobile.css"></style>

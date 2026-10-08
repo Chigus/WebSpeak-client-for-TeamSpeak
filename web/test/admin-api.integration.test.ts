@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -13,6 +14,27 @@ import { createAdminApi } from "../src/services/admin-api.js";
 import { adminResponses } from "../../src/shared/admin-responses.js";
 
 const logger: Logger = { debug() {}, info() {}, warn() {}, error() {}, child() { return this; } };
+
+test("schema 7 upgrades preserve the previously unused public host and initialize ICE defaults", t => {
+  const directory = mkdtempSync(join(tmpdir(), "webspeak-ice-migration-"));
+  const filename = join(directory, "test.db");
+  const original = new WebSpeakDatabase(filename);
+  original.close();
+  const legacy = new DatabaseSync(filename);
+  legacy.exec("ALTER TABLE settings DROP COLUMN webrtc_ipv6_enabled; ALTER TABLE settings DROP COLUMN webrtc_stun_server; PRAGMA user_version = 7;");
+  legacy.prepare("UPDATE settings SET webrtc_public_host = ?").run("media.example.com");
+  legacy.close();
+  const migrated = new WebSpeakDatabase(filename);
+  t.after(() => {
+    migrated.close();
+    assert.equal(dirname(resolve(directory)), resolve(tmpdir()));
+    assert.ok(directory.includes("webspeak-ice-migration-"));
+    rmSync(directory, { recursive: true, force: true });
+  });
+  assert.equal(migrated.getSettings().webRtcPublicHost, "media.example.com");
+  assert.equal(migrated.getSettings().webRtcIpv6Enabled, false);
+  assert.equal(migrated.getSettings().webRtcStunServer, "");
+});
 
 test("browser admin API consumes the actual HTTP router and preserves keep/replace/remove secrets", async t => {
   const directory = mkdtempSync(join(tmpdir(), "webspeak-admin-api-"));
@@ -51,6 +73,27 @@ test("browser admin API consumes the actual HTTP router and preserves keep/repla
   assert.equal((await api.session()).authenticated, true);
   assert.equal((await api.overview()).gateway.version, "test-version");
   const original = await api.settings();
+  assert.equal(original.webRtcPublicHost, "");
+  assert.equal(original.webRtcIpv6Enabled, false);
+  assert.equal(original.webRtcStunServer, "");
+  const network = { webRtcPublicHost: " MEDIA.example.com ", webRtcIpv6Enabled: true, webRtcStunServer: "stun:stun.example.com" };
+  const updated = await api.saveSettings({ ...original, ...network });
+  assert.equal(updated.settings.webRtcPublicHost, "media.example.com");
+  assert.equal(updated.settings.webRtcStunServer, "stun:stun.example.com:3478");
+  assert.deepEqual(service.getWebRtcAudioOptions(), { enabled: false, publicHost: "media.example.com", ipv6Enabled: true, stunServer: "stun:stun.example.com:3478", udpPortRange: [40000, 40099] });
+  const { webRtcPublicHost, webRtcIpv6Enabled, webRtcStunServer, ...legacyInput } = original;
+  await api.saveSettings(legacyInput);
+  assert.equal((await api.settings()).webRtcPublicHost, "media.example.com", "older clients must preserve the new settings");
+  for (const [key, value, code] of [
+    ["webRtcPublicHost", "https://media.example.com", "INVALID_WEBRTC_PUBLIC_HOST"],
+    ["webRtcPublicHost", null, "INVALID_WEBRTC_PUBLIC_HOST"],
+    ["webRtcStunServer", "turn:user:password@example.com", "INVALID_WEBRTC_STUN_SERVER"],
+    ["webRtcStunServer", [], "INVALID_WEBRTC_STUN_SERVER"],
+    ["webRtcIpv6Enabled", "true", "INVALID_WEBRTC_IPV6"],
+  ] as const) {
+    await assert.rejects(api.saveSettings({ ...original, [key]: value } as never), (error: any) => error.code === code);
+    assert.equal(database.getSettings().webRtcIpv6Enabled, true, "rejected updates must not change stored settings");
+  }
   for (const passwordAction of ["replace", "keep", "remove"] as const) {
     const body = {
       ...original, passwordAction, ...(passwordAction === "replace" ? { serverPassword: "test-server-password" } : {}),

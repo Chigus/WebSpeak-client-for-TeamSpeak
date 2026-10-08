@@ -16,6 +16,7 @@ interface Connection {
 
 interface TransportOptions {
   prepareMicrophone(): Promise<Microphone | null>;
+  stunServer?(): string;
   stopPcm(): void;
   muted(): boolean;
   inputVolume(): number;
@@ -127,7 +128,8 @@ export function createWebRtcTransport(options: TransportOptions) {
 
     try {
       options.stopPcm();
-      const peer = new RTCPeerConnection({ iceServers: [] });
+      const stunServer = options.stunServer?.();
+      const peer = new RTCPeerConnection({ iceServers: stunServer ? [{ urls: stunServer }] : [] });
       record.peer = peer;
       track.enabled = !options.muted();
       const input = createWebRtcInput(context, processedStream, options.muted() ? 0 : options.inputVolume());

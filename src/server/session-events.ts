@@ -22,6 +22,7 @@ interface SdkEvents {
   clientLeave: { id: number };
   clientMoved: { id: number; targetChannelID?: bigint };
   clientUpdated: TSDirectoryClient;
+  directoryClientsSnapshot: TSDirectoryClient[];
   rawNotification: TSRawNotification;
   voiceData: TSVoiceData;
   textMessage: TSChatMessage;
@@ -32,7 +33,7 @@ interface SdkEvents {
 
 export interface SessionEventOptions {
   state: SessionDirectoryState;
-  client: Pick<TSClient, "getClientId" | "getChannelId" | "getClientAvatar"> & Pick<EventEmitter, "on" | "off">;
+  client: Pick<TSClient, "getClientId" | "getChannelId" | "getClientAvatar"> & Partial<Pick<TSClient, "refreshDirectoryClients">> & Pick<EventEmitter, "on" | "off">;
   nickname: string;
   requestedChannel?: string;
   isCurrent(): boolean;
@@ -59,6 +60,7 @@ export class SessionEventCoordinator {
   private closed = false;
   private clientId = 0;
   private channelId = 0n;
+  private directoryStatusRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly options: SessionEventOptions) {
     const { state, client } = options;
@@ -88,6 +90,11 @@ export class SessionEventCoordinator {
       const wasKnown = state.members.has(info.id);
       this.directory.applyClientEnter(info);
       this.refresh();
+      if (this.directoryStatusRefreshTimer) clearTimeout(this.directoryStatusRefreshTimer);
+      this.directoryStatusRefreshTimer = setTimeout(() => {
+        this.directoryStatusRefreshTimer = null;
+        void options.client.refreshDirectoryClients?.();
+      }, 300);
       if (options.isPublished()) {
         this.publishDirectory();
         if (!wasKnown) options.sendJson({ type: "memberEnter", id: info.id, nickname: info.nickname, uid: info.uid, isSelf: info.id === this.clientId });
@@ -120,6 +127,11 @@ export class SessionEventCoordinator {
     });
     this.listenDirectory("clientUpdated", info => {
       this.directory.applyClientUpdated(info);
+      this.refresh();
+      this.publishDirectory();
+    });
+    this.listenDirectory("directoryClientsSnapshot", clients => {
+      this.directory.applyClientListSnapshot(clients);
       this.refresh();
       this.publishDirectory();
     });
@@ -217,6 +229,8 @@ export class SessionEventCoordinator {
   }
 
   reset(): void {
+    if (this.directoryStatusRefreshTimer) clearTimeout(this.directoryStatusRefreshTimer);
+    this.directoryStatusRefreshTimer = null;
     this.avatars.reset();
     this.clientId = 0;
     this.channelId = 0n;
@@ -230,6 +244,8 @@ export class SessionEventCoordinator {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    if (this.directoryStatusRefreshTimer) clearTimeout(this.directoryStatusRefreshTimer);
+    this.directoryStatusRefreshTimer = null;
     for (const unsubscribe of this.subscriptions.splice(0)) unsubscribe();
     this.avatars.close();
     this.reset();

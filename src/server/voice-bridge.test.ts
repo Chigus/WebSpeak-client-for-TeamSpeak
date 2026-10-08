@@ -30,7 +30,7 @@ class PeerStub {
   }
 }
 
-function fixture() {
+function fixture(webRtc = { enabled: true } as import("./webrtc-audio.js").WebRtcAudioOptions) {
   const peers: PeerStub[] = [];
   const messages: ServerMessage[] = [];
   const entry = {
@@ -42,7 +42,7 @@ function fixture() {
   };
   let forwarded = 0;
   let configurePeer = (_peer: PeerStub): void => {};
-  const instance = new VoiceBridge({ joinTickets: new JoinTicketStore(), webRtc: { enabled: true } }, pino({ enabled: false }), options => {
+  const instance = new VoiceBridge({ joinTickets: new JoinTicketStore(), webRtc }, pino({ enabled: false }), options => {
     const peer = new PeerStub(options);
     peers.push(peer);
     configurePeer(peer);
@@ -204,4 +204,21 @@ test("old close statistics cannot overwrite a new peer's live snapshot", async (
   await stopped;
   assert.equal(f.entry.audio.webrtcIngressRtpFrames, 27);
   assert.equal(f.entry.webrtc, f.peers[1]);
+});
+
+
+test("configured media address overrides the proxy host and passes IPv6/STUN to the session", async () => {
+  const f = fixture({ enabled: true, publicHost: "2001:db8::42", ipv6Enabled: true, stunServer: "stun:stun.example.com:3478" });
+  Object.assign(f.entry, { webrtcPublicHost: "proxy.example.invalid" });
+  await f.offer("configured");
+  assert.deepEqual(f.peers[0].options.publicAddresses, ["2001:db8::42"]);
+  assert.equal(f.peers[0].options.ipv6Enabled, true);
+  assert.equal(f.peers[0].options.stunServer, "stun:stun.example.com:3478");
+});
+
+test("an unset media override still uses a literal request host", async () => {
+  const f = fixture();
+  Object.assign(f.entry, { webrtcPublicHost: "192.0.2.10" });
+  await f.offer("legacy");
+  assert.deepEqual(f.peers[0].options.publicAddresses, ["192.0.2.10"]);
 });
