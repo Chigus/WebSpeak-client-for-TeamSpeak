@@ -5,7 +5,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import type { Logger } from "../logger.js";
 import { loadConfig } from "../config.js";
-import { formatTeamSpeakTarget, parseTeamSpeakTarget, type TeamSpeakTarget } from "../domain/teamspeak-target.js";
+import { DEFAULT_TEAM_SPEAK_PORT, formatTeamSpeakTarget, parseTeamSpeakTarget, type TeamSpeakTarget } from "../domain/teamspeak-target.js";
+import { formatTeamSpeakConnectionTarget, parseTeamSpeakConnectionTarget, type TeamSpeakConnectionTarget } from "../domain/teamspeak-connection-target.js";
+import { resolveTeamSpeakTarget, TeamSpeakAliasLookupError } from "../server/teamspeak-alias.js";
 import { type AccessMode, type ManagedInviteRecord, type PersistedRelayNode, type SettingsUpdate, WebSpeakDatabase } from "../persistence/database.js";
 import { hashAdminPassword, validateAdminPassword, verifyAdminPassword } from "../security/admin-password.js";
 import { decryptSecret, encryptSecret } from "../security/secret-crypto.js";
@@ -18,7 +20,7 @@ import { DEFAULT_WEBRTC_UDP_PORT_RANGE, WEBRTC_UDP_PORT_MAX, WEBRTC_UDP_PORT_MIN
 import { DEFAULT_WELCOME_TEXTS, resolveWelcomeTexts } from "../site-copy.js";
 
 export interface ConnectionPolicy {
-  defaultTarget: TeamSpeakTarget;
+  defaultTarget: string;
   serverPassword: string;
   accessMode: AccessMode;
 }
@@ -98,14 +100,14 @@ export class AdminService {
       welcomeTextEn: welcomeTexts.en,
       welcomeTexts,
       accessMode: settings.accessMode,
-      target: formatTeamSpeakTarget({ host: settings.tsHost, port: settings.tsPort }),
+      target: settingsTarget(settings),
     };
   }
 
   getAdminSettings(): AdminSettings {
     const settings = this.database.getSettings();
     return {
-      target: formatTeamSpeakTarget({ host: settings.tsHost, port: settings.tsPort }),
+      target: settingsTarget(settings),
       hasPassword: Boolean(settings.tsPasswordEncrypted),
       accessMode: settings.accessMode,
       siteName: settings.siteName,
@@ -168,7 +170,7 @@ export class AdminService {
     const current = this.database.getSettings();
     const relayNodes = input.relayNodes === undefined ? undefined : this.normalizeRelayNodes(input.relayNodes);
     const settings = this.normalizeSettings(input, current, relayNodes);
-    const targetChanged = current.tsHost !== settings.tsHost || current.tsPort !== settings.tsPort;
+    const targetChanged = current.tsHost !== settings.tsHost || current.tsPort !== settings.tsPort || current.tsTarget !== settings.tsTarget;
     this.database.updateSettings(settings);
     if (relayNodes !== undefined) {
       this.database.replaceRelayNodes(relayNodes);
@@ -187,7 +189,7 @@ export class AdminService {
       this.logger.error({ err: error instanceof Error ? error.message : String(error) }, "Stored TeamSpeak password could not be decrypted");
     }
     return {
-      defaultTarget: { host: settings.tsHost, port: settings.tsPort },
+      defaultTarget: settingsTarget(settings),
       serverPassword,
       accessMode: settings.accessMode,
     };
@@ -196,11 +198,12 @@ export class AdminService {
   async testConnection(targetText: string, password: string, persistResult: boolean): Promise<{ ok: boolean; checkType: "network" | "protocol"; passwordVerified: boolean; latencyMs: number; serverName: string | null; requiresPassword: boolean; packetLossPercent?: number; attempts?: number; successfulAttempts?: number; errorCode?: string }> {
     let target: TeamSpeakTarget;
     try {
-      target = parseTeamSpeakTarget(targetText);
+      parseTeamSpeakConnectionTarget(targetText);
     } catch {
       throw new AdminInputError("INVALID_TARGET", "TeamSpeak target is invalid");
     }
     try {
+      target = await resolveTeamSpeakTarget(targetText);
       // The admin connection test must not create a temporary TeamSpeak
       // client: that client becomes visible in the target channel. Use the
       // WebSpeak host's ICMP route measurement instead. The injected probe is
@@ -239,7 +242,9 @@ export class AdminService {
     } catch (error: unknown) {
       const probeError = error instanceof TeamSpeakProbeError
         ? error
-        : new TeamSpeakProbeError("INTERNAL_ERROR", "Connection test failed", error);
+        : error instanceof TeamSpeakAliasLookupError
+          ? new TeamSpeakProbeError("HOST_NOT_FOUND", "TeamSpeak server nickname could not be resolved", error)
+          : new TeamSpeakProbeError("INTERNAL_ERROR", "Connection test failed", error);
       if (persistResult) {
         this.database.recordConnectionTest({ protocol: null, latencyMs: null, error: probeError.code });
         this.database.addAudit("CONNECTION_TEST_FAILED", { code: probeError.code });
@@ -257,7 +262,7 @@ export class AdminService {
         uptimeSeconds: Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
       },
       teamSpeak: {
-        target: formatTeamSpeakTarget({ host: settings.tsHost, port: settings.tsPort }),
+        target: settingsTarget(settings),
         status: settings.lastTestError ? "unreachable" : settings.lastTestAt ? "reachable" : "unknown",
         lastTestAt: settings.lastTestAt,
         latencyMs: settings.lastTestLatencyMs,
@@ -285,6 +290,7 @@ export class AdminService {
       tokenHash: hashInviteToken(token),
       targetHost: settings.tsHost,
       targetPort: settings.tsPort,
+      targetText: settings.tsTarget,
       serverPasswordEncrypted: settings.tsPasswordEncrypted,
       channel,
       expiresAt: new Date(Date.now() + input.expiresInHours * 60 * 60 * 1000).toISOString(),
@@ -305,7 +311,7 @@ export class AdminService {
     return revoked;
   }
 
-  consumeManagedInvite(token: string): { target: TeamSpeakTarget; serverPassword: string; channel: string } | null {
+  consumeManagedInvite(token: string): { target: string; serverPassword: string; channel: string } | null {
     if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) return null;
     const record = this.database.consumeManagedInvite(hashInviteToken(token));
     if (!record) return null;
@@ -316,7 +322,7 @@ export class AdminService {
       this.logger.error({ err: error instanceof Error ? error.message : String(error), inviteId: record.id }, "Managed invite password could not be decrypted");
     }
     this.database.addAudit("INVITE_CONSUMED", { id: record.id });
-    return { target: { host: record.targetHost, port: record.targetPort }, serverPassword, channel: record.channel };
+    return { target: record.targetText ?? formatTeamSpeakTarget({ host: record.targetHost, port: record.targetPort }), serverPassword, channel: record.channel };
   }
 
   dismissLegacyImportNotice(): void {
@@ -324,9 +330,9 @@ export class AdminService {
   }
 
   private normalizeSettings(input: AdminSettingsInput, current: ReturnType<WebSpeakDatabase["getSettings"]>, relayNodes?: PersistedRelayNode[]): SettingsUpdate {
-    let target: TeamSpeakTarget;
+    let target: TeamSpeakConnectionTarget;
     try {
-      target = parseTeamSpeakTarget(input.target);
+      target = parseTeamSpeakConnectionTarget(input.target);
     } catch {
       throw new AdminInputError("INVALID_TARGET", "TeamSpeak target is invalid");
     }
@@ -430,8 +436,9 @@ export class AdminService {
       welcomeTextRu,
       welcomeTextJa,
       accessMode: input.accessMode,
-      tsHost: target.host,
-      tsPort: target.port,
+      tsHost: target.kind === "nickname" ? target.name : target.target.host,
+      tsPort: target.kind === "nickname" ? target.port ?? DEFAULT_TEAM_SPEAK_PORT : target.target.port,
+      tsTarget: target.kind === "nickname" ? formatTeamSpeakConnectionTarget(target) : null,
       tsPasswordEncrypted: encryptedPassword,
       webRtcEnabled: input.webRtcEnabled,
       webRtcPublicHost, webRtcIpv6Enabled, webRtcStunServer,
@@ -528,7 +535,7 @@ export class AdminService {
     const exhausted = record.maxUses > 0 && record.useCount >= record.maxUses;
     return {
       id: record.id,
-      target: formatTeamSpeakTarget({ host: record.targetHost, port: record.targetPort }),
+      target: record.targetText ?? formatTeamSpeakTarget({ host: record.targetHost, port: record.targetPort }),
       channel: record.channel,
       expiresAt: record.expiresAt,
       maxUses: record.maxUses,
@@ -550,6 +557,7 @@ export class AdminService {
       accessMode: settings.accessMode,
       tsHost: settings.tsHost,
       tsPort: settings.tsPort,
+      tsTarget: settings.tsTarget,
       tsPasswordEncrypted: settings.tsPasswordEncrypted,
       webRtcEnabled: settings.webRtcEnabled,
       webRtcPublicHost: settings.webRtcPublicHost,
@@ -581,6 +589,7 @@ export class AdminService {
         accessMode: current.accessMode,
         tsHost: legacy.tsHost,
         tsPort: legacy.tsPort,
+        tsTarget: legacy.tsTarget ?? null,
         tsPasswordEncrypted: legacy.tsServerPassword ? encryptSecret(legacy.tsServerPassword, this.masterSecret) : null,
         webRtcEnabled: current.webRtcEnabled,
         webRtcPublicHost: current.webRtcPublicHost,
@@ -605,6 +614,10 @@ export class AdminService {
 
 function hashInviteToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
+}
+
+function settingsTarget(settings: { tsHost: string; tsPort: number; tsTarget?: string | null }): string {
+  return settings.tsTarget ?? formatTeamSpeakTarget({ host: settings.tsHost, port: settings.tsPort });
 }
 
 function formatRelayTarget(host: string, port: number): string {

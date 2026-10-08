@@ -89,11 +89,15 @@ function createTarget(hostValue: string, portValue: string | number): TeamSpeakT
     throw new InvalidTeamSpeakTargetError("Invalid TeamSpeak server address");
   }
 
+  return { host, port: parseTeamSpeakPort(portValue) };
+}
+
+export function parseTeamSpeakPort(portValue: string | number): number {
   const portText = String(portValue).trim();
   if (!/^\d+$/.test(portText)) throw new InvalidTeamSpeakTargetError("TeamSpeak port must be a number");
   const port = Number(portText);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new InvalidTeamSpeakTargetError("TeamSpeak port must be between 1 and 65535");
   }
-  return { host, port };
+  return port;
 }

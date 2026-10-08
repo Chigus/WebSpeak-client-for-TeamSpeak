@@ -15,10 +15,11 @@ after(async () => { await vite?.close(); });
 function mount(t) {
   const scope = effectScope(), errors = ref(""), message = ref(""), switched = ref(""), calls = [];
   const dialog = reactive({ open: true, channelId: "2", password: "draft", error: "", submitting: false });
+  const serverHost = ref("fixture.invalid"), serverPort = ref("9987");
   const connection = scope.run(() => useWebClientConnection({
     initialized: ref(true), accessMode: ref("fixed"), isConnecting: ref(false), errorCode: errors,
     errorMessage: message, channelSwitchedChannelId: switched,
-    nickname: ref("Preview"), channelName: ref("Room"), serverHost: ref("fixture.invalid"), serverPort: ref("9987"),
+    nickname: ref("Preview"), channelName: ref("Room"), serverHost, serverPort,
     serverPassword: ref(""), rememberIdentity: ref(false), identityMaterial: ref(""), accelerationRelayId: ref(""),
     inviteToken: "", selectedChannelId: ref("2"), channels: ref([]), clientId: ref(1),
     channelPasswordDialog: dialog, serverPasswordDialog: reactive({ open: false, password: "", errorCode: "" }),
@@ -26,8 +27,18 @@ function mount(t) {
     clearError: () => { errors.value = ""; message.value = ""; }, t: key => key,
   }));
   t.after(() => scope.stop());
-  return { dialog, connection, errors, message, switched, calls };
+  return { dialog, connection, errors, message, switched, calls, serverHost, serverPort };
 }
+
+test("pasting a nickname clears the prefilled port and preserves a custom override", t => {
+  const { connection, serverHost, serverPort } = mount(t);
+  serverHost.value = "https://named.myteamspeak.com/lookup?name=team%20eco";
+  assert.equal(serverPort.value, "");
+  assert.equal(connection.currentServerTarget(), "team eco");
+  serverPort.value = "10000";
+  serverHost.value = "another guild";
+  assert.equal(connection.currentServerTarget(), "another guild:10000");
+});
 
 test("a waiting channel password request cannot be submitted twice", t => {
   const { connection, calls, dialog } = mount(t);

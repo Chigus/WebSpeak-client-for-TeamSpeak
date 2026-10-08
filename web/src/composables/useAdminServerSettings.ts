@@ -3,7 +3,7 @@ import { DEFAULT_WELCOME_TEXTS } from "../../../src/site-copy.js";
 import type { AdminSettings } from "../../../src/shared/admin-responses.js";
 import { isAdminRequestCancelled, type AdminApi } from "../services/admin-api.js";
 import { createAdminRequests } from "../services/admin-requests.js";
-import { combineTeamSpeakTarget, splitTeamSpeakTarget } from "../services/teamspeak-target.js";
+import { combineTeamSpeakTarget, splitTeamSpeakTarget, suggestedTeamSpeakPort } from "../services/teamspeak-target.js";
 
 type SecretAction = "keep" | "replace" | "remove";
 interface RelayNodeForm { id: string; name: string; enabled: boolean; target: string; token: string; tokenAction: SecretAction; hasToken: boolean }
@@ -28,6 +28,10 @@ export function useAdminServerSettings(options: Options) {
   const testResult = ref<ProbeState | null>(null);
   let probeRevision = 0;
   let applyingSettings = false;
+
+  watch(() => serverForm.address, (address, previousAddress) => {
+    if (!applyingSettings) serverForm.port = suggestedTeamSpeakPort(previousAddress, address, serverForm.port);
+  }, { flush: "sync" });
 
   function cancelRequests() {
     requests.reset();
