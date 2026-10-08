@@ -88,6 +88,27 @@ async function mount(path = "/admin/server") {
   assert.equal(state.loading, false);
 }
 
+test("nickname defaults load and save without forcing the voice port", async () => {
+  handler = path => Promise.resolve(json(path === "/server" ? settings({ target: "team eco" }) : defaults(path)));
+  await mount();
+  assert.equal(serverModel.serverForm.address, "team eco");
+  assert.equal(serverModel.serverForm.port, "");
+  serverModel.serverForm.address = "voice.example.com";
+  assert.equal(serverModel.serverForm.port, "9987");
+  serverModel.serverForm.address = "another guild";
+  assert.equal(serverModel.serverForm.port, "");
+  handler = (path, init) => {
+    if (path === "/server" && init.method === "PUT") {
+      assert.equal(JSON.parse(init.body).target, "another guild");
+      return Promise.resolve(json({ ok: true, settings: settings({ target: "another guild" }) }));
+    }
+    return Promise.resolve(json(defaults(path)));
+  };
+  await serverModel.saveServerSettings();
+  assert.equal(serverModel.serverForm.port, "");
+  assert.equal(state.errorMessage, "");
+});
+
 test("saving settings preserves edits made after the request started", async () => {
   await mount();
   const save = deferred();

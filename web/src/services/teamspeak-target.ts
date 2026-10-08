@@ -1,3 +1,8 @@
+import {
+  formatTeamSpeakConnectionTarget,
+  parseTeamSpeakConnectionTarget,
+} from "../../../src/domain/teamspeak-connection-target.js";
+
 export const DEFAULT_TEAM_SPEAK_PORT = "9987";
 
 export interface TeamSpeakTargetFields {
@@ -10,39 +15,56 @@ export function splitTeamSpeakTarget(value: unknown, fallbackPort = DEFAULT_TEAM
   const input = typeof value === "string" ? value.trim() : "";
   if (!input) return { address: "", port: fallbackPort };
 
-  const hash = input.lastIndexOf("#");
-  if (hash > 0 && isPort(input.slice(hash + 1))) {
-    return { address: stripBrackets(input.slice(0, hash)), port: input.slice(hash + 1) };
-  }
-
-  if (input.startsWith("[")) {
-    const closingBracket = input.indexOf("]");
-    if (closingBracket > 0) {
-      const address = input.slice(1, closingBracket);
-      const suffix = input.slice(closingBracket + 1);
-      const port = suffix.startsWith(":") && isPort(suffix.slice(1)) ? suffix.slice(1) : fallbackPort;
-      return { address, port };
+  try {
+    const target = parseTeamSpeakConnectionTarget(input);
+    if (target.kind === "nickname") {
+      return { address: formatTeamSpeakConnectionTarget({ ...target, port: undefined }), port: target.port === undefined ? "" : String(target.port) };
     }
+    const hasPort = input.includes("#") || /^\[[^\]]+\]:/.test(input) || /^[^:]+:/.test(input);
+    return { address: target.target.host, port: hasPort ? String(target.target.port) : fallbackPort };
+  } catch {
+    return { address: stripBrackets(input), port: fallbackPort };
   }
-
-  const colon = input.lastIndexOf(":");
-  if (colon > 0 && input.indexOf(":") === colon && isPort(input.slice(colon + 1))) {
-    return { address: input.slice(0, colon), port: input.slice(colon + 1) };
-  }
-
-  return { address: stripBrackets(input), port: fallbackPort };
 }
 
 /** Build the canonical API value from the two user-facing fields. */
 export function combineTeamSpeakTarget(address: string, port: string): string {
   const normalizedAddress = stripBrackets(address.trim());
-  const normalizedPort = port.trim() || DEFAULT_TEAM_SPEAK_PORT;
+  const normalizedPort = port.trim();
   if (!normalizedAddress) return "";
-  return normalizedAddress.includes(":") ? `[${normalizedAddress}]:${normalizedPort}` : `${normalizedAddress}:${normalizedPort}`;
+  const input = !normalizedAddress.startsWith("[") && normalizedAddress.indexOf(":") !== normalizedAddress.lastIndexOf(":") && !/^https?:\/\//i.test(normalizedAddress)
+    ? `[${normalizedAddress}]`
+    : normalizedAddress;
+  try {
+    const target = parseTeamSpeakConnectionTarget(input);
+    if (normalizedPort) {
+      if (!isPort(normalizedPort)) throw new Error("Invalid port");
+      if (target.kind === "nickname") target.port = Number(normalizedPort);
+      else target.target.port = Number(normalizedPort);
+    }
+    return formatTeamSpeakConnectionTarget(target);
+  } catch {
+    return normalizedPort ? `${input}:${normalizedPort}` : input;
+  }
 }
 
 export function isValidTeamSpeakPort(value: string): boolean {
-  return isPort(value.trim());
+  return !value.trim() || isPort(value.trim());
+}
+
+/** Drop the prefilled default when switching to a nickname, retaining custom ports. */
+export function suggestedTeamSpeakPort(previousAddress: string, address: string, port: string): string {
+  try {
+    const target = parseTeamSpeakConnectionTarget(address);
+    let previousWasNickname = false;
+    try { previousWasNickname = parseTeamSpeakConnectionTarget(previousAddress).kind === "nickname"; }
+    catch { /* An empty or incomplete field has no previous nickname. */ }
+    if (target.kind === "nickname" && !previousWasNickname && port === DEFAULT_TEAM_SPEAK_PORT) {
+      return target.port === undefined ? "" : String(target.port);
+    }
+    if (target.kind === "address" && previousWasNickname && !port.trim()) return String(target.target.port);
+  } catch { /* Keep the port while the address is being edited. */ }
+  return port;
 }
 
 function isPort(value: string): boolean {

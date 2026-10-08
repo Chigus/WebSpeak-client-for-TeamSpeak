@@ -1063,7 +1063,9 @@ function initialServerTarget() {
   if (explicit?.trim()) return splitTeamSpeakTarget(explicit);
   const host = (query.get("tsHost") ?? location.hostname).trim();
   const port = (query.get("tsPort") ?? DEFAULT_TEAM_SPEAK_PORT).trim();
-  return splitTeamSpeakTarget(host, port || DEFAULT_TEAM_SPEAK_PORT);
+  const target = splitTeamSpeakTarget(host, port || DEFAULT_TEAM_SPEAK_PORT);
+  if (query.has("tsPort")) target.port = port;
+  return target;
 }
 
 function persistLanguage() {

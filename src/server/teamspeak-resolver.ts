@@ -51,18 +51,11 @@ export class WebSpeakTeamSpeakResolver implements AddrResolver {
       return this.resolveBase(address, signal);
     }
 
-    const localAddresses = await raceWithTimeout(
-      Promise.resolve().then(() => this.localLookup(host)),
-      this.localAliasLookupTimeoutMs,
-      signal,
-    )
-      .catch((error: unknown) => {
-        if (signal?.aborted) throw signal.reason ?? error;
-        return null;
-      });
-    const localAddress = localAddresses?.find(({ address: candidate }) => isPrivateNetworkAddress(candidate));
+    const localAddress = await resolveLocalTeamSpeakAlias(host, {
+      lookup: this.localLookup, timeoutMs: this.localAliasLookupTimeoutMs, signal,
+    });
     if (localAddress) {
-      return [directAddress(localAddress.address, port)];
+      return [directAddress(localAddress, port)];
     }
 
     const baseResults = await this.resolveBaseWithTimeout(address, signal);
@@ -89,6 +82,24 @@ export class WebSpeakTeamSpeakResolver implements AddrResolver {
       timeoutController.abort(new Error("TeamSpeak nickname lookup timed out"));
     }
   }
+}
+
+/** Keep Docker/service names local before attempting public nickname discovery. */
+export async function resolveLocalTeamSpeakAlias(
+  host: string,
+  options: { lookup?: LocalLookup; timeoutMs?: number; signal?: AbortSignal } = {},
+): Promise<string | undefined> {
+  if (!/^[a-z0-9_-]+$/i.test(host)) return undefined;
+  const localLookup = options.lookup ?? ((name: string) => lookup(name, { all: true, verbatim: true }));
+  const addresses = await raceWithTimeout(
+    Promise.resolve().then(() => localLookup(host)),
+    options.timeoutMs ?? LOCAL_ALIAS_LOOKUP_TIMEOUT_MS,
+    options.signal,
+  ).catch((error: unknown) => {
+    if (options.signal?.aborted) throw options.signal.reason ?? error;
+    return null;
+  });
+  return addresses?.find(({ address }) => isPrivateNetworkAddress(address))?.address;
 }
 
 function directAddress(host: string, port: number): ResolvedAddr {

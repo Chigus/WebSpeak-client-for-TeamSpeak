@@ -1,7 +1,7 @@
 import { computed, nextTick, watch, type Ref } from "vue";
 import type { WebClientChatTab } from "./useWebClientChat.js";
 import type { TreeChannel } from "./useWebClientChannels.js";
-import { combineTeamSpeakTarget, isValidTeamSpeakPort } from "../services/teamspeak-target.js";
+import { combineTeamSpeakTarget, isValidTeamSpeakPort, suggestedTeamSpeakPort } from "../services/teamspeak-target.js";
 
 interface ChannelPasswordDialogState {
   open: boolean;
@@ -85,6 +85,10 @@ export function useWebClientConnection({
     && nickname.value.trim()
     && (accessMode.value === "fixed" || (serverHost.value.trim() && isValidTeamSpeakPort(serverPort.value))),
   ));
+
+  watch(serverHost, (address, previousAddress) => {
+    serverPort.value = suggestedTeamSpeakPort(previousAddress, address, serverPort.value);
+  }, { flush: "sync" });
 
   function currentServerTarget(): string {
     return combineTeamSpeakTarget(serverHost.value, serverPort.value);

@@ -5,7 +5,9 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { VoiceBridge, type VoiceBridgeOptions } from "./voice-bridge.js";
 import type { Logger } from "../logger.js";
-import { parseTeamSpeakTarget, teamSpeakTargetKey } from "../domain/teamspeak-target.js";
+import type { TeamSpeakTarget } from "../domain/teamspeak-target.js";
+import { formatTeamSpeakConnectionTarget, parseTeamSpeakConnectionTarget } from "../domain/teamspeak-connection-target.js";
+import { resolveTeamSpeakTarget, TeamSpeakAliasLookupError } from "./teamspeak-alias.js";
 import { createAdminRouter } from "../admin/admin-router.js";
 import type { AdminService } from "../admin/admin-service.js";
 import { AdminSessionStore } from "../admin/admin-session.js";
@@ -95,7 +97,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     let targetPrefillBlocked = false;
     if (publicConfig.accessMode === "open" && target.trim()) {
       try {
-        targetPrefillBlocked = !await isSafeOpenTargetForPrefill(parseTeamSpeakTarget(target));
+        targetPrefillBlocked = !await isSafeOpenTargetForPrefill(await resolveTeamSpeakTarget(target));
       } catch {
         targetPrefillBlocked = true;
       }
@@ -186,7 +188,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
       response.status(400).json({ ok: false, code: "INVITE_INVALID" });
       return;
     }
-    let target = managedInvite?.target ?? policy.defaultTarget;
+    let targetText = managedInvite?.target ?? policy.defaultTarget;
+    let target: TeamSpeakTarget;
     let serverPassword = managedInvite?.serverPassword ?? policy.serverPassword;
     const channel = requestedChannel || managedInvite?.channel || "";
     const requestedRelayId = typeof body.accelerationRelayId === "string" ? body.accelerationRelayId.trim().slice(0, 110) : "";
@@ -200,16 +203,11 @@ export function createWebServer(options: WebServerOptions): WebServer {
       response.status(400).json({ ok: false, code: "ACCELERATION_UNAVAILABLE" });
       return;
     }
-    if (!managedInvite) {
-      try {
+    try {
+      if (!managedInvite) {
         if (policy.accessMode === "open" && typeof body.target === "string" && body.target.trim()) {
-          target = parseTeamSpeakTarget(body.target);
-          const isDefault = teamSpeakTargetKey(target) === teamSpeakTargetKey(policy.defaultTarget);
-          // Open mode must protect the gateway even when a user submits the
-          // same address configured as the administrator's default target.
-          // The default target only controls which server is prefilled; it is
-          // not a trust boundary and must not bypass SSRF protection.
-          target = await resolveSafeOpenTarget(target);
+          targetText = formatTeamSpeakConnectionTarget(parseTeamSpeakConnectionTarget(body.target));
+          const isDefault = targetText === policy.defaultTarget;
           if (!isDefault) serverPassword = typeof body.serverPassword === "string" ? body.serverPassword.slice(0, 512) : "";
           else if (typeof body.serverPassword === "string" && body.serverPassword.trim()) serverPassword = body.serverPassword.slice(0, 512);
         } else if (policy.accessMode === "fixed" && typeof body.serverPassword === "string" && body.serverPassword.trim()) {
@@ -218,10 +216,14 @@ export function createWebServer(options: WebServerOptions): WebServer {
           // required. The target itself is never taken from this request.
           serverPassword = body.serverPassword.slice(0, 512);
         }
-      } catch {
-        response.status(400).json({ ok: false, code: "TARGET_NOT_ALLOWED" });
-        return;
       }
+      target = await resolveTeamSpeakTarget(targetText);
+      // Open-mode defaults are user targets too; validate the resolved address
+      // and pass that exact IP to the voice connection to prevent DNS rebinding.
+      if (!managedInvite && policy.accessMode === "open") target = await resolveSafeOpenTarget(target);
+    } catch (error) {
+      response.status(400).json({ ok: false, code: error instanceof TeamSpeakAliasLookupError ? "HOST_NOT_FOUND" : "TARGET_NOT_ALLOWED" });
+      return;
     }
 
     const ticket = options.voiceBridgeOptions.joinTickets.create({

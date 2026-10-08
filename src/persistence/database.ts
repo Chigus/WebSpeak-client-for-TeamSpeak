@@ -6,7 +6,7 @@ import type { AdminCredential } from "../security/admin-password.js";
 import type { TeamSpeakProtocol } from "../server/teamspeak-adapter.js";
 import { DEFAULT_WEBRTC_UDP_PORT_RANGE } from "../server/webrtc-config.js";
 
-export const DATABASE_SCHEMA_VERSION = 8;
+export const DATABASE_SCHEMA_VERSION = 9;
 export type AccessMode = "fixed" | "open";
 
 export interface PersistedSettings {
@@ -19,6 +19,7 @@ export interface PersistedSettings {
   accessMode: AccessMode;
   tsHost: string;
   tsPort: number;
+  tsTarget: string | null;
   tsPasswordEncrypted: string | null;
   detectedProtocol: TeamSpeakProtocol | null;
   lastTestAt: string | null;
@@ -49,6 +50,7 @@ export interface SettingsUpdate {
   accessMode: AccessMode;
   tsHost: string;
   tsPort: number;
+  tsTarget?: string | null;
   tsPasswordEncrypted: string | null;
   webRtcEnabled: boolean;
   webRtcPublicHost?: string;
@@ -80,6 +82,7 @@ export interface ManagedInviteRecord {
   tokenHash: string;
   targetHost: string;
   targetPort: number;
+  targetText?: string | null;
   serverPasswordEncrypted: string | null;
   channel: string;
   expiresAt: string;
@@ -94,6 +97,7 @@ interface ManagedInviteRow extends Record<string, unknown> {
   token_hash: string;
   target_host: string;
   target_port: number;
+  target_text: string | null;
   server_password_encrypted: string | null;
   channel: string;
   expires_at: string;
@@ -113,6 +117,7 @@ interface SettingsRow extends Record<string, unknown> {
   access_mode: string;
   ts_host: string;
   ts_port: number;
+  ts_target: string | null;
   ts_password_encrypted: string | null;
   detected_protocol: string | null;
   last_test_at: string | null;
@@ -210,6 +215,7 @@ export class WebSpeakDatabase {
       accessMode: row.access_mode === "open" ? "open" : "fixed",
       tsHost: row.ts_host,
       tsPort: row.ts_port,
+      tsTarget: row.ts_target,
       tsPasswordEncrypted: row.ts_password_encrypted,
       detectedProtocol: row.detected_protocol === "ts3" || row.detected_protocol === "ts6" ? row.detected_protocol : null,
       lastTestAt: row.last_test_at,
@@ -301,14 +307,15 @@ export class WebSpeakDatabase {
     this.transaction(() => {
       this.database.prepare(
         `INSERT INTO managed_invites (
-           id, token_hash, target_host, target_port, server_password_encrypted,
+           id, token_hash, target_host, target_port, target_text, server_password_encrypted,
            channel, expires_at, max_uses, use_count, created_at, revoked_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL)`,
       ).run(
         record.id,
         record.tokenHash,
         record.targetHost,
         record.targetPort,
+        record.targetText ?? null,
         record.serverPasswordEncrypted,
         record.channel,
         record.expiresAt,
@@ -597,13 +604,23 @@ export class WebSpeakDatabase {
         `);
         this.database.exec("PRAGMA user_version = 8");
       });
+      version = 8;
+    }
+    if (version === 8) {
+      this.transaction(() => {
+        this.database.exec(`
+          ALTER TABLE settings ADD COLUMN ts_target TEXT;
+          ALTER TABLE managed_invites ADD COLUMN target_text TEXT;
+        `);
+        this.database.exec("PRAGMA user_version = 9");
+      });
     }
   }
 
   private writeSettings(settings: SettingsUpdate, now: string): void {
     this.database.prepare(
       `UPDATE settings SET
-         site_name = ?, welcome_text = ?, welcome_text_en = ?, welcome_text_de = ?, welcome_text_ru = ?, welcome_text_ja = ?, access_mode = ?, ts_host = ?, ts_port = ?,
+         site_name = ?, welcome_text = ?, welcome_text_en = ?, welcome_text_de = ?, welcome_text_ru = ?, welcome_text_ja = ?, access_mode = ?, ts_host = ?, ts_port = ?, ts_target = ?,
          ts_password_encrypted = ?, webrtc_enabled = ?, webrtc_public_host = ?, webrtc_ipv6_enabled = ?, webrtc_stun_server = ?, webrtc_udp_start = ?,
          webrtc_udp_end = ?, relay_configured = ?, relay_enabled = ?, relay_name = ?,
          relay_host = ?, relay_port = ?, relay_token_encrypted = ?, updated_at = ?
@@ -618,6 +635,7 @@ export class WebSpeakDatabase {
       settings.accessMode,
       settings.tsHost,
       settings.tsPort,
+      settings.tsTarget ?? null,
       settings.tsPasswordEncrypted,
       settings.webRtcEnabled ? 1 : 0,
       settings.webRtcPublicHost ?? "",
@@ -659,6 +677,7 @@ function mapManagedInviteRow(row: ManagedInviteRow): ManagedInviteRecord {
     tokenHash: row.token_hash,
     targetHost: row.target_host,
     targetPort: row.target_port,
+    targetText: row.target_text,
     serverPasswordEncrypted: row.server_password_encrypted,
     channel: row.channel,
     expiresAt: row.expires_at,
