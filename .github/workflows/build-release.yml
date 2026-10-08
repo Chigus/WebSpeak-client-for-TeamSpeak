@@ -280,6 +280,7 @@ jobs:
           npm --prefix mobile ci --no-audit --no-fund
           npm run android:sync
           cd web/android
+          chmod +x gradlew
           ./gradlew --no-daemon assembleDebug -PappVersion="$release_version" -PappVersionCode="$version_code"
           cd "$GITHUB_WORKSPACE"
           mkdir -p release-apks
