@@ -1,5 +1,8 @@
 apply plugin: 'com.android.application'
 
+def appVersion = project.hasProperty('appVersion') ? project.property('appVersion').toString() : '0.2.6'
+def appVersionCode = project.hasProperty('appVersionCode') ? project.property('appVersionCode').toString().toInteger() : 206
+
 android {
     namespace = "io.webspeak.client"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -15,8 +18,8 @@ android {
         applicationId "io.webspeak.client"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 25
-        versionName "0.2.5-preview"
+        versionCode appVersionCode
+        versionName appVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

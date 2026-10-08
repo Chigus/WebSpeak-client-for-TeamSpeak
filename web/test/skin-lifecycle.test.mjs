@@ -16,7 +16,7 @@ const deferred = () => {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 };
-const skin = id => ({ id, name: id, version: "1.0.0", minAppVersion: "0.2.5-preview",
+const skin = id => ({ id, name: id, version: "1.0.0", minAppVersion: "0.2.6",
   css: `[data-ws-skin="${id}"] { --skin-test: blue; }`, assets: {}, installedAt: 1 });
 const json = body => new Response(JSON.stringify(body));
 class Element {
@@ -97,7 +97,7 @@ test("clearing a skin invalidates an outstanding local read", async () => {
 test("aborting an activation prevents a late read from modifying the next page", async () => {
   const read = deferred(), owner = new AbortController();
   globalThis.skinStorage.get = () => read.promise;
-  const old = runtime.activateSkin("sample.a", undefined, "0.2.5-preview", { signal: owner.signal }).catch(error => error);
+  const old = runtime.activateSkin("sample.a", undefined, "0.2.6", { signal: owner.signal }).catch(error => error);
   owner.abort(); read.resolve(skin("sample.a")); await old;
   assert.equal(elements.has("webspeak-active-custom-skin"), false);
   assert.equal(runtime.getStoredSkinId(), null);
@@ -119,7 +119,7 @@ function page(options = {}) {
 }
 test("a skin load deadline settles a hung local read and rejects its late result", async () => {
   const read = deferred(); globalThis.skinStorage.get = () => read.promise;
-  await assert.rejects(runtime.activateSkin("sample.a", undefined, "0.2.5-preview", { timeoutMs: 10 }), { name: "TimeoutError" });
+  await assert.rejects(runtime.activateSkin("sample.a", undefined, "0.2.6", { timeoutMs: 10 }), { name: "TimeoutError" });
   read.resolve(skin("sample.a")); await nextTurn();
   assert.equal(elements.has("webspeak-active-custom-skin"), false);
 });
@@ -134,7 +134,7 @@ test("the directory deadline includes a hanging JSON body and aborts its request
 test("the package deadline includes a hanging archive body", async () => {
   const body = deferred(); let signal;
   handler = async (_url, init) => { signal = init.signal; return { ok: true, blob: () => body.promise }; };
-  await assert.rejects(runtime.activateSkin("sample.a", undefined, "0.2.5-preview", { timeoutMs: 10 }), { name: "TimeoutError" });
+  await assert.rejects(runtime.activateSkin("sample.a", undefined, "0.2.6", { timeoutMs: 10 }), { name: "TimeoutError" });
   assert.equal(signal.aborted, true);
   body.resolve(new Blob(["invalid"])); await nextTurn();
   assert.equal(runtime.getStoredSkinId(), null);

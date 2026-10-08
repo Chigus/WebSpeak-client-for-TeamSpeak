@@ -12,8 +12,8 @@ test("skin catalog always includes the three protected built-ins and exposes onl
   globalThis.fetch = async () => new Response(JSON.stringify({
     defaultSkinId: "sample-skin",
     skins: [
-      { id: "sample-skin", name: "Sample", version: "1.0.0", author: "Test", license: "MIT", minAppVersion: "0.2.5-preview", installedAt: 1, enabled: true },
-      { id: "disabled-skin", name: "Disabled", version: "1.0.0", author: "Test", license: "MIT", minAppVersion: "0.2.5-preview", installedAt: 2, enabled: false },
+      { id: "sample-skin", name: "Sample", version: "1.0.0", author: "Test", license: "MIT", minAppVersion: "0.2.6", installedAt: 1, enabled: true },
+      { id: "disabled-skin", name: "Disabled", version: "1.0.0", author: "Test", license: "MIT", minAppVersion: "0.2.6", installedAt: 2, enabled: false },
       { id: "community.illusia-voice", name: "Spoofed", version: "9.9.9", author: "Other", license: "MIT", minAppVersion: "0.0.1", installedAt: 3 },
     ],
   }), { status: 200, headers: { "content-type": "application/json" } });
@@ -40,7 +40,7 @@ test("invalid or disabled instance defaults safely fall back to the protected da
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({
     defaultSkinId: "disabled-skin",
-    skins: [{ id: "disabled-skin", name: "Disabled", version: "1.0.0", author: "Test", license: "MIT", minAppVersion: "0.2.5-preview", installedAt: 2, enabled: false }],
+    skins: [{ id: "disabled-skin", name: "Disabled", version: "1.0.0", author: "Test", license: "MIT", minAppVersion: "0.2.6", installedAt: 2, enabled: false }],
   }), { status: 200, headers: { "content-type": "application/json" } });
 
   try {

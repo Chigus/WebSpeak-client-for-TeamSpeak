@@ -9,7 +9,7 @@ on:
       version:
         description: Release version without the v prefix
         required: true
-        default: 0.1.3
+        default: 0.2.6
         type: string
 
 permissions:
@@ -19,14 +19,23 @@ jobs:
   verify:
     uses: ./.github/workflows/ci.yml
 
-  windows-x64:
+  windows:
     needs: verify
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.2
+          architecture: ${{ matrix.arch == 'arm64' && 'arm64' || 'x64' }}
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -57,14 +66,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm prune --omit=dev --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Package and smoke-test Windows x64
+      - name: Package and smoke-test Windows ${{ matrix.arch }}
         shell: pwsh
         env:
           RELEASE_REF: ${{ inputs.version || github.ref_name }}
+          PACKAGE_ARCH: ${{ matrix.arch }}
         run: |
           $ErrorActionPreference = "Stop"
           $releaseVersion = $env:RELEASE_REF -replace '^v', ''
-          $packageName = "webspeak-webclient-v$releaseVersion-windows-x64"
+          $packageName = "webspeak-webclient-v$releaseVersion-windows-$env:PACKAGE_ARCH"
           $packageRoot = Join-Path $env:RUNNER_TEMP $packageName
           $runtimeRoot = Split-Path -Parent (Get-Command node).Source
           New-Item -ItemType Directory -Path $packageRoot | Out-Null
@@ -116,19 +126,28 @@ jobs:
           Compress-Archive -LiteralPath $packageRoot -DestinationPath (Join-Path $env:GITHUB_WORKSPACE ($packageName + ".zip")) -CompressionLevel Optimal
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-x64
-          path: webspeak-webclient-v*-windows-x64.zip
+          name: windows-${{ matrix.arch }}
+          path: webspeak-webclient-v*-windows-${{ matrix.arch }}.zip
           if-no-files-found: error
           compression-level: 0
 
-  linux-x64:
+  linux:
     needs: verify
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.2
+          architecture: ${{ matrix.arch == 'arm64' && 'arm64' || 'x64' }}
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -150,13 +169,14 @@ jobs:
           npm run web:build
           npm run build
           npm prune --omit=dev --no-audit --no-fund
-      - name: Package and smoke-test Linux x64
+      - name: Package and smoke-test Linux ${{ matrix.arch }}
         env:
           RELEASE_REF: ${{ inputs.version || github.ref_name }}
+          PACKAGE_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
           release_version="${RELEASE_REF#v}"
-          package_name="webspeak-webclient-v${release_version}-linux-x64"
+          package_name="webspeak-webclient-v${release_version}-linux-${PACKAGE_ARCH}"
           package_root="$RUNNER_TEMP/$package_name"
           runtime_root="$(dirname "$(dirname "$(command -v node)")")"
           mkdir -p "$package_root/web" "$package_root/runtime"
@@ -205,28 +225,114 @@ jobs:
           tar -czf "$GITHUB_WORKSPACE/${package_name}.tar.gz" -C "$RUNNER_TEMP" "$package_name"
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-x64
-          path: webspeak-webclient-v*-linux-x64.tar.gz
+          name: linux-${{ matrix.arch }}
+          path: webspeak-webclient-v*-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
+  android:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.2
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+            mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+      - name: Build Android APKs
+        env:
+          RELEASE_REF: ${{ inputs.version || github.ref_name }}
+        run: |
+          set -euo pipefail
+          release_version="${RELEASE_REF#v}"
+          version_code="$(node -e 'const [major, minor, patch] = process.argv[1].split(".").map(Number); process.stdout.write(String(major * 10000 + minor * 100 + patch))' "$release_version")"
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          npm ci --ignore-scripts --no-audit --no-fund
+          current_version="$(node -p "require('./package.json').version")"
+          if [ "$current_version" != "$release_version" ]; then
+            npm version --no-git-tag-version "$release_version"
+          fi
+          npm run prepare:sdk
+          npm --prefix web ci --no-audit --no-fund
+          npm --prefix mobile ci --no-audit --no-fund
+          npm run android:sync
+          cd web/android
+          ./gradlew --no-daemon assembleDebug -PappVersion="$release_version" -PappVersionCode="$version_code"
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p release-apks
+          for apk in web/android/app/build/outputs/apk/debug/app-*-debug.apk; do
+            abi="${apk##*/app-}"
+            abi="${abi%-debug.apk}"
+            cp "$apk" "release-apks/webspeak-android-v${release_version}-${abi}-debug.apk"
+          done
+          test "$(find release-apks -maxdepth 1 -name '*.apk' | wc -l)" -eq 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apks
+          path: release-apks/*.apk
           if-no-files-found: error
           compression-level: 0
 
   publish-release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows-x64, linux-x64]
+    needs: [windows, linux, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - name: Download deployment packages
         uses: actions/download-artifact@v4
         with:
-          pattern: '*-x64'
+          pattern: '*'
           path: release-assets
           merge-multiple: true
+      - name: Create checksums
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum * > SHA256SUMS.txt
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: WebSpeak ${{ github.ref_name }}
-          generate_release_notes: true
+          body_path: docs/releases/${{ github.ref_name }}.md
           files: release-assets/*
+      - name: Remove superseded preview release and tag
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = 'v0.2.6-preview';
+            try {
+              const release = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag,
+              });
+              await github.rest.repos.deleteRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.data.id,
+              });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            try {
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `tags/${tag}`,
+              });
+            } catch (error) {
+              if (error.status !== 404 && error.status !== 422) throw error;
+            }
