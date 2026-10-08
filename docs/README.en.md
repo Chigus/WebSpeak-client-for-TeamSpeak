@@ -27,7 +27,7 @@ The public demo is hosted in Hong Kong and its network conditions and load may b
 | Administration | Manage targets, access policy, WebRTC, relays, invites, sessions, logs, diagnostics, and backups. |
 | Skins | Protected Day, Night, and ILLUSIA skins, plus instance-managed `.wskin` appearances with administrator enable/default controls. |
 | User experience | Chinese, English, German, Russian, and Japanese UI with responsive desktop/mobile layouts. |
-| Self-hosting | Data stays with the operator; Docker amd64/arm64, Windows/Linux x64 and ARM64 packages, and an Android client are provided. |
+| Self-hosting | Data stays with the operator; Docker amd64/arm64, Windows x64 and Linux x64/ARM64 packages, and an Android client are provided. |
 
 ## 🖼️ Screenshots
 
@@ -162,7 +162,7 @@ Disable and save the relay configuration to remove the relay option from the wel
 
 | Version | Date | Summary |
 | --- | --- | --- |
-| [v0.2.6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.6) | 2026-10-08 | Relative to 0.2.5, fixed #10, implemented #9/#12, hardened #6/#7, and fixed the existing-share discovery case reported in PR #13; improved voice and mobile interactions; added x64/ARM64 server and three-ABI Android packages. |
+| [v0.2.6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.6) | 2026-10-08 | Relative to 0.2.5, fixed #10, implemented #9/#12, hardened #6/#7, and fixed the existing-share discovery case reported in PR #13; improved voice and mobile interactions; added Windows x64, Linux x64/ARM64, amd64/arm64 Docker, and three-ABI Android packages. |
 | [v0.2.5](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.5) | 2026-09-27 | Added `.wskin` skins, administrator enable/default controls, and protected Day/Night/ILLUSIA built-ins; removed the unfinished Aurora Voice sample, fixed skin-load flashes, dark-control contrast, and voice-room artwork layering, and added the official skin-development Agent Skill. |
 | [v0.2.4](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.4) | 2026-09-22 | Added cross-platform P2P screen sharing between browsers and native TeamSpeak 6 clients; added STUN/external-TURN configuration, live player and viewer state, 1080p/60 FPS capture settings, and WebRTC statistics; refined screen-share interactions and added visitor numbering. |
 | [v0.2.3](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.3) | 2026-09-19 | Added channel member scheduling and permission-aware direct moves; added avatar, mute-state, and remembered-identity support; refreshed feature screenshots and documentation for all five languages. |
@@ -183,7 +183,7 @@ See the complete history in [CHANGELOG.md](../CHANGELOG.md).
 | Method | Best for | Environment |
 | --- | --- | --- |
 | Docker Compose (recommended) | Long-running servers, simple upgrades, and persistent data | Docker Engine + Docker Compose |
-| Release package | Running without Node.js or build dependencies | Windows/Linux x64 or ARM64 |
+| Release package | Running without Node.js or build dependencies | Windows x64 or Linux x64/ARM64 |
 | From source | Development, debugging, and customization | Node.js 22.5+, Git, and native build tools |
 
 ### Docker Compose (recommended)
@@ -214,7 +214,7 @@ Do not run `docker compose down -v`; it removes the database and administrator s
 
 ### Release package
 
-Download the matching `windows-x64.zip`, `windows-arm64.zip`, `linux-x64.tar.gz`, or `linux-arm64.tar.gz` from [GitHub Releases](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/latest). Extract it and run the included launcher. Packages include the Node.js runtime and production dependencies. Docker images support amd64/arm64.
+Download the matching `windows-x64.zip`, `linux-x64.tar.gz`, or `linux-arm64.tar.gz` from [GitHub Releases](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/latest). Extract it and run the included launcher. Packages include the Node.js runtime and production dependencies. Docker images support amd64/arm64.
 
 Android APKs for `arm64-v8a`, `armeabi-v7a`, and `x86_64` are also attached. They use debug signing for sideload testing; they are not Google Play packages, and real-device voice still needs validation.
 

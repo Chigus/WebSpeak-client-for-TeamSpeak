@@ -8,7 +8,7 @@
 - 实现 [#12](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/issues/12) 所需的公网媒体地址、IPv6 候选和语音 STUN 管理配置；修复 [PR #13](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pull/13) 所报告的连接后漏掉既有 TS6 原生屏幕共享的问题。媒体直连仍要求 UDP 路径可达，需按部署环境配置并验证。
 - 改善语音与 WebRTC 会话稳定性：隔离连接切换后的音频、目录和统计事件，改进 Opus 协商及连续编码状态，并修复静音麦克风时伴奏被一并静音的问题。
 - 优化移动端语音控制、屏幕常亮和窄屏布局；改进管理后台状态生命周期与语音工作区组件结构。
-- 发布包扩展为 Windows/Linux x64 与 ARM64；Docker 镜像支持 amd64/arm64；增加 Android 客户端 APK，包含 arm64-v8a、armeabi-v7a、x86_64 三种构建。Android APK 使用 debug 签名，供侧载测试，不代表已完成真机 TeamSpeak 语音验收。
+- 发布包提供 Windows x64 与 Linux x64/ARM64；Docker 镜像支持 amd64/arm64；增加 Android 客户端 APK，包含 arm64-v8a、armeabi-v7a、x86_64 三种构建。Android APK 使用 debug 签名，供侧载测试，不代表已完成真机 TeamSpeak 语音验收。
 
 ### English
 
@@ -16,28 +16,28 @@
 - Added the public media address, IPv6-candidate, and voice-STUN controls requested by [#12](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/issues/12), and fixed the missed-existing-TS6-share case described in [PR #13](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pull/13). Direct media still requires a reachable UDP path and deployment-specific configuration and testing.
 - Improved voice and WebRTC session stability by isolating audio, directory, and statistics events across reconnects, tightening Opus negotiation and encoder continuity, and keeping accompaniment audible while the microphone is muted.
 - Refined mobile voice controls, screen wake behavior, and narrow layouts; improved administration state lifecycles and voice-workspace component boundaries.
-- Expanded Windows/Linux packages to x64 and ARM64; Docker images now support amd64/arm64. Android APKs are available for arm64-v8a, armeabi-v7a, and x86_64. They use debug signing for sideload testing; real-device TeamSpeak voice has not been validated.
+- Added Windows x64 and Linux x64/ARM64 packages; Docker images support amd64/arm64. Android APKs are available for arm64-v8a, armeabi-v7a, and x86_64. They use debug signing for sideload testing; real-device TeamSpeak voice has not been validated.
 
 ### Deutsch
 
 - Docker-/Compose-Auflösung kurzer Hostnamen und HTTPS-Gesundheitsprüfungen aus [#10](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/issues/10) behoben; Import, Konvertierung und Export von TeamSpeak-Identitäten für [#9](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/issues/9) ergänzt; Stummschaltungssynchronisierung aus [#6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/issues/6) und TS6-Bildschirmfreigabe-Bereinigung aus [#7](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/issues/7) gehärtet.
 - Die in [#12](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/issues/12) gewünschten Einstellungen für öffentliche Medienadresse, IPv6-Kandidaten und Sprach-STUN ergänzt; den Fall verpasst synchronisierter, bereits aktiver TS6-Freigaben aus [PR #13](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pull/13) behoben. Direkte Medien benötigen weiterhin einen erreichbaren UDP-Pfad und deployment-spezifische Konfiguration und Tests.
 - Sprach- und WebRTC-Sitzungen stabilisiert, Opus-Aushandlung verbessert und Begleitton bei stummgeschaltetem Mikrofon erhalten. Mobile Sprachsteuerung, Bildschirm-Wachhalten und schmale Layouts wurden überarbeitet.
-- Windows-/Linux-Pakete für x64 und ARM64 sowie Docker-Images für amd64/arm64 ergänzt. Android-APKs gibt es für arm64-v8a, armeabi-v7a und x86_64; sie sind für Seiteneinladungstests debug-signiert. Reale TeamSpeak-Sprachtests auf Geräten sind nicht bestätigt.
+- Windows-x64- und Linux-x64/ARM64-Pakete sowie Docker-Images für amd64/arm64 ergänzt. Android-APKs gibt es für arm64-v8a, armeabi-v7a und x86_64; sie sind für Seiteneinladungstests debug-signiert. Reale TeamSpeak-Sprachtests auf Geräten sind nicht bestätigt.
 
 ### Русский
 
 - Исправлены разрешение коротких имён Docker/Compose и HTTPS-проверки работоспособности из [#10](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/issues/10); добавлен импорт, преобразование и экспорт идентификаторов TeamSpeak для [#9](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/issues/9); усилена синхронизация микрофона из [#6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/issues/6) и очистка трансляции экрана TS6 из [#7](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/issues/7).
 - Добавлены настройки публичного адреса медиа, IPv6-кандидатов и голосового STUN по запросу [#12](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/issues/12); исправлен пропуск уже запущенной трансляции TS6 после подключения из [PR #13](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pull/13). Для прямого медиа по-прежнему нужен доступный UDP-маршрут и настройка конкретного развёртывания.
 - Повышена устойчивость голосовых сессий и WebRTC: события аудио, каталога и статистики изолированы при переподключении, улучшены согласование Opus и непрерывность кодирования; музыка сопровождения остаётся слышна при выключенном микрофоне. Улучшены мобильные элементы управления и узкие экраны.
-- Пакеты Windows/Linux теперь доступны для x64 и ARM64, Docker-образы — для amd64/arm64. Android APK собраны для arm64-v8a, armeabi-v7a и x86_64 и подписаны отладочным ключом для установки вручную; голос TeamSpeak на реальных устройствах не проверен.
+- Доступны пакеты Windows x64 и Linux x64/ARM64, Docker-образы — для amd64/arm64. Android APK собраны для arm64-v8a, armeabi-v7a и x86_64 и подписаны отладочным ключом для установки вручную; голос TeamSpeak на реальных устройствах не проверен.
 
 ### 日本語
 
 - [#10](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/issues/10) の Docker/Compose 短縮ホスト名解決と HTTPS ヘルスチェックを修正。[#9](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/issues/9) の TeamSpeak ID インポート・変換・エクスポートを実装し、[#6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/issues/6) のミュート同期と [#7](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/issues/7) の TS6 画面共有終了処理を強化しました。
 - [#12](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/issues/12) の要望に沿って公開メディアアドレス、IPv6 候補、音声 STUN の設定を追加し、[PR #13](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pull/13) が報告した接続前から存在する TS6 画面共有の見落としを修正しました。直接メディア通信には到達可能な UDP 経路と環境ごとの設定・検証が必要です。
 - 音声/WebRTC セッションの安定性を改善し、再接続後に古い音声・ディレクトリ・統計イベントが混ざらないようにしました。Opus のネゴシエーションと連続エンコードを改善し、マイクをミュートしても伴奏が聞こえるよう修正しました。モバイル操作と狭い画面のレイアウトも改善しました。
-- Windows/Linux サーバーパッケージは x64 と ARM64、Docker イメージは amd64/arm64 に対応。Android APK は arm64-v8a、armeabi-v7a、x86_64 を用意しました。APK はサイドロードテスト向けのデバッグ署名で、実機 TeamSpeak 音声は未検証です。
+- Windows x64 と Linux x64/ARM64 のサーバーパッケージ、amd64/arm64 の Docker イメージに対応。Android APK は arm64-v8a、armeabi-v7a、x86_64 を用意しました。APK はサイドロードテスト向けのデバッグ署名で、実機 TeamSpeak 音声は未検証です。
 
 ## [0.2.5] — 2026-09-27（相对 0.2.4）
 

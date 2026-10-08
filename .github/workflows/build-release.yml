@@ -27,15 +27,13 @@ jobs:
         include:
           - arch: x64
             runner: windows-latest
-          - arch: arm64
-            runner: windows-11-arm
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.2
-          architecture: ${{ matrix.arch == 'arm64' && 'arm64' || 'x64' }}
+          architecture: x64
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -51,26 +49,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run prepare:sdk
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if ((node -p "process.arch") -eq "arm64") {
-            $env:npm_config_node_gyp = Join-Path (Get-Location) "node_modules/node-gyp/bin/node-gyp.js"
-            $opusDirectory = Join-Path (Get-Location) "node_modules/@discordjs/opus"
-            $opusWindowsConfig = Join-Path (Get-Location) "node_modules/@discordjs/opus/deps/config/opus/win"
-            $arm64Config = Join-Path $opusWindowsConfig "arm64/config.h"
-            if (-not (Test-Path $arm64Config)) {
-              New-Item -ItemType Directory -Force -Path (Split-Path -Parent $arm64Config) | Out-Null
-              Copy-Item -LiteralPath (Join-Path $opusWindowsConfig "x64/config.h") -Destination $arm64Config
-            }
-            Push-Location $opusDirectory
-            try {
-              node ..\node-pre-gyp\bin\node-pre-gyp install --fallback-to-build
-              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            } finally {
-              Pop-Location
-            }
-          } else {
-            npm rebuild @discordjs/opus --foreground-scripts --no-audit --no-fund
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
+          npm rebuild @discordjs/opus --foreground-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm --prefix web ci --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $currentVersion = node -p "require('./package.json').version"

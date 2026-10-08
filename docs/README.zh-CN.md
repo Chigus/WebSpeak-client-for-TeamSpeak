@@ -27,7 +27,7 @@ WebSpeak 是一个可自行部署的 TeamSpeak 3 / TeamSpeak 6 网页客户端�
 | 管理控制台 | 管理目标、访问策略、WebRTC、中继、邀请、会话、日志、诊断和备份。 |
 | 皮肤 | 提供日间、夜间和 ILLUSIA 三款受保护皮肤，并支持实例自定义 `.wskin` 外观与管理员默认/启用管理。 |
 | 界面体验 | 提供中文、English、Deutsch、Русский、日本語及响应式桌面/移动布局。 |
-| 自托管 | 数据由部署者保存，支持 Docker amd64/arm64、Windows/Linux x64/arm64 服务端包和 Android 客户端。 |
+| 自托管 | 数据由部署者保存，支持 Docker amd64/arm64、Windows x64、Linux x64/ARM64 服务端包和 Android 客户端。 |
 
 ## 🖼️ 界面截图
 
@@ -164,7 +164,7 @@ docker run -d --name webspeak-relay --restart unless-stopped --network host \
 
 | 版本 | 日期 | 摘要 |
 | --- | --- | --- |
-| [v0.2.6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.6) | 2026-10-08 | 相对 0.2.5 修复 #10、实现 #9/#12，并加固 #6/#7；修复 PR #13 所报告的既有屏幕共享漏同步；改善语音和移动端交互；发布 x64/ARM64 与三种 ABI 构建包。 |
+| [v0.2.6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.6) | 2026-10-08 | 相对 0.2.5 修复 #10、实现 #9/#12，并加固 #6/#7；修复 PR #13 所报告的既有屏幕共享漏同步；改善语音和移动端交互；发布 Windows x64、Linux x64/ARM64、Docker amd64/arm64 和 Android 三种 ABI 构建包。 |
 | [v0.2.5](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.5) | 2026-09-27 | 新增 `.wskin` 皮肤系统、管理员启用/默认管理和受保护的日间/夜间/ILLUSIA 内置皮肤；移除未完成 Aurora Voice 样例，修复皮肤加载闪烁、暗色控件可读性与语音界面美术层级，并加入官方皮肤开发 Agent Skill。 |
 | [v0.2.4](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.4) | 2026-09-22 | 新增浏览器与 TeamSpeak 6 原生客户端之间的跨端 P2P 屏幕共享；提供 STUN/外部 TURN 配置、直播播放器、观众状态、1080p/60 FPS 采集设置和 WebRTC 统计；优化屏幕共享交互并新增访客编号。 |
 | [v0.2.3](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.3) | 2026-09-19 | 新增频道成员调度与按权限直接移动；支持头像、静音状态同步和身份恢复；更新五种语言的功能截图与文档。 |
@@ -185,7 +185,7 @@ docker run -d --name webspeak-relay --restart unless-stopped --network host \
 | 方案 | 适用场景 | 环境 |
 | --- | --- | --- |
 | Docker Compose（推荐） | 长期运行、升级简单、数据持久化 | Docker Engine + Docker Compose |
-| 发布包 | 不安装 Node.js 和构建依赖 | Windows/Linux x64 或 ARM64 |
+| 发布包 | 不安装 Node.js 和构建依赖 | Windows x64 或 Linux x64/ARM64 |
 | 源码运行 | 开发、调试和二次开发 | Node.js 22.5+、Git 和本地编译工具 |
 
 ### Docker Compose（推荐）
@@ -216,7 +216,7 @@ docker compose up -d
 
 ### 发布包
 
-从 [GitHub Releases](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/latest) 下载与系统和架构匹配的 `windows-x64.zip`、`windows-arm64.zip`、`linux-x64.tar.gz` 或 `linux-arm64.tar.gz`，解压后运行对应启动脚本。发布包自带 Node.js 运行时和生产依赖。Docker 镜像支持 amd64/arm64。
+从 [GitHub Releases](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/latest) 下载与系统和架构匹配的 `windows-x64.zip`、`linux-x64.tar.gz` 或 `linux-arm64.tar.gz`，解压后运行对应启动脚本。发布包自带 Node.js 运行时和生产依赖。Docker 镜像支持 amd64/arm64。
 
 Release 同时提供 Android `arm64-v8a`、`armeabi-v7a` 和 `x86_64` APK。它们使用 debug 签名，可手动侧载测试；不是 Google Play 发布包，Android 真机语音仍需验收。
 

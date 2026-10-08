@@ -101,7 +101,7 @@ docker compose up -d
 
 ### Пакет Release
 
-Скачайте подходящий пакет `windows-x64.zip`, `windows-arm64.zip`, `linux-x64.tar.gz` или `linux-arm64.tar.gz` из [Releases](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/latest) и запустите приложенный скрипт. Docker поддерживает amd64/arm64. Также доступны Android APK для `arm64-v8a`, `armeabi-v7a` и `x86_64`; они подписаны отладочным ключом для ручной установки и тестирования, а не для Google Play. Голос TeamSpeak на реальных устройствах пока не проверен.
+Скачайте подходящий пакет `windows-x64.zip`, `linux-x64.tar.gz` или `linux-arm64.tar.gz` из [Releases](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/latest) и запустите приложенный скрипт. Docker поддерживает amd64/arm64. Также доступны Android APK для `arm64-v8a`, `armeabi-v7a` и `x86_64`; они подписаны отладочным ключом для ручной установки и тестирования, а не для Google Play. Голос TeamSpeak на реальных устройствах пока не проверен.
 
 ### Из исходников
 
@@ -135,7 +135,7 @@ npm start
 
 | Версия | Изменения |
 | --- | --- |
-| [v0.2.6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.6) | Исправлена #10, реализованы настройки #9/#12, усилены исправления #6/#7 и исправлен случай из PR #13; улучшено мобильное управление; добавлены Windows/Linux x64 и ARM64, Docker amd64/arm64 и Android APK для трёх ABI. |
+| [v0.2.6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.6) | Исправлена #10, реализованы настройки #9/#12, усилены исправления #6/#7 и исправлен случай из PR #13; улучшено мобильное управление; добавлены Windows x64, Linux x64/ARM64, Docker amd64/arm64 и Android APK для трёх ABI. |
 | [v0.2.5](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.5) | Добавлены скины `.wskin`, управление включением и темой по умолчанию, а также защищённые темы «День», «Ночь» и ILLUSIA; удалён незавершённый пример Aurora Voice, исправлены мерцание при загрузке скина, контраст элементов в тёмном режиме и слои иллюстраций в голосовом пространстве; добавлен официальный Agent Skill для разработки скинов. |
 | [v0.2.4](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.4) | Добавлена кроссплатформенная P2P-трансляция экрана между браузерами и нативными клиентами TeamSpeak 6; добавлены настройка STUN/внешнего TURN, проигрыватель и состояние зрителей, захват до 1080p/60 FPS и статистика WebRTC; улучшено управление трансляцией и добавлен номер посетителя. |
 | [v0.2.3](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.3) | Добавлены управление перемещением участников и прямое перемещение с учётом прав; поддержаны аватары, синхронизация микрофона и восстановление идентичности; обновлены скриншоты и документация для пяти языков. |

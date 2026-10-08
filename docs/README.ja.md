@@ -101,7 +101,7 @@ docker compose up -d
 
 ### Release パッケージ
 
-[Releases](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/latest) から `windows-x64.zip`、`windows-arm64.zip`、`linux-x64.tar.gz`、`linux-arm64.tar.gz` のいずれかを取得し、同梱ランチャーを実行します。Docker は amd64/arm64 に対応します。`arm64-v8a`、`armeabi-v7a`、`x86_64` の Android APK もあります。APK は手動インストールとテスト向けのデバッグ署名で、Google Play 用ではありません。実機 TeamSpeak 音声は未検証です。
+[Releases](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/latest) から `windows-x64.zip`、`linux-x64.tar.gz`、`linux-arm64.tar.gz` のいずれかを取得し、同梱ランチャーを実行します。Docker は amd64/arm64 に対応します。`arm64-v8a`、`armeabi-v7a`、`x86_64` の Android APK もあります。APK は手動インストールとテスト向けのデバッグ署名で、Google Play 用ではありません。実機 TeamSpeak 音声は未検証です。
 
 ### ソースから
 
@@ -135,7 +135,7 @@ npm start
 
 | バージョン | 内容 |
 | --- | --- |
-| [v0.2.6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.6) | #10 を修正、#9/#12 の設定を実装し、#6/#7 を強化。PR #13 が報告した TS6 共有の見落としも修正しました。Windows/Linux x64・ARM64、Docker amd64/arm64、3 ABI の Android APK を追加しました。 |
+| [v0.2.6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.6) | #10 を修正、#9/#12 の設定を実装し、#6/#7 を強化。PR #13 が報告した TS6 共有の見落としも修正しました。Windows x64、Linux x64/ARM64、Docker amd64/arm64、3 ABI の Android APK を追加しました。 |
 | [v0.2.5](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.5) | `.wskin` スキン、管理者向けの有効化/デフォルト設定、保護された昼・夜・ILLUSIA 内蔵スキンを追加。未完成の Aurora Voice サンプルを削除し、読み込み時のちらつき、ダークモードの視認性、音声画面のアートレイヤーを修正。公式スキン開発 Agent Skill も追加しました。 |
 | [v0.2.4](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.4) | ブラウザと TeamSpeak 6 ネイティブクライアント間のクロスプラットフォーム P2P 画面共有を追加しました。STUN/外部 TURN 設定、プレーヤーと視聴者状態、1080p/60 FPS 取得設定、WebRTC 統計に対応し、共有操作と訪問者番号も改善しました。 |
 | [v0.2.3](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.3) | チャンネルメンバーの移動操作と権限に応じた直接移動を追加し、アバター表示、ミュート状態の同期、保存 ID の復元に対応しました。5 言語のスクリーンショットとドキュメントも更新しました。 |

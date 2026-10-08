@@ -154,7 +154,7 @@ Relay deaktivieren und speichern, um die Option von der Willkommensseite zu entf
 
 | Version | Datum | Zusammenfassung |
 | --- | --- | --- |
-| [v0.2.6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.6) | 2026-10-08 | Gegenüber 0.2.5 #10 behoben, #9/#12 umgesetzt, #6/#7 abgesichert und den in PR #13 beschriebenen TS6-Freigabefall korrigiert; Sprach- und Mobilinteraktionen verbessert; Windows-/Linux x64/ARM64, Docker amd64/arm64 und Android-APKs für drei ABIs ergänzt. |
+| [v0.2.6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.6) | 2026-10-08 | Gegenüber 0.2.5 #10 behoben, #9/#12 umgesetzt, #6/#7 abgesichert und den in PR #13 beschriebenen TS6-Freigabefall korrigiert; Sprach- und Mobilinteraktionen verbessert; Windows x64, Linux x64/ARM64, Docker amd64/arm64 und Android-APKs für drei ABIs ergänzt. |
 | [v0.2.5](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.5) | 2026-09-27 | `.wskin`-Skins, Aktivierungs-/Standardverwaltung und geschützte Tages-, Nacht- und ILLUSIA-Skins ergänzt; unfertiges Aurora-Voice-Beispiel entfernt, Skin-Ladeblitze, dunkle Bedienelemente und Artwork-Ebenen im Sprachbereich korrigiert sowie offiziellen Skin-Entwicklungs-Agent-Skill hinzugefügt. |
 | [v0.2.4](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.4) | 2026-09-22 | Plattformübergreifendes P2P-Bildschirmteilen zwischen Browsern und nativen TeamSpeak-6-Clients ergänzt; STUN-/externes-TURN-Konfiguration, Live-Player und Zuschauerstatus, Aufnahmeoptionen bis 1080p/60 FPS und WebRTC-Statistiken hinzugefügt; Bildschirmfreigabe-Interaktion verbessert und Besucherzählung ergänzt. |
 | [v0.2.3](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.3) | 2026-09-19 | Mitgliederplanung und direkte Verschiebung nach Berechtigung ergänzt; Avatar-, Stummschaltstatus- und Identitätsunterstützung hinzugefügt; Screenshots und Dokumentation für alle fünf Sprachen aktualisiert. |
@@ -175,7 +175,7 @@ Vollständige Historie: [CHANGELOG.md](../CHANGELOG.md).
 | Methode | Geeignet für | Umgebung |
 | --- | --- | --- |
 | Docker Compose (empfohlen) | Dauerbetrieb, einfache Updates und persistente Daten | Docker Engine + Docker Compose |
-| Release-Paket | Betrieb ohne Node.js und Build-Werkzeuge | Windows/Linux x64 oder ARM64 |
+| Release-Paket | Betrieb ohne Node.js und Build-Werkzeuge | Windows x64 oder Linux x64/ARM64 |
 | Aus dem Quellcode | Entwicklung und Anpassungen | Node.js 22.5+, Git und native Build-Werkzeuge |
 
 ### Docker Compose (empfohlen)
@@ -206,7 +206,7 @@ docker compose up -d
 
 ### Release-Paket
 
-Das passende `windows-x64.zip`, `windows-arm64.zip`, `linux-x64.tar.gz` oder `linux-arm64.tar.gz` aus den [GitHub Releases](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/latest) herunterladen und den enthaltenen Starter ausführen. Die Pakete enthalten Node.js und Produktionsabhängigkeiten. Docker unterstützt amd64/arm64.
+Das passende `windows-x64.zip`, `linux-x64.tar.gz` oder `linux-arm64.tar.gz` aus den [GitHub Releases](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/latest) herunterladen und den enthaltenen Starter ausführen. Die Pakete enthalten Node.js und Produktionsabhängigkeiten. Docker unterstützt amd64/arm64.
 
 Android-APKs für `arm64-v8a`, `armeabi-v7a` und `x86_64` sind ebenfalls verfügbar. Sie sind für Tests per Sideload debug-signiert, keine Google-Play-Pakete; echte TeamSpeak-Sprachtests auf Geräten stehen noch aus.
 
