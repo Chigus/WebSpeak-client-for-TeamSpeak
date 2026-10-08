@@ -243,11 +243,13 @@ jobs:
             package-lock.json
             web/package-lock.json
             mobile/package-lock.json
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
       - name: Build Android APKs
         env:
           RELEASE_REF: ${{ inputs.version || github.ref_name }}
