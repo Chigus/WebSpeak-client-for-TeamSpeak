@@ -51,9 +51,10 @@ class AudioDecoderStub {
   static failConfigure = false;
   decodeQueueSize = 0;
   closed = 0;
+  decoded = [];
   constructor(callbacks) { this.callbacks = callbacks; AudioDecoderStub.instances.push(this); }
   configure(config) { if (AudioDecoderStub.failConfigure) throw new Error("Codec unavailable"); this.config = { ...config }; }
-  decode(chunk) { this.lastChunk = chunk; }
+  decode(chunk) { this.lastChunk = chunk; this.decoded.push(chunk); }
   close() { this.closed++; }
 }
 class RecorderStub {
@@ -67,8 +68,8 @@ class RecorderStub {
   stop() { this.stops++; this.state = "inactive"; }
   finish() { this.state = "inactive"; this.ondataavailable?.({ data: new Blob(["audio"]) }); this.onstop?.(); }
 }
-function decodedChunk() {
-  return { sampleRate: 48000, numberOfChannels: 1, numberOfFrames: 960, closed: 0, copyTo() {}, close() { this.closed++; } };
+function decodedChunk(timestamp = 0) {
+  return { timestamp, sampleRate: 48000, numberOfChannels: 1, numberOfFrames: 960, closed: 0, copyTo() {}, close() { this.closed++; } };
 }
 function receiveAudio(socket, clientId = 7, codec = 4) {
   socket.onmessage({ data: new Uint8Array([codec, clientId >> 8, clientId & 255, 1, 2, 3]).buffer });
@@ -1790,14 +1791,21 @@ test("an offer rejected after a new connection opens cannot report a microphone 
 });
 
 
-test("resetting an overloaded remote decoder disconnects its old gain", async () => {
+test("an overloaded remote decoder drops excess audio without disconnecting its gain", async () => {
   const socket = await connect();
   receiveAudio(socket);
   const gain = AudioContextStub.gains.at(-1);
-  AudioDecoderStub.instances.at(-1).decodeQueueSize = 3;
+  const decoder = AudioDecoderStub.instances.at(-1);
+  decoder.decodeQueueSize = 15;
   receiveAudio(socket);
-  assert.equal(gain.disconnects, 1);
-  assert.equal(AudioDecoderStub.instances.length, 2);
+  assert.equal(gain.disconnects, 0);
+  assert.equal(AudioDecoderStub.instances.length, 1);
+  assert.equal(decoder.closed, 0);
+  assert.equal(decoder.decoded.length, 1);
+  decoder.decodeQueueSize = 0;
+  receiveAudio(socket);
+  assert.equal(decoder.decoded.length, 2);
+  assert.equal(decoder.lastChunk.timestamp, 40_000);
 });
 
 test("an old source ending cannot hide replacement playback from session cleanup", async () => {
@@ -1806,8 +1814,7 @@ test("an old source ending cannot hide replacement playback from session cleanup
   const first = AudioDecoderStub.instances.at(-1);
   first.callbacks.output(decodedChunk());
   const oldSource = AudioContextStub.sources.at(-1);
-  first.decodeQueueSize = 3;
-  receiveAudio(socket);
+  receiveAudio(socket, 7, 5);
   AudioDecoderStub.instances.at(-1).callbacks.output(decodedChunk());
   const replacement = AudioContextStub.sources.at(-1);
   oldSource.dispatchEvent(new Event("ended"));
@@ -1887,8 +1894,7 @@ test("remote playback preserves member volume through output mute and decoder re
   voice.toggleOutputMute();
   assert.deepEqual(AudioContextStub.gains.map(node => node.gain.value), [0, 0]);
   const old = AudioDecoderStub.instances[0];
-  old.decodeQueueSize = 3;
-  receiveAudio(socket, 7);
+  receiveAudio(socket, 7, 5);
   const replacement = AudioDecoderStub.instances.at(-1);
   old.callbacks.error(new Error("stale decoder error"));
   assert.equal(replacement.closed, 0);
@@ -1898,21 +1904,33 @@ test("remote playback preserves member volume through output mute and decoder re
   assert.equal(AudioContextStub.gains[1].gain.value, 0.5);
 });
 
-test("decoded audio stays within the 80 ms playback window and recovers after overflow", async () => {
+test("WSS audio remains bounded through overload and resumes without resetting scheduled playback", async t => {
+  t.mock.method(performance, "now", () => 0);
   const socket = await connect();
-  receiveAudio(socket);
+  socket.receive({ type: "connected", tsClientId: 1 });
+  await nextTurn();
+  for (let frame = 0; frame < 20; frame++) receiveAudio(socket);
   const decoder = AudioDecoderStub.instances[0];
-  const chunks = Array.from({ length: 5 }, decodedChunk);
+  assert.equal(decoder.decoded.length, 12);
+  const chunks = decoder.decoded.map(encoded => decodedChunk(encoded.timestamp));
   for (const chunk of chunks) decoder.callbacks.output(chunk);
-  assert.deepEqual(AudioContextStub.sources.map(source => source.startedAt), [0, 0.02, 0.04, 0.06]);
-  assert.equal(decoder.closed, 1);
-  assert.ok(AudioContextStub.sources.every(source => source.stopped === 1));
+  assert.equal(AudioContextStub.sources.length, 12);
+  AudioContextStub.sources.forEach((source, index) => {
+    assert.ok(Math.abs(source.startedAt - (0.12 + index * 0.02)) < 1e-9);
+    assert.ok(source.startedAt + source.buffer.duration <= 0.36 + 1e-9);
+  });
+  assert.equal(decoder.closed, 0);
+  assert.ok(AudioContextStub.sources.every(source => source.stopped === 0));
   assert.ok(chunks.every(chunk => chunk.closed === 1));
+  AudioContextStub.instances.at(-1).currentTime = 0.20;
   receiveAudio(socket);
-  const replacement = AudioDecoderStub.instances.at(-1);
-  replacement.callbacks.output(decodedChunk());
-  assert.notEqual(replacement, decoder);
-  assert.equal(AudioContextStub.sources.at(-1).startedAt, 0);
+  assert.equal(decoder.lastChunk.timestamp, 400_000);
+  // Native Opus can continue output PTS across the eight rejected input packets.
+  decoder.callbacks.output(decodedChunk(240_000));
+  assert.equal(AudioDecoderStub.instances.length, 1);
+  assert.ok(Math.abs(AudioContextStub.sources.at(-1).startedAt - 0.36) < 1e-9);
+  const sample = await audioSample(socket);
+  assert.deepEqual(sample.fallbackPlayback, { framesReceived: 21, framesDropped: 8, decodeErrors: 0 });
 });
 
 test("old socket audio cannot create a decoder in a replacement session", async () => {
@@ -2781,7 +2799,7 @@ test("stereo receive headers select two-channel decoding and preserve both playb
   assert.deepEqual(stereo.config, { codec: "opus", sampleRate: 48000, numberOfChannels: 2 });
   assert.deepEqual([...stereo.lastChunk.data], [1, 2, 3], "the codec and speaker header must not enter the Opus payload");
   const planes = [new Float32Array(960).fill(0.25), new Float32Array(960).fill(-0.125)];
-  const chunk = { sampleRate: 48000, numberOfChannels: 2, numberOfFrames: 960, closed: 0,
+  const chunk = { timestamp: stereo.lastChunk.timestamp, sampleRate: 48000, numberOfChannels: 2, numberOfFrames: 960, closed: 0,
     copyTo(samples, { planeIndex, format }) { assert.equal(format, "f32-planar"); samples.set(planes[planeIndex]); },
     close() { this.closed++; } };
   stereo.callbacks.output(chunk);
