@@ -183,14 +183,14 @@ export function createWebServer(options: WebServerOptions): WebServer {
     }
 
     const policy = options.adminService.getConnectionPolicy();
-    const managedInvite = inviteToken ? options.adminService.consumeManagedInvite(inviteToken) : null;
+    const managedInvite = inviteToken ? options.adminService.getManagedInvite(inviteToken) : null;
     if (inviteToken && !managedInvite) {
       response.status(400).json({ ok: false, code: "INVITE_INVALID" });
       return;
     }
     let targetText = managedInvite?.target ?? policy.defaultTarget;
     let target: TeamSpeakTarget;
-    let serverPassword = managedInvite?.serverPassword ?? policy.serverPassword;
+    let serverPassword = policy.serverPassword;
     const channel = requestedChannel || managedInvite?.channel || "";
     const requestedRelayId = typeof body.accelerationRelayId === "string" ? body.accelerationRelayId.trim().slice(0, 110) : "";
     const accelerationRequested = body.accelerated === true || Boolean(requestedRelayId);
@@ -224,6 +224,15 @@ export function createWebServer(options: WebServerOptions): WebServer {
     } catch (error) {
       response.status(400).json({ ok: false, code: error instanceof TeamSpeakAliasLookupError ? "HOST_NOT_FOUND" : "TARGET_NOT_ALLOWED" });
       return;
+    }
+
+    if (inviteToken) {
+      const consumedInvite = options.adminService.consumeManagedInvite(inviteToken);
+      if (!consumedInvite) {
+        response.status(400).json({ ok: false, code: "INVITE_INVALID" });
+        return;
+      }
+      serverPassword = consumedInvite.serverPassword;
     }
 
     const ticket = options.voiceBridgeOptions.joinTickets.create({

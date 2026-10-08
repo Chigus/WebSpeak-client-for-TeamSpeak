@@ -94,6 +94,18 @@ test("settings, tests, invites, and join tickets resolve nicknames through the g
   assert.equal(invited.payload?.channel, "Lobby");
   assert.equal(invited.payload?.serverPassword, "stored-password");
   assert.equal(service.getConnectionPolicy().defaultTarget, "different guild:9987");
+
+  service.updateSettings(settings("retry guild", "fixed"));
+  const retryInvite = service.createManagedInvite({ channel: "Lobby", expiresInHours: 1, maxUses: 1 });
+  lookupBody = "";
+  assert.equal((await join({ invite: retryInvite.token })).code, "HOST_NOT_FOUND");
+  assert.equal(service.listManagedInvites().find((item) => item.id === retryInvite.invite.id)?.useCount, 0);
+  lookupBody = "1.1.1.1:10001";
+  const retriedInvite = await join({ invite: retryInvite.token });
+  assert.equal(retriedInvite.status, 201);
+  assert.deepEqual(retriedInvite.payload?.target, { host: "1.1.1.1", port: 10001 });
+  assert.equal(service.listManagedInvites().find((item) => item.id === retryInvite.invite.id)?.useCount, 1);
+
   lookupBody = "";
   assert.equal((await join({ target: "missing guild" })).code, "HOST_NOT_FOUND");
   await assert.rejects(service.testConnection("missing guild", "", true), { code: "HOST_NOT_FOUND" });

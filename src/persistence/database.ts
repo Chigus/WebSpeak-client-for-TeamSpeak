@@ -333,6 +333,18 @@ export class WebSpeakDatabase {
     return rows.map(mapManagedInviteRow);
   }
 
+  getManagedInvite(tokenHash: string, now = Date.now()): ManagedInviteRecord | null {
+    const nowIso = new Date(now).toISOString();
+    const row = this.database.prepare(
+      `SELECT * FROM managed_invites
+       WHERE token_hash = ?
+         AND revoked_at IS NULL
+         AND expires_at > ?
+         AND (max_uses = 0 OR use_count < max_uses)`,
+    ).get(tokenHash, nowIso) as ManagedInviteRow | undefined;
+    return row ? mapManagedInviteRow(row) : null;
+  }
+
   revokeManagedInvite(id: string): boolean {
     const result = this.database.prepare(
       "UPDATE managed_invites SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",

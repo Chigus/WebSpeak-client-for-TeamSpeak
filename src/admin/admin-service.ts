@@ -311,6 +311,16 @@ export class AdminService {
     return revoked;
   }
 
+  getManagedInvite(token: string): { target: string; channel: string } | null {
+    if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) return null;
+    const record = this.database.getManagedInvite(hashInviteToken(token));
+    if (!record) return null;
+    return {
+      target: record.targetText ?? formatTeamSpeakTarget({ host: record.targetHost, port: record.targetPort }),
+      channel: record.channel,
+    };
+  }
+
   consumeManagedInvite(token: string): { target: string; serverPassword: string; channel: string } | null {
     if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) return null;
     const record = this.database.consumeManagedInvite(hashInviteToken(token));
