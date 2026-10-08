@@ -163,7 +163,7 @@ npm run verify
 
 Headless Vue tests use Vite middleware mode with both HMR and the WebSocket listener disabled (`hmr: false`, `ws: false`). Disabling HMR alone still reserves Vite's default socket port and causes parallel test processes to conflict.
 
-CI verifies pushes to `dev` and `master`, pull requests and manual runs. Docker publication on `master` or release tags, and release packaging on tags or manual runs, call the same verification workflow before publishing or packaging. Verification includes the application checks and a Docker HTTP health smoke test; that smoke test does not prove voice or screen-sharing functionality.
+CI verifies pushes to `dev`, `master` and the maintained `nas/macau` branch, pull requests and manual runs. Docker publication on `master` or release tags, and release packaging on tags or manual runs, call the same verification workflow before publishing or packaging. Verification includes the application checks and a Docker HTTP health smoke test; that smoke test does not prove voice or screen-sharing functionality.
 
 Tests requiring a real TeamSpeak server, browser media devices or Android hardware must document their environment and outcome separately. Never substitute a mock codec or an HTTP health response for a successful audio test.
 
@@ -207,4 +207,4 @@ Skin cache writes and preference persistence accept the owning AbortSignal, incl
 
 Validate admin responses before applying them to page state. Network and protocol failures must preserve unsaved input; a failed logout must not be presented as a successful logout. Keep secret keep/replace/remove actions intact and do not persist credentials in UI error messages or diagnostic logs.
 
-The repository remote is `https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak`. Preserve existing local work when implementing the plan in `docs/CODE_REFACTOR_PLAN.zh-CN.md`. Keep private configuration, runtime data and local deployment archives out of source commits. Preserve documented skin hooks and browser persistence formats during component refactors.
+This maintained fork uses `origin` for `https://github.com/Chigus/WebSpeak-client-for-TeamSpeak` and `upstream` for `https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak`; verify the actual remotes before updating. Read `AGENTS.md` for the `nas/macau` branch and NAS release workflow. Preserve existing local work when implementing the plan in `docs/CODE_REFACTOR_PLAN.zh-CN.md`. Keep private configuration, runtime data and local deployment archives out of source commits. Preserve documented skin hooks and browser persistence formats during component refactors.

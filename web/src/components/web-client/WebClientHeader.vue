@@ -28,7 +28,7 @@
       >
       <a
         class="github-button"
-        href="https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak"
+        href="https://github.com/Chigus/WebSpeak-client-for-TeamSpeak"
         target="_blank"
         rel="noreferrer"
         :title="t('githubRepository')"
@@ -38,30 +38,6 @@
           name="github"
           :size="18"
         /><span>{{ t("githubRepository") }}</span>
-      </a>
-      <button
-        type="button"
-        class="qq-button"
-        :title="t('qqGroup')"
-        :aria-label="t('qqGroup')"
-        aria-haspopup="dialog"
-        @click="emit('openQq')"
-      >
-        <Icon
-          name="qq"
-          :size="18"
-        /><span class="qq-label">{{ t("qqGroup") }}</span>
-      </button>
-      <a
-        class="bilibili-button"
-        href="https://space.bilibili.com/25414873"
-        target="_blank"
-        rel="noreferrer"
-        :title="t('bilibiliProfile')"
-        :aria-label="t('bilibiliProfile')"
-      >
-        <span class="bilibili-glyph">B</span
-        ><span class="bilibili-label">{{ t("bilibiliProfile") }}</span>
       </a>
       <span
         class="version-badge"
@@ -127,7 +103,6 @@ defineProps<{
 const language = defineModel<Language>("language", { required: true });
 const skinId = defineModel<string>("skinId", { required: true });
 const emit = defineEmits<{
-  openQq: [];
   skinChange: [value: string];
   languageChange: [];
 }>();
