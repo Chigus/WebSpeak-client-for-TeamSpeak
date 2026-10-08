@@ -157,3 +157,4 @@ WebSpeak は [GNU Affero General Public License v3.0 only](../LICENSE) の下で
 - GitHub のマージ記録に基づく一覧です。上のバージョン概要には、各リリースに実際に含まれる変更のみを記載しています。
 - [LainHE](https://github.com/LainHE) — [PR #2](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pull/2) でブラウザのエラー翻訳を改善し、[PR #8](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pull/8) で拡大縮小、フローティングレイアウト、ホームのフッターを修正。
 - [TimmySheep](https://github.com/TimmySheep) — [マージ済み PR #13、#15–#24](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pulls?q=is%3Apr+is%3Amerged+author%3ATimmySheep)。既存 TS6 共有の検出、画面比率、モバイル音声・画面点灯・スキンメニュー、ID のチャンネル設定、PWA/テーマ、チャット履歴、メンバー音声状態、マイク権限などに貢献。
+- [yichen11818](https://github.com/yichen11818) — [PR #25](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pull/25) で TeamSpeak の登録済みニックネームによる接続に対応し、設定・お気に入り・招待リンクにニックネームの接続先を保持。
