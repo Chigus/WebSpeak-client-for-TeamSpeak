@@ -4,7 +4,9 @@ import type { AudioFlowStats } from "./audio-stats.js";
 import type { TSClient, TSVoiceData } from "./ts-client.js";
 import type { WebRtcAudioSession } from "./webrtc-audio.js";
 
-const AUDIO_FRAME_BYTES = 1_920; // 20 ms of 48 kHz mono Int16 PCM.
+// Fixed 20 ms frames at 48 kHz: mono Int16 or interleaved L/R Int16.
+const MONO_FRAME_BYTES = 1_920;
+const STEREO_FRAME_BYTES = 3_840;
 // Keep the established byte guard; the browser also bounds playback by time.
 const MAX_BUFFERED_BYTES = 4_096;
 
@@ -23,11 +25,13 @@ export interface SessionAudioOptions {
   peer(): Pick<WebRtcAudioSession, "pushTeamSpeakVoice"> | null;
   whisperTargets(): readonly number[] | null;
   sendJson(message: ServerMessage): void;
+  createStereoEncoder?(): VoiceEncoder;
 }
 
-/** A session owns one encoder and one active audio route in each direction. */
+/** A session owns its encoders and one active audio route in each direction. */
 export class SessionAudioTransport {
   private encoder: VoiceEncoder | null;
+  private stereoEncoder: VoiceEncoder | null = null;
   private closed = false;
   private warnedAt: number | null = null;
 
@@ -76,7 +80,8 @@ export class SessionAudioTransport {
   receivePcm(frame: Buffer): void {
     if (!this.isCurrent()) return;
     const stats = this.options.audio;
-    if (frame.length !== AUDIO_FRAME_BYTES) {
+    const stereo = frame.length === STEREO_FRAME_BYTES;
+    if (frame.length !== MONO_FRAME_BYTES && !stereo) {
       stats.ingressDroppedFrames++;
       this.options.sendJson({ type: "error", error: { code: "INVALID_AUDIO_FRAME", message: "音频帧格式无效", recoverable: false } });
       return;
@@ -87,8 +92,11 @@ export class SessionAudioTransport {
     const startedAt = this.clock();
     let encoded: Buffer;
     try {
-      if (!this.encoder) throw new Error("Encoder unavailable");
-      encoded = this.encoder.encode(frame);
+      // Ordinary voice sessions never allocate the additional stereo codec.
+      if (stereo && !this.stereoEncoder) this.stereoEncoder = this.options.createStereoEncoder?.() ?? null;
+      const encoder = stereo ? this.stereoEncoder : this.encoder;
+      if (!encoder) throw new Error("Encoder unavailable");
+      encoded = encoder.encode(frame);
       stats.tsEncodeMaxMs = Math.max(stats.tsEncodeMaxMs, this.clock() - startedAt);
     } catch {
       stats.tsSendErrors++;
@@ -96,7 +104,7 @@ export class SessionAudioTransport {
       this.reportEncoderFailure();
       return;
     }
-    this.sendVoice(encoded, 4);
+    this.sendVoice(encoded, stereo ? 5 : 4);
   }
 
   receiveWebRtc(data: Buffer, codec: number): void {
@@ -151,7 +159,10 @@ export class SessionAudioTransport {
     if (this.closed) return;
     this.closed = true;
     const encoder = this.encoder;
+    const stereoEncoder = this.stereoEncoder;
     this.encoder = null;
+    this.stereoEncoder = null;
     try { encoder?.dispose(); } catch { /* other session resources must still be released */ }
+    try { stereoEncoder?.dispose(); } catch { /* other session resources must still be released */ }
   }
 }

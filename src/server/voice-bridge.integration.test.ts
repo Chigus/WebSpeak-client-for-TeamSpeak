@@ -18,6 +18,7 @@ import type { WebRtcAudioSession } from "./webrtc-audio.js";
 class TeamSpeakStub extends EventEmitter {
   disconnected = false;
   sent: Buffer[] = [];
+  sentCodecs: number[] = [];
   directory: TSDirectorySnapshot = { channels: [], clients: [] };
   avatarRequest: (id: number, uid: string) => Promise<TSClientAvatar | null> = async () => null;
   async connect() { this.disconnected = false; this.emit("directorySnapshot", this.directory); }
@@ -27,14 +28,15 @@ class TeamSpeakStub extends EventEmitter {
   isConnected() { return !this.disconnected; }
   async sendProtocolCommand() {}
   async setAccompanimentActive() {}
-  sendVoice(data: Buffer) { this.sent.push(data); this.emit("sent", data); }
-  sendWhisper(data: Buffer) { this.sent.push(data); }
+  sendVoice(data: Buffer, codec = 4) { this.sent.push(data); this.sentCodecs.push(codec); this.emit("sent", data); }
+  sendWhisper(data: Buffer, _clientIds: number[], codec = 4) { this.sent.push(data); this.sentCodecs.push(codec); }
   getClientAvatar(id: number, uid: string) { return this.avatarRequest(id, uid); }
 }
 
 async function fixture(t: TestContext, overrides: {
   createTeamSpeakClient?: () => TSClient;
   createEncoder?: () => Pick<OpusEncoder, "encode" | "dispose">;
+  createStereoEncoder?: () => Pick<OpusEncoder, "encode" | "dispose">;
   configureSdk?: (sdk: TeamSpeakStub) => void;
 } = {}) {
   const sdk = new TeamSpeakStub();
@@ -43,6 +45,7 @@ async function fixture(t: TestContext, overrides: {
   const bridge = new VoiceBridge({ joinTickets: tickets }, pino({ enabled: false }), undefined, {
     createTeamSpeakClient: overrides.createTeamSpeakClient ?? (() => sdk as unknown as TSClient),
     ...(overrides.createEncoder ? { createEncoder: overrides.createEncoder } : {}),
+    ...(overrides.createStereoEncoder ? { createStereoEncoder: overrides.createStereoEncoder } : {}),
   });
   const server = createServer();
   bridge.attach(server);
@@ -140,6 +143,80 @@ test("loopback PCM reaches the SDK as native Opus and malformed PCM is rejected"
   const [raw] = await error;
   assert.equal(JSON.parse(raw.toString()).error.code, "INVALID_AUDIO_FRAME");
   assert.equal(f.sdk.sent.length, 1);
+  assert.deepEqual(f.sdk.sentCodecs, [4]);
+});
+
+function stereoToneAmplitude(pcm: Buffer, channel: 0 | 1, frequency: number): number {
+  const frames = pcm.length / 4;
+  let real = 0;
+  let imaginary = 0;
+  for (let index = 0; index < frames; index++) {
+    const sample = pcm.readInt16LE(index * 4 + channel * 2);
+    const phase = 2 * Math.PI * frequency * index / 48_000;
+    real += sample * Math.cos(phase);
+    imaginary += sample * Math.sin(phase);
+  }
+  return 2 * Math.hypot(real, imaginary) / frames;
+}
+
+test("loopback stereo retains separate left and right signals through native Opus music", { timeout: 5_000 }, async t => {
+  const f = await fixture(t);
+  const decoder = new OpusEncoder(48_000, 2);
+  t.after(() => decoder.dispose());
+  let lastPacket: Buffer = Buffer.alloc(0);
+  for (let frame = 0; frame < 16; frame++) {
+    const pcm = Buffer.alloc(3_840);
+    for (let index = 0; index < 960; index++) {
+      const time = (frame * 960 + index) / 48_000;
+      const left = Math.round(10_000 * Math.sin(2 * Math.PI * 600 * time));
+      // The final frames are correlated, exercising forced stereo as well.
+      const right = frame < 12 ? Math.round(14_000 * Math.sin(2 * Math.PI * 1_200 * time)) : left;
+      pcm.writeInt16LE(left, index * 4);
+      pcm.writeInt16LE(right, index * 4 + 2);
+    }
+    const sent = once(f.sdk, "sent");
+    f.socket.send(pcm);
+    await sent;
+    lastPacket = f.sdk.sent[frame]!;
+    assert.equal(f.sdk.sentCodecs[frame], 5, "stereo must be marked as TeamSpeak Opus Music");
+    assert.ok(lastPacket.length > 0 && lastPacket.length < pcm.length);
+    assert.equal(lastPacket[0]! & 4, 4, "Opus TOC must retain its stereo flag");
+    const decoded = decoder.decode(lastPacket);
+    assert.equal(decoded.length, 3_840, "20 ms must contain 960 samples per channel");
+    if (frame < 3 || frame >= 12) continue; // Skip codec startup delay and the correlated tail.
+    const left600 = stereoToneAmplitude(decoded, 0, 600);
+    const left1200 = stereoToneAmplitude(decoded, 0, 1_200);
+    const right600 = stereoToneAmplitude(decoded, 1, 600);
+    const right1200 = stereoToneAmplitude(decoded, 1, 1_200);
+    assert.ok(left600 > 2_000 && right1200 > 2_000, `frame ${frame}: both channels must stay audible`);
+    assert.ok(left600 > left1200 * 8, `frame ${frame}: right signal leaked into the left channel`);
+    assert.ok(right1200 > right600 * 8, `frame ${frame}: left signal leaked into the right channel`);
+  }
+  const received = once(f.socket, "message");
+  f.sdk.emit("voiceData", { clientId: 2, codec: 5, data: lastPacket });
+  const [packet, binary] = await received;
+  assert.equal(binary, true);
+  assert.deepEqual(packet, Buffer.concat([Buffer.from([5, 0, 2]), lastPacket]));
+});
+
+test("a stereo codec remains lazy and is released with its session", { timeout: 5_000 }, async t => {
+  let created = 0;
+  let disposed = 0;
+  const f = await fixture(t, { createStereoEncoder() {
+    created++;
+    return { encode: () => Buffer.from([4, 0, 0]), dispose() { disposed++; } };
+  } });
+  const monoSent = once(f.sdk, "sent");
+  f.socket.send(Buffer.alloc(1_920));
+  await monoSent;
+  assert.equal(created, 0);
+  const stereoSent = once(f.sdk, "sent");
+  f.socket.send(Buffer.alloc(3_840));
+  await stereoSent;
+  assert.equal(created, 1);
+  const entry = [...f.entries.values()][0]!;
+  await f.bridge.terminateSession(entry.id);
+  assert.equal(disposed, 1);
 });
 
 test("failed final peer statistics do not interrupt session cleanup", { timeout: 5_000 }, async t => {

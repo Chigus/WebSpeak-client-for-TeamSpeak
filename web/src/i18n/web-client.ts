@@ -1541,6 +1541,67 @@ webClientTranslations.ja = {
   langSwitch: "中文",
 };
 
+const stereoTranslations: Record<Language, Record<string, string>> = {
+  zh: {
+    inputMode: "输入模式",
+    monoVoiceInput: "普通语音（单声道）",
+    stereoRawInput: "人头麦 / 立体声原音",
+    stereoInputHint: "保留左右声道，关闭降噪、回声消除和音量门限。未静音时持续传送声音；建议使用耳机。",
+    inputChannelStatus: "输入：{input} 声道 · 传送：{output} 声道",
+    continuousTransmission: "连续传送",
+    leftChannel: "左声道 L",
+    rightChannel: "右声道 R",
+    sourceCode: "本版本源码",
+  },
+  en: {
+    inputMode: "Input mode",
+    monoVoiceInput: "Voice (mono)",
+    stereoRawInput: "Binaural / original stereo",
+    stereoInputHint: "Preserves left and right channels with noise suppression, echo cancellation and the voice gate off. Sends continuously while unmuted; headphones recommended.",
+    inputChannelStatus: "Input: {input} channels · Sending: {output} channels",
+    continuousTransmission: "Continuous transmission",
+    leftChannel: "Left L",
+    rightChannel: "Right R",
+    sourceCode: "Source for this version",
+  },
+  de: {
+    inputMode: "Eingangsmodus",
+    monoVoiceInput: "Sprache (Mono)",
+    stereoRawInput: "Kunstkopf / Original-Stereo",
+    stereoInputHint: "Erhält beide Kanäle ohne Rauschunterdrückung, Echounterdrückung oder Sprachschwelle. Sendet fortlaufend, solange das Mikrofon nicht stumm ist. Kopfhörer empfohlen.",
+    inputChannelStatus: "Eingang: {input} Kanäle · Übertragung: {output} Kanäle",
+    continuousTransmission: "Fortlaufende Übertragung",
+    leftChannel: "Links L",
+    rightChannel: "Rechts R",
+    sourceCode: "Quellcode dieser Version",
+  },
+  ru: {
+    inputMode: "Режим входа",
+    monoVoiceInput: "Речь (моно)",
+    stereoRawInput: "Бинауральный / исходный стереозвук",
+    stereoInputHint: "Сохраняет левый и правый каналы без шумоподавления, эхоподавления и порога активации. Передача непрерывна, пока микрофон включён. Рекомендуются наушники.",
+    inputChannelStatus: "Вход: {input} каналов · Передача: {output} каналов",
+    continuousTransmission: "Непрерывная передача",
+    leftChannel: "Левый L",
+    rightChannel: "Правый R",
+    sourceCode: "Исходный код этой версии",
+  },
+  ja: {
+    inputMode: "入力モード",
+    monoVoiceInput: "通話（モノラル）",
+    stereoRawInput: "バイノーラル / ステレオ原音",
+    stereoInputHint: "左右の音声を保持し、ノイズ抑制・エコー除去・音量ゲートを無効にします。ミュート中以外は連続送信します。ヘッドホンを推奨します。",
+    inputChannelStatus: "入力：{input} チャンネル · 送信：{output} チャンネル",
+    continuousTransmission: "連続送信",
+    leftChannel: "左 L",
+    rightChannel: "右 R",
+    sourceCode: "このバージョンのソース",
+  },
+};
+for (const language of Object.keys(stereoTranslations) as Language[]) {
+  Object.assign(webClientTranslations[language]!, stereoTranslations[language]);
+}
+
 export function getInitialLanguage(): Language {
   const stored = localStorage.getItem("webspeak:language");
   if (stored === "zh" || stored === "en" || stored === "de" || stored === "ru" || stored === "ja") return stored;

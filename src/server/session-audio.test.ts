@@ -1,16 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { SessionAudioTransport } from "./session-audio.js";
+import { SessionAudioTransport, type VoiceEncoder } from "./session-audio.js";
 import { createAudioFlowStats } from "./audio-stats.js";
 import type { ServerMessage } from "../shared/server-messages.js";
 import type { TSVoiceData } from "./ts-client.js";
 
-function fixture() {
+function fixture(createStereoEncoder?: () => VoiceEncoder) {
   const state = { current: true, ready: true, now: 0, targets: null as number[] | null, disposed: 0,
+    stereoCreated: 0, stereoDisposed: 0,
     peer: null as { pushTeamSpeakVoice(data: TSVoiceData): void } | null };
   const audio = createAudioFlowStats();
   const packets: Buffer[] = [];
   const encoded: Buffer[] = [];
+  const stereoEncoded: Buffer[] = [];
   const forwarded: Array<{ data: Buffer; codec: number; targets?: number[] }> = [];
   const notices: ServerMessage[] = [];
   const socket = { readyState: 1 as 0 | 1 | 2 | 3, bufferedAmount: 0, send: (packet: Buffer) => { packets.push(packet); } };
@@ -22,13 +24,18 @@ function fixture() {
     encode(frame: Buffer) { encoded.push(frame); state.now += 3; return Buffer.from([9, 8, 7]); },
     dispose() { state.disposed++; },
   };
+  const stereoEncoder = {
+    encode(frame: Buffer) { stereoEncoded.push(frame); state.now += 3; return Buffer.from([6, 5, 4]); },
+    dispose() { state.stereoDisposed++; },
+  };
   const transport = new SessionAudioTransport({
     audio, socket, client, isCurrent: () => state.current, isReady: () => state.ready,
     selfId: () => 1, peer: () => state.peer, whisperTargets: () => state.targets,
     sendJson: message => { notices.push(message); },
+    createStereoEncoder() { state.stereoCreated++; return createStereoEncoder?.() ?? stereoEncoder; },
   }, encoder, () => state.now);
   const remote = (clientId = 513) => ({ clientId, codec: 4, data: Buffer.from([11, 12, 13]) });
-  return { transport, audio, state, socket, client, encoder, packets, encoded, forwarded, notices, remote };
+  return { transport, audio, state, socket, client, encoder, stereoEncoder, packets, encoded, stereoEncoded, forwarded, notices, remote };
 }
 
 test("PCM framing preserves codec, whisper routing and timing counters", () => {
@@ -62,6 +69,61 @@ test("invalid PCM is rejected and reconnecting sessions do not encode audio", ()
   assert.equal(f.packets.length, 0);
 });
 
+test("stereo PCM lazily uses one music encoder while mono and whisper routes stay independent", () => {
+  const f = fixture();
+  const stereo = Buffer.alloc(3_840);
+  stereo.writeInt16LE(12_000, 0);
+  stereo.writeInt16LE(-8_000, 2);
+  f.transport.receivePcm(Buffer.alloc(1_920));
+  assert.equal(f.state.stereoCreated, 0);
+  f.transport.receivePcm(stereo);
+  f.state.targets = [7, 8];
+  f.transport.receivePcm(stereo);
+  f.transport.receivePcm(Buffer.alloc(1_920));
+  assert.equal(f.state.stereoCreated, 1);
+  assert.equal(f.encoded.length, 2);
+  assert.deepEqual(f.stereoEncoded, [stereo, stereo]);
+  assert.deepEqual(f.forwarded.map(({ codec, targets }) => ({ codec, targets })), [
+    { codec: 4, targets: undefined }, { codec: 5, targets: undefined },
+    { codec: 5, targets: [7, 8] }, { codec: 4, targets: [7, 8] },
+  ]);
+  assert.equal(f.audio.ingressFrames, 4);
+  assert.equal(f.audio.tsSendFrames, 4);
+  assert.equal(f.audio.ingressDroppedFrames, 0);
+});
+
+test("invalid, reconnecting, WebRTC and closed input cannot allocate a stereo encoder", () => {
+  const f = fixture();
+  for (const bytes of [3_839, 3_841, 7_680]) f.transport.receivePcm(Buffer.alloc(bytes));
+  assert.equal(f.notices.length, 3);
+  assert.ok(f.notices.every(message => message.type === "error" && message.error?.code === "INVALID_AUDIO_FRAME"));
+  f.state.ready = false;
+  f.transport.receivePcm(Buffer.alloc(3_840));
+  f.state.ready = true;
+  f.state.peer = { pushTeamSpeakVoice() {} };
+  f.transport.receivePcm(Buffer.alloc(3_840));
+  f.transport.close();
+  f.transport.receivePcm(Buffer.alloc(3_840));
+  assert.equal(f.state.stereoCreated, 0);
+  assert.equal(f.audio.ingressDroppedFrames, 5);
+  assert.equal(f.forwarded.length, 0);
+  assert.equal(f.state.disposed, 1);
+  assert.equal(f.state.stereoDisposed, 0);
+});
+
+test("stereo initialization failure is contained and ordinary voice keeps working", () => {
+  const f = fixture(() => { throw new Error("Stereo codec unavailable"); });
+  f.transport.receivePcm(Buffer.alloc(3_840));
+  f.transport.receivePcm(Buffer.alloc(3_840));
+  assert.equal(f.audio.tsSendErrors, 2);
+  assert.equal(f.audio.ingressDroppedFrames, 2);
+  assert.equal(f.notices.length, 1);
+  assert.equal(f.notices[0]?.type, "audioError");
+  f.transport.receivePcm(Buffer.alloc(1_920));
+  assert.deepEqual(f.forwarded.map(packet => packet.codec), [4]);
+  assert.equal(f.audio.tsSendFrames, 1);
+});
+
 test("WebRTC ingress excludes queued PCM and fallback re-enables PCM", () => {
   const f = fixture();
   f.state.peer = { pushTeamSpeakVoice() {} };
@@ -87,6 +149,14 @@ test("TeamSpeak packets keep the three-byte header and exclude self playback", (
   assert.equal(f.audio.tsReceiveFrames, 2);
   assert.equal(f.audio.egressFrames, 1);
   assert.deepEqual(f.audio.egressFramesByClient, { "513": 1 });
+});
+
+test("TeamSpeak music keeps its codec and Opus payload on the browser route", () => {
+  const f = fixture();
+  const music = { ...f.remote(), codec: 5 };
+  f.transport.receiveTeamSpeak(music);
+  assert.deepEqual([...f.packets[0]!], [5, 2, 1, 11, 12, 13]);
+  assert.equal(f.audio.egressFrames, 1);
 });
 
 test("backpressure drops bursts above 4096 bytes and resumes without a retained queue", () => {
@@ -172,6 +242,20 @@ test("codec cleanup is idempotent even if disposal throws", t => {
   assert.equal(attempts, 1);
   assert.equal(f.audio.ingressFrames, 0);
   assert.equal(f.audio.tsReceiveFrames, 0);
+});
+
+test("both audio encoders are released even if either disposal throws", t => {
+  const f = fixture();
+  f.transport.receivePcm(Buffer.alloc(3_840));
+  const released: string[] = [];
+  t.mock.method(f.encoder, "dispose", () => { released.push("mono"); throw new Error("Mono closed"); });
+  t.mock.method(f.stereoEncoder, "dispose", () => { released.push("stereo"); throw new Error("Stereo closed"); });
+  f.transport.close();
+  f.transport.close();
+  f.transport.receivePcm(Buffer.alloc(3_840));
+  assert.deepEqual(released, ["mono", "stereo"]);
+  assert.equal(f.state.stereoCreated, 1);
+  assert.equal(f.stereoEncoded.length, 1);
 });
 
 test("invalid SDK speaker IDs and codecs cannot throw while packing the header", () => {

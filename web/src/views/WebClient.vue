@@ -247,6 +247,8 @@
       >
         <span>WebSpeak</span><span class="footer-separator">·</span
         ><span>{{ t("teamSpeakClient") }}</span
+        ><span class="footer-separator">·</span
+        ><a href="/source/webspeak-stereo-source.tar.gz" download>{{ t("sourceCode") }}</a
         ><span class="footer-spacer"></span
         ><button
           type="button"
@@ -818,6 +820,7 @@ const {
   pokeNotifications,
   microphoneMuted,
   noiseSuppressionEnabled,
+  stereoInputEnabled,
   inputVolume,
   outputVolume,
   outputMuted,
@@ -829,9 +832,12 @@ const {
   selectedOutputDeviceId,
   outputDeviceSupported,
   audioPermission,
+  microphoneProcessing,
   audioContextState,
   identityMaterial,
   micLevel,
+  micLeftLevel,
+  micRightLevel,
   microphoneTestActive,
   testAudioUrl,
   speakingIds,
@@ -841,6 +847,7 @@ const {
   setVolume,
   setInputVolume,
   setNoiseSuppressionEnabled,
+  setStereoInputEnabled,
   setOutputVolume,
   toggleOutputMute,
   setVoxThreshold,
@@ -1014,6 +1021,7 @@ const audioControls = useWebClientAudioControls({
   prepareInputDevices,
   setInputVolume,
   setNoiseSuppressionEnabled,
+  setStereoInputEnabled,
   setOutputVolume,
   setVoxThreshold,
   setNotificationVolume,
@@ -1037,7 +1045,7 @@ function reconnectMobile(): void {
   reconnectNow();
 }
 const { toggleMicrophone, stopWhisperTalk } = audioControls;
-const audioDockState = { microphoneMuted, inputVolume, outputVolume, outputMuted, noiseSuppressionEnabled, accompanimentActive };
+const audioDockState = { microphoneMuted, inputVolume, outputVolume, outputMuted, noiseSuppressionEnabled, stereoInputEnabled, accompanimentActive };
 const audioSettingsState = {
   inputDevices,
   outputDevices,
@@ -1045,14 +1053,18 @@ const audioSettingsState = {
   selectedOutputDeviceId,
   outputDeviceSupported,
   audioPermission,
+  microphoneProcessing,
   audioContextState,
   microphoneMuted,
   noiseSuppressionEnabled,
+  stereoInputEnabled,
   inputVolume,
   outputVolume,
   voxThreshold,
   notificationVolume,
   micLevel,
+  micLeftLevel,
+  micRightLevel,
   microphoneTestActive,
   testAudioUrl,
 };

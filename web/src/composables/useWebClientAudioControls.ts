@@ -14,6 +14,7 @@ interface UseWebClientAudioControlsOptions {
   prepareInputDevices: () => Promise<void>;
   setInputVolume: (value: number) => void;
   setNoiseSuppressionEnabled: (enabled: boolean) => Promise<void>;
+  setStereoInputEnabled: (enabled: boolean) => Promise<void>;
   setOutputVolume: (value: number) => void;
   setVoxThreshold: (value: number) => void;
   setNotificationVolume: (value: number) => void;
@@ -44,6 +45,7 @@ export function useWebClientAudioControls({
   prepareInputDevices,
   setInputVolume,
   setNoiseSuppressionEnabled,
+  setStereoInputEnabled,
   setOutputVolume,
   setVoxThreshold,
   setNotificationVolume,
@@ -75,13 +77,14 @@ export function useWebClientAudioControls({
   }
 
   function microphoneErrorMessage(error: unknown, fallback = "请检查浏览器权限"): string {
-    const name = error instanceof DOMException ? error.name : "";
+    const name = error instanceof Error ? error.name : "";
     const reasons: Record<string, string> = {
       NotAllowedError: "浏览器未授予麦克风权限",
       NotFoundError: "未找到可用的麦克风",
       NotReadableError: "麦克风可能正被其他程序占用",
       OverconstrainedError: "所选麦克风当前不可用",
       SecurityError: "浏览器阻止了麦克风访问",
+      StereoInputUnavailableError: "所选输入未提供双声道，请选择声卡的立体声回录或虚拟输入",
     };
     return `麦克风访问失败：${reasons[name] ?? fallback}`;
   }
@@ -92,6 +95,14 @@ export function useWebClientAudioControls({
 
   function onNoiseSuppressionToggle(event: Event): void {
     void setNoiseSuppressionEnabled((event.target as HTMLInputElement).checked);
+  }
+
+  async function onStereoInputChange(event: Event): Promise<void> {
+    const isCurrent = beginSettingsRequest();
+    try { await setStereoInputEnabled((event.target as HTMLSelectElement).value === "stereo"); }
+    catch (error: unknown) {
+      if (isCurrent()) settingsError.value = microphoneErrorMessage(error, "无法启用双声道输入，请检查录音设备的声道设置");
+    }
   }
 
   function onOutputVolume(event: Event): void {
@@ -237,6 +248,7 @@ export function useWebClientAudioControls({
     micMeterBars,
     onInputVolume,
     onNoiseSuppressionToggle,
+    onStereoInputChange,
     onOutputVolume,
     onVoxThreshold,
     onNotificationVolume,

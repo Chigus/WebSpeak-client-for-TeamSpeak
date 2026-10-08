@@ -100,7 +100,7 @@ Microphone metering is optional and must not interrupt voice. Its nodes and time
 
 ## Audio and screen sharing
 
-The compatibility voice path captures 48 kHz mono PCM using an AudioWorklet, with a ScriptProcessor fallback. The browser assembles 960-sample, 20 ms frames and sends 1,920-byte Int16 payloads over WebSocket. The gateway encodes them as Opus for TeamSpeak. Incoming Opus uses a three-byte header containing codec and client ID, then browser WebCodecs decoding and playback.
+The compatibility voice path captures 48 kHz PCM using an AudioWorklet, with a ScriptProcessor fallback. Each 20 ms frame has 960 samples per channel: 1,920 Int16 bytes for ordinary mono speech, or 3,840 bytes of LR-interleaved Int16 for optional binaural/stereo input. Strict frame length selects the gateway encoder; stereo uses Opus Music (codec 5), 192 kbps and two forced channels, while mono retains Opus Voice (codec 4). Incoming Opus uses a three-byte header containing codec and client ID; browser playback selects one or two channels from the codec and retires the decoder safely when it changes. Stereo capture disables voice processing and gating and stays on WSS; this deployment keeps the optional mono WebRTC mixer disabled for all listeners.
 
 When enabled by the administrator, WebRTC provides a separate voice transport between the browser and gateway. The gateway uses `werift` and mixes incoming TeamSpeak speakers for WebRTC playback. Negotiation failures can fall back to the compatibility path. Keep microphone mute, per-member volume and playback behavior consistent across both transports.
 

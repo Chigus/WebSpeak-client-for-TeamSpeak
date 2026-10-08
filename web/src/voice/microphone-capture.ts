@@ -8,6 +8,9 @@ export interface MicrophoneProcessingSettings {
   noiseSuppression: boolean | null;
   autoGainControl: boolean | null;
   rnnoise: boolean | null;
+  sourceChannelCount: number | null;
+  sourceSampleRate: number | null;
+  captureChannelCount: 1 | 2;
 }
 
 export interface MicrophoneCapture {
@@ -22,11 +25,12 @@ export interface MicrophoneCapture {
 interface CaptureOptions {
   context: AudioContext;
   stream: MediaStream;
+  channels?: 1 | 2;
   noiseSuppression: boolean;
   volume: number;
   signal: AbortSignal;
   assertCurrent(): void;
-  onSamples(input: Float32Array, rms?: number): void;
+  onSamples(input: Float32Array, rms?: number, levels?: readonly number[]): void;
 }
 
 // Each prepared graph owns its stream and nodes. It cannot publish PCM before
@@ -51,6 +55,7 @@ export function createMicrophoneCaptureFactory() {
 
   async function prepare(options: CaptureOptions): Promise<MicrophoneCapture> {
     const { context: ctx, stream, assertCurrent } = options;
+    const channels = options.channels ?? 1;
     let source: MediaStreamAudioSourceNode | null = null;
     let denoiser: RnnoiseWorkletNode | null = null;
     let destination: MediaStreamAudioDestinationNode | null = null;
@@ -81,8 +86,8 @@ export function createMicrophoneCaptureFactory() {
       }
       for (const track of stream.getTracks()) clean(() => track.stop());
     }
-    const onSamples = (samples: Float32Array, rms?: number) => {
-      if (active && !disposed) options.onSamples(samples, rms);
+    const onSamples = (samples: Float32Array, rms?: number, levels?: readonly number[]) => {
+      if (active && !disposed) options.onSamples(samples, rms, levels);
     };
     options.signal.addEventListener("abort", dispose, { once: true });
     try {
@@ -90,9 +95,16 @@ export function createMicrophoneCaptureFactory() {
       const track = stream.getAudioTracks().find(candidate => candidate.readyState === "live");
       if (!track) throw new DOMException("No live microphone track", "NotFoundError");
       const settings = track.getSettings();
+      const sourceChannelCount = typeof settings.channelCount === "number" && Number.isFinite(settings.channelCount)
+        ? settings.channelCount : null;
+      if (channels === 2 && sourceChannelCount !== null && sourceChannelCount !== 2) {
+        const error = new Error("The selected input does not provide two audio channels");
+        error.name = "StereoInputUnavailableError";
+        throw error;
+      }
       source = ctx.createMediaStreamSource(stream);
       const supportsWorklet = typeof AudioWorkletNode !== "undefined" && Boolean(ctx.audioWorklet);
-      if (options.noiseSuppression && supportsWorklet) {
+      if (channels === 1 && options.noiseSuppression && supportsWorklet) {
         try {
           if (!wasmPromise) wasmPromise = loadRnnoise({ url: rnnoiseWasmUrl, simdUrl: rnnoiseSimdWasmUrl }).catch(error => {
             wasmPromise = null;
@@ -108,11 +120,17 @@ export function createMicrophoneCaptureFactory() {
       const processedSource = denoiser ?? source;
       if (denoiser) source.connect(denoiser);
       destination = ctx.createMediaStreamDestination();
-      destination.channelCount = 1;
+      destination.channelCount = channels;
       destination.channelCountMode = "explicit";
+      if (channels === 2) destination.channelInterpretation = "discrete";
       processedSource.connect(destination);
       gain = ctx.createGain();
       gain.gain.value = options.volume;
+      gain.channelCount = channels;
+      gain.channelCountMode = "explicit";
+      // Keep L/R independent. A missing input channel stays silent instead of
+      // being duplicated into a misleading stereo pair.
+      if (channels === 2) gain.channelInterpretation = "discrete";
       silent = ctx.createGain();
       silent.gain.value = 0;
       if (supportsWorklet) {
@@ -120,10 +138,13 @@ export function createMicrophoneCaptureFactory() {
           await loadModule(ctx, "/mic-capture-worklet.js");
           assertCurrent();
           worklet = new AudioWorkletNode(ctx, "webspeak-mic-capture", {
-            numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+            numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [channels],
+            channelCount: channels, channelCountMode: "explicit",
+            channelInterpretation: channels === 2 ? "discrete" : "speakers",
+            processorOptions: { channels },
           });
-          worklet.port.onmessage = (event: MessageEvent<{ samples?: Float32Array; rms?: number }>) => {
-            if (event.data?.samples instanceof Float32Array) onSamples(event.data.samples, event.data.rms);
+          worklet.port.onmessage = (event: MessageEvent<{ samples?: Float32Array; rms?: number; levels?: number[] }>) => {
+            if (event.data?.samples instanceof Float32Array) onSamples(event.data.samples, event.data.rms, event.data.levels);
           };
         } catch {
           assertCurrent();
@@ -132,8 +153,30 @@ export function createMicrophoneCaptureFactory() {
         }
       }
       if (!worklet) {
-        script = ctx.createScriptProcessor(1024, 1, 1);
-        script.onaudioprocess = event => onSamples(event.inputBuffer.getChannelData(0));
+        script = ctx.createScriptProcessor(1024, channels, channels);
+        script.onaudioprocess = event => {
+          if (!active || disposed) return;
+          const left = event.inputBuffer.getChannelData(0);
+          const right = channels === 2 && event.inputBuffer.numberOfChannels > 1
+            ? event.inputBuffer.getChannelData(1) : null;
+          const samples = channels === 1 ? left : new Float32Array(left.length * channels);
+          let leftEnergy = 0;
+          let rightEnergy = 0;
+          for (let index = 0; index < left.length; index++) {
+            const l = left[index]!;
+            leftEnergy += l * l;
+            if (channels === 2) {
+              const r = right?.[index] ?? 0;
+              rightEnergy += r * r;
+              samples[index * 2] = l;
+              samples[index * 2 + 1] = r;
+            }
+          }
+          const frames = left.length || 1;
+          const levels = channels === 1 ? [Math.sqrt(leftEnergy / frames)]
+            : [Math.sqrt(leftEnergy / frames), Math.sqrt(rightEnergy / frames)];
+          onSamples(samples, Math.sqrt((leftEnergy + rightEnergy) / (frames * channels)), levels);
+        };
       }
       processedSource.connect(gain);
       const capture = worklet ?? script!;
@@ -149,6 +192,10 @@ export function createMicrophoneCaptureFactory() {
           noiseSuppression: typeof settings.noiseSuppression === "boolean" ? settings.noiseSuppression : null,
           autoGainControl: typeof settings.autoGainControl === "boolean" ? settings.autoGainControl : null,
           rnnoise: Boolean(denoiser),
+          sourceChannelCount,
+          sourceSampleRate: typeof settings.sampleRate === "number" && Number.isFinite(settings.sampleRate) && settings.sampleRate > 0
+            ? settings.sampleRate : null,
+          captureChannelCount: channels,
         },
         activate() { if (!disposed && (worklet || script)) active = true; },
         setVolume(value) { if (gain) gain.gain.value = value; },

@@ -124,6 +124,7 @@ const MICROPHONE_FAILURE_REASONS: Record<string, string> = {
   TRACKSTARTERROR: "麦克风可能正被其他程序占用",
   ABORTERROR: "麦克风启动被中断，请重试",
   INVALIDSTATEERROR: "麦克风启动被中断，请重试",
+  STEREOINPUTUNAVAILABLEERROR: "所选输入未提供双声道，请选择声卡的立体声回录或虚拟输入",
   TYPEFERROR: "麦克风访问参数被系统拒绝",
 };
 
@@ -279,9 +280,14 @@ export function useVoiceWebSocket() {
     noiseSuppression: null,
     autoGainControl: null,
     rnnoise: null,
+    sourceChannelCount: null,
+    sourceSampleRate: null,
+    captureChannelCount: 1,
   });
   const audioContextState = ref<AudioContextState | "unknown">("unknown");
   const micLevel = ref(0);
+  const micLeftLevel = ref(0);
+  const micRightLevel = ref(0);
   const microphoneTestActive = ref(false);
   const testAudioUrl = ref("");
   const microphoneTest = createMicrophoneTest({
@@ -295,6 +301,10 @@ export function useVoiceWebSocket() {
   const noiseSuppressionEnabled = ref(true);
   let noiseSuppressionTouched = false;
   let committedNoiseSuppressionEnabled = noiseSuppressionEnabled.value;
+  const stereoInputEnabled = ref(false);
+  let stereoInputTouched = false;
+  let committedStereoInputEnabled = false;
+  let activeCaptureChannels: 1 | 2 = 1;
   const inputVolume = ref(1);
   const outputVolume = ref(1);
   const outputMuted = ref(false);
@@ -394,6 +404,7 @@ export function useVoiceWebSocket() {
       inputDeviceId: committedInputDeviceId,
       microphoneMuted: microphoneMuted.value,
       noiseSuppressionEnabled: committedNoiseSuppressionEnabled,
+      stereoInputEnabled: committedStereoInputEnabled,
       voxThreshold: voxThreshold.value,
       inputGain: inputVolume.value,
       outputVolume: outputVolume.value,
@@ -420,6 +431,10 @@ export function useVoiceWebSocket() {
     if (!noiseSuppressionTouched && typeof preferences.noiseSuppressionEnabled === "boolean") {
       noiseSuppressionEnabled.value = preferences.noiseSuppressionEnabled;
       committedNoiseSuppressionEnabled = preferences.noiseSuppressionEnabled;
+    }
+    if (!stereoInputTouched && typeof preferences.stereoInputEnabled === "boolean") {
+      stereoInputEnabled.value = preferences.stereoInputEnabled;
+      committedStereoInputEnabled = preferences.stereoInputEnabled;
     }
     if (typeof preferences.voxThreshold === "number") voxThreshold.value = clamp(preferences.voxThreshold, 0.001, 0.08);
     if (typeof preferences.inputGain === "number") inputVolume.value = Math.max(0, Math.min(1, preferences.inputGain));
@@ -559,12 +574,12 @@ export function useVoiceWebSocket() {
     return null;
   }
 
-  function microphoneConstraints(): MediaTrackConstraints {
+  function microphoneConstraints(channels: 1 | 2): MediaTrackConstraints {
     const constraints: MediaTrackConstraints = {
       sampleRate: { ideal: 48000 },
-      channelCount: { ideal: 1 },
-      echoCancellation: true,
-      noiseSuppression: noiseSuppressionEnabled.value,
+      channelCount: channels === 2 ? { exact: 2 } : { ideal: 1 },
+      echoCancellation: channels === 1,
+      noiseSuppression: channels === 1 && noiseSuppressionEnabled.value,
       // Keep the microphone's natural dynamics. Browser AGC can make speech
       // pump in volume, especially while background noise changes.
       autoGainControl: false,
@@ -619,15 +634,19 @@ export function useVoiceWebSocket() {
     await refreshAudioDevices();
   }
 
-  function handleCaptureChunk(input: Float32Array, rms?: number): void {
+  function handleCaptureChunk(input: Float32Array, rms?: number, levels?: readonly number[]): void {
     if (!input.length) return;
     micLevel.value = Math.min(1, (rms ?? Math.sqrt(input.reduce((sum, sample) => sum + sample * sample, 0) / input.length)) * 6);
+    micLeftLevel.value = Math.min(1, (levels?.[0] ?? micLevel.value / 6) * 6);
+    micRightLevel.value = activeCaptureChannels === 2 ? Math.min(1, (levels?.[1] ?? 0) * 6) : 0;
+    const frameSamples = AUDIO_FRAME_SAMPLES * activeCaptureChannels;
+    const maxBufferedBytes = MAX_AUDIO_BUFFERED_BYTES * activeCaptureChannels;
     const socket = ws.value;
     const shouldSend = !microphoneMuted.value
       && !microphoneTestActive.value
       && !webrtc.active
       && socket?.readyState === WebSocket.OPEN
-      && voxGate(input);
+      && (activeCaptureChannels === 2 || voxGate(input));
     if (!shouldSend) {
       accumLen = 0;
       if (microphoneMuted.value) {
@@ -641,7 +660,7 @@ export function useVoiceWebSocket() {
       return;
     }
     const bufferedBytes = socket.bufferedAmount;
-    if (bufferedBytes > MAX_AUDIO_BUFFERED_BYTES) {
+    if (bufferedBytes > maxBufferedBytes) {
       accumLen = 0;
       return;
     }
@@ -653,14 +672,18 @@ export function useVoiceWebSocket() {
     }
 
     const need = accumLen + input.length;
-    if (accumBuf.length < need) accumBuf = new Int16Array(Math.max(need, accumBuf.length * 2));
+    if (accumBuf.length < need) {
+      const expanded = new Int16Array(Math.max(need, accumBuf.length * 2));
+      expanded.set(accumBuf.subarray(0, accumLen));
+      accumBuf = expanded;
+    }
     accumBuf.set(convBuf.subarray(0, input.length), accumLen);
     accumLen = need;
 
     let offset = 0;
-    while (offset + AUDIO_FRAME_SAMPLES <= accumLen && socket.readyState === WebSocket.OPEN && socket.bufferedAmount <= MAX_AUDIO_BUFFERED_BYTES) {
-      socket.send(accumBuf.slice(offset, offset + AUDIO_FRAME_SAMPLES).buffer);
-      offset += AUDIO_FRAME_SAMPLES;
+    while (offset + frameSamples <= accumLen && socket.readyState === WebSocket.OPEN && socket.bufferedAmount <= maxBufferedBytes) {
+      socket.send(accumBuf.slice(offset, offset + frameSamples).buffer);
+      offset += frameSamples;
     }
     if (offset > 0) markSpeaking(state.tsClientId);
     accumLen -= offset;
@@ -673,6 +696,7 @@ export function useVoiceWebSocket() {
     const controller = new AbortController();
     pendingMicrophoneCapture = controller;
     const ctx = getAudioCtx();
+    const channels = stereoInputEnabled.value ? 2 : 1;
     const assertCurrent = (): void => {
       if (generation !== microphoneGeneration || audioCtx !== ctx || controller.signal.aborted) throw new CancelledMediaOperation();
     };
@@ -681,7 +705,7 @@ export function useVoiceWebSocket() {
     let factoryOwnsStream = false;
     try {
       nextStream = await requestMediaBeforeAudioResume(
-        () => navigator.mediaDevices.getUserMedia({ audio: microphoneConstraints() }),
+        () => navigator.mediaDevices.getUserMedia({ audio: microphoneConstraints(channels) }),
         () => ctx.state === "suspended" ? ctx.resume() : Promise.resolve(),
       );
       assertCurrent();
@@ -689,7 +713,8 @@ export function useVoiceWebSocket() {
       factoryOwnsStream = true;
       nextCapture = await microphoneCaptureFactory.prepare({
         context: ctx, stream: nextStream, signal: controller.signal, assertCurrent,
-        noiseSuppression: noiseSuppressionEnabled.value, volume: inputVolume.value, onSamples: handleCaptureChunk,
+        channels, noiseSuppression: channels === 1 && noiseSuppressionEnabled.value,
+        volume: inputVolume.value, onSamples: handleCaptureChunk,
       });
       assertCurrent();
       // Commit only a complete graph. Permission and node failures leave the
@@ -697,6 +722,7 @@ export function useVoiceWebSocket() {
       stopMicrophone(false);
       micStream = nextStream;
       microphoneCapture = nextCapture;
+      activeCaptureChannels = channels;
       Object.assign(microphoneProcessing, nextCapture.processing);
       nextCapture.setVolume(inputVolume.value);
       nextCapture.activate();
@@ -704,10 +730,13 @@ export function useVoiceWebSocket() {
       // if device enumeration or WebRTC negotiation is still in progress.
       committedInputDeviceId = selectedInputDeviceId.value;
       committedNoiseSuppressionEnabled = noiseSuppressionEnabled.value;
+      committedStereoInputEnabled = channels === 2;
       clearMicrophoneError();
     } catch (error) {
       nextCapture?.dispose();
       if (!factoryOwnsStream) nextStream?.getTracks().forEach(track => track.stop());
+      // A superseded permission rejection must not mark a newer live graph as failed.
+      if (generation !== microphoneGeneration || audioCtx !== ctx || controller.signal.aborted) throw new CancelledMediaOperation();
       if (generation === microphoneGeneration && !(error instanceof CancelledMediaOperation)) {
         if (error instanceof DOMException && ["NotAllowedError", "SecurityError"].includes(error.name)) audioPermission.value = "denied";
         setMicrophoneError(error);
@@ -763,9 +792,11 @@ export function useVoiceWebSocket() {
   }
 
   async function startWebRtcTransport(sequence: number, socket: WebSocket): Promise<void> {
+    // The optional WebRTC mixer is mono; binaural capture stays on the stereo WSS route.
+    if (stereoInputEnabled.value) { await ensureMicrophone(); return; }
     await webrtc.start({
       isCurrent: () => sequence === voiceConnection.generation && ws.value === socket
-        && socket.readyState === WebSocket.OPEN && state.connected,
+        && socket.readyState === WebSocket.OPEN && state.connected && !stereoInputEnabled.value,
       send: message => socket.send(JSON.stringify(message)),
     });
   }
@@ -775,6 +806,8 @@ export function useVoiceWebSocket() {
     voxAttack = 0;
     voxRelease = 0;
     micLevel.value = 0;
+    micLeftLevel.value = 0;
+    micRightLevel.value = 0;
     microphoneCapture?.stopCapture();
   }
 
@@ -815,23 +848,31 @@ export function useVoiceWebSocket() {
     const sequence = voiceConnection.generation;
     const socket = ws.value;
     const isCurrent = () => generation === inputDeviceGeneration && sequence === voiceConnection.generation;
-    const shouldRestartWebRtc = webrtc.active && Boolean(ws.value);
+    const shouldRestartWebRtc = !stereoInputEnabled.value && webrtc.active && Boolean(ws.value);
     try {
       // Keep the current peer alive until the replacement microphone is ready.
-      if (micStream) await startMicrophone();
+      if (micStream || pendingMicrophoneCapture) await startMicrophone();
       if (!isCurrent()) return;
+      if (stereoInputEnabled.value) {
+        // Stop a pending or active mono peer only after a stereo graph commits.
+        try { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "webrtcStop" })); }
+        finally { webrtc.stop(); }
+        microphoneCapture?.activate();
+      }
       if (shouldRestartWebRtc && socket) await startWebRtcTransport(sequence, socket);
       if (!isCurrent()) return;
       await refreshAudioDevices();
       if (!isCurrent()) return;
       committedInputDeviceId = selectedInputDeviceId.value;
       committedNoiseSuppressionEnabled = noiseSuppressionEnabled.value;
+      committedStereoInputEnabled = stereoInputEnabled.value;
       localStorage.setItem("webspeak:input-device", committedInputDeviceId);
       await saveAudioPreferences();
     } catch (error) {
       if (!isCurrent() || error instanceof CancelledMediaOperation) return;
       selectedInputDeviceId.value = committedInputDeviceId;
       noiseSuppressionEnabled.value = committedNoiseSuppressionEnabled;
+      stereoInputEnabled.value = committedStereoInputEnabled;
       localStorage.setItem("webspeak:input-device", committedInputDeviceId);
       throw error;
     }
@@ -1020,6 +1061,7 @@ export function useVoiceWebSocket() {
     selectedInputDeviceId.value = committedInputDeviceId;
     selectedOutputDeviceId.value = committedOutputDeviceId;
     noiseSuppressionEnabled.value = committedNoiseSuppressionEnabled;
+    stereoInputEnabled.value = committedStereoInputEnabled;
     microphoneTest.dispose();
     audioDiagnostics.reset();
     commands.clear(new Error("语音连接已关闭"));
@@ -1177,7 +1219,7 @@ export function useVoiceWebSocket() {
     if (clientId === state.tsClientId) return;
     audioDiagnostics.count("framesReceived");
     markSpeaking(clientId);
-    remotePlayback.play(clientId, data.slice(3));
+    remotePlayback.play(clientId, data.slice(3), data[0]);
   }
 
   function sendCmd<K extends ClientCommandType>(type: K, payload: ClientCommandPayloads[K]): void {
@@ -1366,6 +1408,7 @@ export function useVoiceWebSocket() {
   }
 
   async function setNoiseSuppressionEnabled(enabled: boolean): Promise<void> {
+    if (stereoInputEnabled.value) return;
     if (noiseSuppressionEnabled.value === enabled) return;
     noiseSuppressionTouched = true;
     noiseSuppressionEnabled.value = enabled;
@@ -1374,6 +1417,14 @@ export function useVoiceWebSocket() {
     } catch (error) {
       setMicrophoneError(error);
     }
+  }
+
+  async function setStereoInputEnabled(enabled: boolean): Promise<void> {
+    if (stereoInputEnabled.value === enabled) return;
+    stereoInputTouched = true;
+    stereoInputEnabled.value = enabled;
+    try { await reconfigureMicrophone(); }
+    catch (error) { setMicrophoneError(error); throw error; }
   }
 
   function setOutputVolume(volume: number): void {
@@ -1410,6 +1461,7 @@ export function useVoiceWebSocket() {
     pokeNotifications,
     microphoneMuted,
     noiseSuppressionEnabled,
+    stereoInputEnabled,
     inputVolume,
     outputVolume,
     outputMuted,
@@ -1425,6 +1477,8 @@ export function useVoiceWebSocket() {
     audioContextState,
     identityMaterial,
     micLevel,
+    micLeftLevel,
+    micRightLevel,
     microphoneTestActive,
     testAudioUrl,
     speakingIds,
@@ -1437,6 +1491,7 @@ export function useVoiceWebSocket() {
     setVolume,
     setInputVolume,
     setNoiseSuppressionEnabled,
+    setStereoInputEnabled,
     setOutputVolume,
     toggleOutputMute,
     setVoxThreshold,

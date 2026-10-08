@@ -55,7 +55,9 @@
               ><strong>{{ t("noiseSuppression") }}</strong></span
             ><input
               type="checkbox"
-              :checked="noiseSuppressionEnabled"
+              :checked="!stereoInputEnabled && noiseSuppressionEnabled"
+              :disabled="stereoInputEnabled"
+              :title="stereoInputEnabled ? t('stereoInputHint') : ''"
               :aria-label="t('noiseSuppression')"
               @change="onNoiseSuppressionToggle"
           /></label>
@@ -132,12 +134,12 @@ import type { useVoiceWebSocket } from "../../composables/useVoiceWebSocket.js";
 import type { useWebClientAudioControls } from "../../composables/useWebClientAudioControls.js";
 
 const props = defineProps<{
-  model: Pick<ReturnType<typeof useVoiceWebSocket>, "microphoneMuted" | "inputVolume" | "outputVolume" | "outputMuted" | "noiseSuppressionEnabled" | "accompanimentActive">;
+  model: Pick<ReturnType<typeof useVoiceWebSocket>, "microphoneMuted" | "inputVolume" | "outputVolume" | "outputMuted" | "noiseSuppressionEnabled" | "stereoInputEnabled" | "accompanimentActive">;
   controls: Pick<ReturnType<typeof useWebClientAudioControls>, "toggleMicrophone" | "onInputVolume" | "onOutputVolume" | "onNoiseSuppressionToggle" | "toggleAccompaniment">;
   t: (key: string) => string;
   rangeStyle: (value: number, max: number) => Record<string, string>;
 }>();
-const { microphoneMuted, inputVolume, outputVolume, outputMuted, noiseSuppressionEnabled, accompanimentActive } = props.model;
+const { microphoneMuted, inputVolume, outputVolume, outputMuted, noiseSuppressionEnabled, stereoInputEnabled, accompanimentActive } = props.model;
 const { toggleMicrophone, onInputVolume, onOutputVolume, onNoiseSuppressionToggle, toggleAccompaniment } = props.controls;
 const emit = defineEmits<{ settings: []; outputMute: [] }>();
 </script>

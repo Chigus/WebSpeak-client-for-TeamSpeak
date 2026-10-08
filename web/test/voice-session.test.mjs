@@ -52,7 +52,7 @@ class AudioDecoderStub {
   decodeQueueSize = 0;
   closed = 0;
   constructor(callbacks) { this.callbacks = callbacks; AudioDecoderStub.instances.push(this); }
-  configure() { if (AudioDecoderStub.failConfigure) throw new Error("Codec unavailable"); }
+  configure(config) { if (AudioDecoderStub.failConfigure) throw new Error("Codec unavailable"); this.config = { ...config }; }
   decode(chunk) { this.lastChunk = chunk; }
   close() { this.closed++; }
 }
@@ -70,8 +70,8 @@ class RecorderStub {
 function decodedChunk() {
   return { sampleRate: 48000, numberOfChannels: 1, numberOfFrames: 960, closed: 0, copyTo() {}, close() { this.closed++; } };
 }
-function receiveAudio(socket, clientId = 7) {
-  socket.onmessage({ data: new Uint8Array([4, clientId >> 8, clientId & 255, 1, 2, 3]).buffer });
+function receiveAudio(socket, clientId = 7, codec = 4) {
+  socket.onmessage({ data: new Uint8Array([codec, clientId >> 8, clientId & 255, 1, 2, 3]).buffer });
 }
 class AudioContextStub extends EventTarget {
   static instances = [];
@@ -100,13 +100,20 @@ class AudioContextStub extends EventTarget {
   }
   createGain() { const node = new AudioNodeStub(); AudioContextStub.gains.push(node); return node; }
   createAnalyser() { throw new Error("Analyser unavailable"); }
-  createBuffer(channels, frames, sampleRate) { return { duration: frames / sampleRate, copyToChannel() {} }; }
+  createBuffer(channels, frames, sampleRate) {
+    return { duration: frames / sampleRate, numberOfChannels: channels, numberOfFrames: frames, sampleRate, planes: [],
+      copyToChannel(samples, channel) { this.planes[channel] = samples.slice(); } };
+  }
   createBufferSource() { const node = new AudioSourceStub(); AudioContextStub.sources.push(node); return node; }
-  createScriptProcessor() { const node = new AudioNodeStub(); AudioContextStub.processors.push(node); return node; }
+  createScriptProcessor(size, inputs, outputs) {
+    const node = Object.assign(new AudioNodeStub(), { size, inputs, outputs });
+    AudioContextStub.processors.push(node); return node;
+  }
 }
-function microphoneStream() {
+function microphoneStream(settings) {
   const track = new TestTrack();
   track.kind = "audio";
+  if (settings) track.getSettings = () => ({ ...settings });
   return { track, getTracks: () => [track], getVideoTracks: () => [], getAudioTracks: () => [track] };
 }
 
@@ -2441,4 +2448,430 @@ test("voice STUN configuration reaches the browser peer and resets on a legacy c
   socket.receive({ type: "connected", tsClientId: 2, webrtcAvailable: true });
   await nextTurn();
   assert.deepEqual(TestPeer.instances.at(-1).config.iceServers, []);
+});
+
+function stereoMicrophones() {
+  const requests = [], streams = [];
+  const getUserMedia = async ({ audio }) => {
+    requests.push(audio);
+    const stream = microphoneStream({ channelCount: audio.channelCount?.exact === 2 ? 2 : 1, sampleRate: 48000,
+      echoCancellation: audio.echoCancellation, noiseSuppression: audio.noiseSuppression, autoGainControl: audio.autoGainControl });
+    streams.push(stream);
+    return stream;
+  };
+  navigator.mediaDevices.getUserMedia = getUserMedia;
+  navigator.mediaDevices.enumerateDevices = async () => availableDevices;
+  return { requests, streams, getUserMedia };
+}
+
+function emitMicrophone(processor, left, right) {
+  processor.onaudioprocess({ inputBuffer: {
+    numberOfChannels: right ? 2 : 1,
+    getChannelData: channel => channel === 0 ? left : right,
+  } });
+}
+
+function pcmFrames(socket) {
+  return socket.messages.filter(message => message instanceof ArrayBuffer);
+}
+
+function assertStereoPcm(frame, left, right) {
+  assert.equal(frame.byteLength, 3840, "20 ms stereo must contain 960 samples per ear");
+  const samples = new Int16Array(frame);
+  for (let index = 0; index < 960; index++) {
+    assert.equal(samples[index * 2], left, `left sample ${index}`);
+    assert.equal(samples[index * 2 + 1], right, `right sample ${index}`);
+  }
+}
+
+async function connectStereo() {
+  const devices = stereoMicrophones();
+  await voice.setStereoInputEnabled(true);
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  await nextTurn();
+  return { ...devices, socket, capture: AudioContextStub.processors.at(-1) };
+}
+
+test("stereo capture requests the selected two-channel input with all speech processing disabled", async () => {
+  const { requests } = stereoMicrophones();
+  await voice.setInputDevice("mic-b");
+  await voice.setStereoInputEnabled(true);
+  await voice.ensureMicrophone();
+  assert.deepEqual(requests.at(-1), { deviceId: { exact: "mic-b" }, sampleRate: { ideal: 48000 },
+    channelCount: { exact: 2 }, echoCancellation: false, noiseSuppression: false, autoGainControl: false });
+  assert.equal(voice.microphoneProcessing.captureChannelCount, 2);
+  assert.equal(voice.microphoneProcessing.sourceChannelCount, 2);
+  assert.equal(voice.microphoneProcessing.sourceSampleRate, 48000);
+  assert.equal(voice.microphoneProcessing.rnnoise, false);
+  const capture = AudioContextStub.processors.at(-1);
+  assert.equal(capture.inputs, 2);
+  assert.equal(capture.outputs, 2);
+  const requestCount = requests.length;
+  await voice.setNoiseSuppressionEnabled(false);
+  assert.equal(requests.length, requestCount, "the normal noise toggle cannot reconfigure a stereo source");
+  await voice.setStereoInputEnabled(false);
+  assert.deepEqual(requests.at(-1).channelCount, { ideal: 1 });
+  assert.equal(requests.at(-1).echoCancellation, true);
+  assert.equal(requests.at(-1).noiseSuppression, true, "leaving stereo restores the existing mono preference");
+});
+
+test("stereo sends separate left and right PCM continuously below the voice threshold", async () => {
+  const { socket, capture } = await connectStereo();
+  voice.setVoxThreshold(0.08);
+  const left = new Float32Array(960).fill(0.25);
+  const right = new Float32Array(960).fill(-0.125);
+  emitMicrophone(capture, left, right);
+  assertStereoPcm(pcmFrames(socket)[0], 8191, -4096);
+  assert.equal(voice.micLeftLevel.value, 1);
+  assert.equal(voice.micRightLevel.value, 0.75);
+  const silence = new Float32Array(960);
+  for (let index = 0; index < 24; index++) emitMicrophone(capture, silence, silence);
+  assert.equal(pcmFrames(socket).length, 25, "continuous stereo cannot cut quiet ambience after the VOX hold expires");
+  assertStereoPcm(pcmFrames(socket).at(-1), 0, 0);
+  emitMicrophone(capture, new Float32Array(960).fill(0.0005), new Float32Array(960).fill(-0.00025));
+  assert.equal(pcmFrames(socket).length, 26);
+  assertStereoPcm(pcmFrames(socket).at(-1), 16, -8);
+  assert.ok(voice.micLeftLevel.value > voice.micRightLevel.value);
+  assert.ok(voice.micRightLevel.value > 0);
+});
+
+test("stereo batches ScriptProcessor chunks by time without shifting the left and right ears", async () => {
+  const { socket, capture } = await connectStereo();
+  const left = new Float32Array(1024).fill(0.25);
+  const right = new Float32Array(1024).fill(-0.125);
+  for (let index = 0; index < 15; index++) emitMicrophone(capture, left, right);
+  assert.equal(pcmFrames(socket).length, 16, "fifteen 1024-frame chunks contain sixteen 960-frame packets");
+  for (const frame of pcmFrames(socket)) assertStereoPcm(frame, 8191, -4096);
+});
+
+test("stereo mute and microphone testing discard pending samples without reopening the voice gate", async () => {
+  const { socket, capture } = await connectStereo();
+  emitMicrophone(capture, new Float32Array(480).fill(0.25), new Float32Array(480).fill(-0.125));
+  assert.equal(pcmFrames(socket).length, 0);
+  voice.setMicrophoneMuted(true);
+  emitMicrophone(capture, new Float32Array(960).fill(0.25), new Float32Array(960).fill(-0.125));
+  assert.equal(pcmFrames(socket).length, 0);
+  voice.setMicrophoneMuted(false);
+  emitMicrophone(capture, new Float32Array(960).fill(0.5), new Float32Array(960).fill(-0.25));
+  assertStereoPcm(pcmFrames(socket)[0], 16383, -8192);
+  await voice.startMicrophoneTest();
+  emitMicrophone(capture, new Float32Array(960).fill(0.25), new Float32Array(960).fill(-0.125));
+  assert.equal(pcmFrames(socket).length, 1, "local microphone recording cannot leak to the room");
+  voice.stopMicrophoneTest();
+  emitMicrophone(capture, new Float32Array(960), new Float32Array(960));
+  assert.equal(pcmFrames(socket).length, 2);
+  assertStereoPcm(pcmFrames(socket)[1], 0, 0);
+});
+
+test("stereo backpressure retains the same time bound and drops stale partial audio", async () => {
+  const { socket, capture } = await connectStereo();
+  const left = new Float32Array(960).fill(0.25), right = new Float32Array(960).fill(-0.125);
+  socket.bufferedAmount = 30000;
+  emitMicrophone(capture, left, right);
+  assert.equal(pcmFrames(socket).length, 1, "30 kB is below the ten-frame stereo queue bound");
+  emitMicrophone(capture, left.subarray(0, 480), right.subarray(0, 480));
+  socket.bufferedAmount = 40000;
+  emitMicrophone(capture, left, right);
+  assert.equal(pcmFrames(socket).length, 1);
+  socket.bufferedAmount = 0;
+  emitMicrophone(capture, new Float32Array(960).fill(0.5), new Float32Array(960).fill(-0.25));
+  assert.equal(pcmFrames(socket).length, 2);
+  assertStereoPcm(pcmFrames(socket)[1], 16383, -8192);
+});
+
+test("stereo mode changes use each live graph's frame format until its replacement commits", async () => {
+  const devices = stereoMicrophones();
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  await nextTurn();
+  const mono = AudioContextStub.processors.at(-1), initial = devices.streams.at(-1);
+  emitMicrophone(mono, new Float32Array(960).fill(0.25));
+  const stereoPermission = deferred();
+  navigator.mediaDevices.getUserMedia = () => stereoPermission.promise;
+  const toStereo = voice.setStereoInputEnabled(true);
+  emitMicrophone(mono, new Float32Array(960).fill(0.25));
+  emitMicrophone(mono, new Float32Array(480).fill(0.5));
+  assert.deepEqual(pcmFrames(socket).map(frame => frame.byteLength), [1920, 1920]);
+  assert.equal(initial.track.readyState, "live");
+  assert.equal(voice.microphoneProcessing.captureChannelCount, 1);
+  const stereoStream = microphoneStream({ channelCount: 2, sampleRate: 48000 });
+  stereoPermission.resolve(stereoStream);
+  await toStereo;
+  const stereo = AudioContextStub.processors.at(-1);
+  emitMicrophone(stereo, new Float32Array(960).fill(0.25), new Float32Array(960).fill(-0.125));
+  assertStereoPcm(pcmFrames(socket)[2], 8191, -4096);
+  assert.equal(initial.track.readyState, "ended");
+  assert.equal(voice.microphoneProcessing.captureChannelCount, 2);
+  emitMicrophone(mono, new Float32Array(960).fill(0.5));
+  assert.equal(pcmFrames(socket).length, 3);
+  const monoPermission = deferred();
+  navigator.mediaDevices.getUserMedia = () => monoPermission.promise;
+  const toMono = voice.setStereoInputEnabled(false);
+  emitMicrophone(stereo, new Float32Array(960).fill(0.25), new Float32Array(960).fill(-0.125));
+  emitMicrophone(stereo, new Float32Array(480).fill(0.5), new Float32Array(480).fill(-0.5));
+  assertStereoPcm(pcmFrames(socket)[3], 8191, -4096);
+  const monoStream = microphoneStream({ channelCount: 1, sampleRate: 48000 });
+  monoPermission.resolve(monoStream);
+  await toMono;
+  const current = AudioContextStub.processors.at(-1);
+  emitMicrophone(current, new Float32Array(960).fill(-0.25));
+  assert.equal(pcmFrames(socket)[4].byteLength, 1920);
+  assert.ok(new Int16Array(pcmFrames(socket)[4]).every(sample => sample === -8192));
+  assert.equal(stereoStream.track.readyState, "ended");
+  emitMicrophone(stereo, new Float32Array(960).fill(0.5), new Float32Array(960).fill(-0.5));
+  assert.equal(pcmFrames(socket).length, 5);
+});
+
+test("a rejected stereo source preserves the working mono graph and its frame format", async () => {
+  const devices = stereoMicrophones();
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  await nextTurn();
+  const old = AudioContextStub.processors.at(-1), initial = devices.streams.at(-1);
+  const unsuitable = microphoneStream({ channelCount: 1, sampleRate: 48000 });
+  navigator.mediaDevices.getUserMedia = async () => unsuitable;
+  await assert.rejects(voice.setStereoInputEnabled(true), { name: "StereoInputUnavailableError" });
+  assert.equal(voice.stereoInputEnabled.value, false);
+  assert.equal(voice.microphoneProcessing.captureChannelCount, 1);
+  assert.equal(voice.microphoneProcessing.sourceChannelCount, 1);
+  assert.equal(initial.track.readyState, "live");
+  assert.equal(unsuitable.track.readyState, "ended");
+  assert.notEqual(voice.state.microphoneErrorCode, "");
+  emitMicrophone(old, new Float32Array(960).fill(0.25));
+  assert.equal(pcmFrames(socket)[0].byteLength, 1920);
+});
+
+test("a failed return to mono keeps the old stereo graph continuous while the setting rolls back", async () => {
+  const { socket, capture, streams } = await connectStereo();
+  const initial = streams.at(-1), permission = deferred();
+  navigator.mediaDevices.getUserMedia = () => permission.promise;
+  const pending = voice.setStereoInputEnabled(false);
+  const rejected = assert.rejects(pending, { name: "NotReadableError" });
+  emitMicrophone(capture, new Float32Array(960).fill(0.25), new Float32Array(960).fill(-0.125));
+  assertStereoPcm(pcmFrames(socket)[0], 8191, -4096);
+  permission.reject(new DOMException("Input busy", "NotReadableError"));
+  await rejected;
+  assert.equal(voice.stereoInputEnabled.value, true);
+  assert.equal(voice.microphoneProcessing.captureChannelCount, 2);
+  assert.equal(initial.track.readyState, "live");
+  emitMicrophone(capture, new Float32Array(960), new Float32Array(960));
+  assertStereoPcm(pcmFrames(socket)[1], 0, 0);
+});
+
+test("a late stereo permission cannot overwrite a newer successful mono selection", async () => {
+  stereoMicrophones();
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  await nextTurn();
+  const permission = deferred(), current = microphoneStream({ channelCount: 1 });
+  navigator.mediaDevices.getUserMedia = ({ audio }) => audio.channelCount.exact === 2 ? permission.promise : Promise.resolve(current);
+  const old = voice.setStereoInputEnabled(true);
+  await voice.setStereoInputEnabled(false);
+  const late = microphoneStream({ channelCount: 2 });
+  permission.resolve(late);
+  await old;
+  assert.equal(voice.stereoInputEnabled.value, false);
+  assert.equal(voice.microphoneProcessing.captureChannelCount, 1);
+  assert.equal(current.track.readyState, "live");
+  assert.equal(late.track.readyState, "ended");
+  emitMicrophone(AudioContextStub.processors.at(-1), new Float32Array(960).fill(0.25));
+  assert.equal(pcmFrames(socket)[0].byteLength, 1920);
+});
+
+test("a stereo selection during initial microphone permission cannot commit a late mono graph", async () => {
+  stereoMicrophones();
+  const permission = deferred();
+  const initial = microphoneStream({ channelCount: 1, sampleRate: 48000 });
+  const stereo = microphoneStream({ channelCount: 2, sampleRate: 48000 });
+  navigator.mediaDevices.getUserMedia = ({ audio }) => audio.channelCount.exact === 2 ? Promise.resolve(stereo) : permission.promise;
+  const readiness = voice.ensureMicrophone().catch(error => error);
+  await nextTurn();
+  await voice.setStereoInputEnabled(true);
+  permission.resolve(initial);
+  await readiness;
+  assert.equal(voice.stereoInputEnabled.value, true);
+  assert.equal(voice.microphoneProcessing.captureChannelCount, 2, "the displayed mode and the first committed graph must agree");
+  assert.equal(stereo.track.readyState, "live");
+  assert.equal(initial.track.readyState, "ended");
+});
+
+test("closing standalone settings cancels a pending stereo switch and releases both streams", async () => {
+  const devices = stereoMicrophones();
+  await voice.prepareInputDevices();
+  const initial = devices.streams.at(-1), oldCapture = AudioContextStub.processors.at(-1);
+  const oldContext = AudioContextStub.instances.at(-1), permission = deferred();
+  navigator.mediaDevices.getUserMedia = () => permission.promise;
+  const pending = voice.setStereoInputEnabled(true);
+  voice.stopMicrophoneTest();
+  assert.equal(initial.track.readyState, "ended");
+  assert.equal(oldContext.state, "closed");
+  const late = microphoneStream({ channelCount: 2 });
+  permission.resolve(late);
+  await pending;
+  assert.equal(late.track.readyState, "ended");
+  assert.equal(voice.state.microphoneErrorCode, "");
+  emitMicrophone(oldCapture, new Float32Array(960).fill(0.25));
+  assert.equal(voice.micLevel.value, 0);
+  assert.equal(voice.micLeftLevel.value, 0);
+  assert.equal(voice.micRightLevel.value, 0);
+  navigator.mediaDevices.getUserMedia = devices.getUserMedia;
+  await voice.prepareInputDevices();
+  assert.notEqual(AudioContextStub.instances.at(-1), oldContext);
+  assert.equal(voice.microphoneProcessing.captureChannelCount, 2);
+  assert.equal(devices.streams.at(-1).track.readyState, "live");
+  voice.stopMicrophoneTest();
+  assert.equal(devices.streams.at(-1).track.readyState, "ended");
+});
+
+test("a rejected superseded initial permission cannot report an error over working stereo capture", async () => {
+  stereoMicrophones();
+  const permission = deferred(), stereo = microphoneStream({ channelCount: 2 });
+  navigator.mediaDevices.getUserMedia = ({ audio }) => audio.channelCount.exact === 2 ? Promise.resolve(stereo) : permission.promise;
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  await nextTurn();
+  await voice.setStereoInputEnabled(true);
+  assert.equal(voice.microphoneProcessing.captureChannelCount, 2);
+  assert.equal(voice.state.microphoneErrorCode, "");
+  permission.reject(new DOMException("The previous input is busy", "NotReadableError"));
+  await nextTurn();
+  assert.equal(voice.state.microphoneErrorCode, "", "failure of a superseded request must not label the replacement microphone broken");
+  assert.equal(stereo.track.readyState, "live");
+  emitMicrophone(AudioContextStub.processors.at(-1), new Float32Array(960).fill(0.25), new Float32Array(960).fill(-0.125));
+  assertStereoPcm(pcmFrames(socket)[0], 8191, -4096);
+});
+
+test("stereo stays on WSS when the gateway advertises the optional mono WebRTC transport", async () => {
+  stereoMicrophones();
+  await voice.setStereoInputEnabled(true);
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1, webrtcAvailable: true });
+  await nextTurn();
+  assert.equal(TestPeer.instances.length, 0);
+  assert.equal(socket.messages.some(message => message.type === "webrtcOffer"), false);
+  emitMicrophone(AudioContextStub.processors.at(-1), new Float32Array(960).fill(0.25), new Float32Array(960).fill(-0.125));
+  assertStereoPcm(pcmFrames(socket)[0], 8191, -4096);
+});
+
+test("switching an active mono WebRTC session to stereo stops its peer only after capture succeeds", async () => {
+  const devices = stereoMicrophones();
+  const { peer, socket } = await connectWebRtc();
+  const initial = devices.streams.at(-1), permission = deferred();
+  navigator.mediaDevices.getUserMedia = () => permission.promise;
+  const pending = voice.setStereoInputEnabled(true);
+  assert.notEqual(peer.connectionState, "closed");
+  assert.equal(initial.track.readyState, "live");
+  permission.resolve(microphoneStream({ channelCount: 2, sampleRate: 48000 }));
+  await pending;
+  assert.equal(peer.connectionState, "closed");
+  assert.equal(initial.track.readyState, "ended");
+  assert.equal(socket.messages.filter(message => message.type === "webrtcOffer").length, 1);
+  assert.ok(socket.messages.some(message => message.type === "webrtcStop"));
+  emitMicrophone(AudioContextStub.processors.at(-1), new Float32Array(960).fill(0.25), new Float32Array(960).fill(-0.125));
+  assertStereoPcm(pcmFrames(socket)[0], 8191, -4096);
+});
+
+test("stereo receive headers select two-channel decoding and preserve both playback planes", async () => {
+  const socket = await connect();
+  socket.receive({ type: "connected", tsClientId: 1 });
+  await nextTurn();
+  receiveAudio(socket, 7, 5);
+  const stereo = AudioDecoderStub.instances.at(-1);
+  assert.deepEqual(stereo.config, { codec: "opus", sampleRate: 48000, numberOfChannels: 2 });
+  assert.deepEqual([...stereo.lastChunk.data], [1, 2, 3], "the codec and speaker header must not enter the Opus payload");
+  const planes = [new Float32Array(960).fill(0.25), new Float32Array(960).fill(-0.125)];
+  const chunk = { sampleRate: 48000, numberOfChannels: 2, numberOfFrames: 960, closed: 0,
+    copyTo(samples, { planeIndex, format }) { assert.equal(format, "f32-planar"); samples.set(planes[planeIndex]); },
+    close() { this.closed++; } };
+  stereo.callbacks.output(chunk);
+  const source = AudioContextStub.sources.at(-1);
+  assert.equal(source.buffer.numberOfChannels, 2);
+  assert.deepEqual(source.buffer.planes, planes);
+  assert.equal(chunk.closed, 1);
+  receiveAudio(socket, 8, 4);
+  const otherSpeaker = AudioDecoderStub.instances.at(-1);
+  assert.equal(otherSpeaker.config.numberOfChannels, 1);
+  receiveAudio(socket, 7, 4);
+  assert.equal(stereo.closed, 1);
+  assert.equal(source.stopped, 1);
+  assert.equal(otherSpeaker.closed, 0);
+  assert.equal(AudioDecoderStub.instances.at(-1).config.numberOfChannels, 1);
+  const count = AudioDecoderStub.instances.length;
+  receiveAudio(socket, 9, 99);
+  assert.equal(AudioDecoderStub.instances.length, count, "unsupported audio codecs must not be misdecoded as mono");
+});
+
+function installPreferenceStorage(t, initial) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "indexedDB");
+  let preferences = structuredClone(initial);
+  const database = { close() {}, transaction(storeName, mode) {
+    assert.equal(storeName, "preferences");
+    const transaction = { objectStore: () => ({
+      get() {
+        const request = {};
+        queueMicrotask(() => {
+          request.result = structuredClone(preferences);
+          request.onsuccess?.();
+          if (mode === "readonly") queueMicrotask(() => transaction.oncomplete?.());
+        });
+        return request;
+      },
+      put(value) {
+        const request = {};
+        queueMicrotask(() => {
+          preferences = structuredClone(value);
+          request.onsuccess?.();
+          queueMicrotask(() => transaction.oncomplete?.());
+        });
+        return request;
+      },
+    }), abort() { transaction.onabort?.(); } };
+    return transaction;
+  } };
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: { open() {
+    const request = { result: database };
+    queueMicrotask(() => request.onsuccess?.());
+    return request;
+  } } });
+  t.after(() => {
+    if (descriptor) Object.defineProperty(globalThis, "indexedDB", descriptor);
+    else delete globalThis.indexedDB;
+  });
+  return { read: () => preferences };
+}
+
+test("stereo preferences save only committed capture changes and survive a fresh voice instance", async t => {
+  await nextTurn();
+  const stored = installPreferenceStorage(t, { schemaVersion: 1, stereoInputEnabled: false, noiseSuppressionEnabled: true,
+    language: "ja", skinId: "existing-skin", volumesByUid: {} });
+  const devices = stereoMicrophones();
+  voice.disconnect();
+  voice = useVoiceWebSocket();
+  await nextTurn();
+  await voice.ensureMicrophone();
+  await voice.setStereoInputEnabled(true);
+  assert.equal(stored.read().stereoInputEnabled, true);
+  assert.equal(stored.read().noiseSuppressionEnabled, true);
+  assert.equal(stored.read().language, "ja");
+  assert.equal(stored.read().skinId, "existing-skin");
+  navigator.mediaDevices.getUserMedia = async () => { throw new DOMException("Busy", "NotReadableError"); };
+  await assert.rejects(voice.setStereoInputEnabled(false), { name: "NotReadableError" });
+  assert.equal(stored.read().stereoInputEnabled, true);
+  navigator.mediaDevices.getUserMedia = devices.getUserMedia;
+  voice.disconnect();
+  voice = useVoiceWebSocket();
+  await nextTurn();
+  assert.equal(voice.stereoInputEnabled.value, true);
+  await voice.ensureMicrophone();
+  assert.deepEqual(devices.requests.at(-1).channelCount, { exact: 2 });
+  assert.equal(voice.microphoneProcessing.captureChannelCount, 2);
+  await voice.setStereoInputEnabled(false);
+  assert.equal(stored.read().stereoInputEnabled, false);
+  voice.disconnect();
+  voice = useVoiceWebSocket();
+  await nextTurn();
+  assert.equal(voice.stereoInputEnabled.value, false);
+  await voice.ensureMicrophone();
+  assert.deepEqual(devices.requests.at(-1).channelCount, { ideal: 1 });
 });

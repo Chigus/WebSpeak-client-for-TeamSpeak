@@ -47,6 +47,7 @@ export interface VoiceBridgeOptions {
 interface VoiceBridgeDependencies {
   createTeamSpeakClient?(options: TSClientOptions, logger: LoggerType): TSClient;
   createEncoder?(): Pick<OpusEncoder, "encode" | "dispose">;
+  createStereoEncoder?(): Pick<OpusEncoder, "encode" | "dispose">;
 }
 
 export interface AdminSessionSummary {
@@ -234,6 +235,8 @@ export class VoiceBridge {
           peer: () => entry!.webrtc,
           whisperTargets: () => entry!.whisperActive ? [...entry!.whisperTargetIds] : null,
           sendJson: message => sendJson(message),
+          createStereoEncoder: this.dependencies.createStereoEncoder
+            ?? (() => new OpusEncoder(48000, 2, { bitrate: 192_000, forceChannels: 2 })),
         }, this.dependencies.createEncoder?.() ?? new OpusEncoder(48000, 1));
       } catch (error: unknown) {
         this.logger.error({ err: error, entryId }, "Could not create Opus encoder");

@@ -23,7 +23,7 @@ function mount(t, extra = {}) {
     settingsOpen, microphoneMuted: ref(false), inputVolume: ref(1), voxThreshold: ref(.01),
     notificationVolume: ref(1), micLevel: ref(0), microphoneTestActive: ref(false),
     accompanimentActive: ref(false), accompanimentErrorCode: ref(""), whisperTargetIds: new Set(),
-    prepareInputDevices: async () => {}, stopMicrophoneTest: () => stops.push("stop"),
+    prepareInputDevices: async () => {}, setStereoInputEnabled: async () => {}, stopMicrophoneTest: () => stops.push("stop"),
     localizedMessage: value => value, t: key => key, ...extra,
   }));
   t.after(() => scope.stop());
@@ -136,4 +136,48 @@ test("scope disposal releases an active whisper and its capture", t => {
   scope.stop();
   assert.deepEqual(sent, [true, false]);
   assert.equal(captures.size, 0);
+});
+
+test("stereo selection maps both modes and gives a source-channel error an actionable message", async t => {
+  const selected = [];
+  const { controls } = mount(t, { setStereoInputEnabled: async enabled => {
+    selected.push(enabled);
+    if (enabled) throw Object.assign(new Error("Only one input channel"), { name: "StereoInputUnavailableError" });
+  } });
+  await controls.onStereoInputChange({ target: { value: "stereo" } });
+  assert.match(controls.settingsError.value, /未提供双声道/);
+  assert.match(controls.settingsError.value, /立体声回录或虚拟输入/);
+  await controls.onStereoInputChange({ target: { value: "mono" } });
+  assert.deepEqual(selected, [true, false]);
+  assert.equal(controls.settingsError.value, "");
+});
+
+test("a late stereo permission failure cannot replace a newer successful mono selection", async t => {
+  const old = deferred();
+  const { controls } = mount(t, { setStereoInputEnabled: enabled => enabled ? old.promise : Promise.resolve() });
+  const pending = controls.onStereoInputChange({ target: { value: "stereo" } });
+  await controls.onStereoInputChange({ target: { value: "mono" } });
+  old.reject(new DOMException("Old permission request", "NotAllowedError"));
+  await pending;
+  assert.equal(controls.settingsError.value, "");
+});
+
+test("successful stereo selection retires an earlier output-device error", async t => {
+  const old = deferred();
+  const { controls } = mount(t, { setOutputDevice: () => old.promise });
+  const pending = controls.onOutputDeviceChange(deviceEvent);
+  await controls.onStereoInputChange({ target: { value: "stereo" } });
+  old.reject(new Error("Old output request"));
+  await pending;
+  assert.equal(controls.settingsError.value, "");
+});
+
+test("closing settings suppresses a pending stereo selection's late failure", async t => {
+  const selection = deferred();
+  const { controls, settingsOpen } = mount(t, { setStereoInputEnabled: () => selection.promise });
+  const pending = controls.onStereoInputChange({ target: { value: "stereo" } });
+  settingsOpen.value = false;
+  selection.reject(new DOMException("Input busy", "NotReadableError"));
+  await pending;
+  assert.equal(controls.settingsError.value, "");
 });

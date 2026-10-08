@@ -48,6 +48,21 @@
                 :value="device.deviceId"
                 >{{ device.label || t("microphoneNumber", { index: index + 1 }) }}</option
               ></select
+            ><label class="settings-label" for="input-mode">{{ t("inputMode") }}</label
+            ><select
+              id="input-mode"
+              class="settings-select"
+              :value="stereoInputEnabled ? 'stereo' : 'mono'"
+              @change="onStereoInputChange"
+              ><option value="mono">{{ t("monoVoiceInput") }}</option
+              ><option value="stereo">{{ t("stereoRawInput") }}</option></select
+            ><p v-if="stereoInputEnabled" class="settings-hint">{{ t("stereoInputHint") }}</p
+            ><p v-if="stereoInputEnabled && audioPermission === 'granted'" class="settings-hint">{{
+              t("inputChannelStatus", {
+                input: microphoneProcessing.sourceChannelCount ?? t("processingUnknown"),
+                output: microphoneProcessing.captureChannelCount,
+              })
+            }}</p
             ><p
               v-if="audioSettingsError"
               class="settings-error"
@@ -87,7 +102,8 @@
                 ><small>{{ t("noiseSuppressionHint") }}</small></span
               ><input
                 type="checkbox"
-                :checked="noiseSuppressionEnabled"
+                :checked="!stereoInputEnabled && noiseSuppressionEnabled"
+                :disabled="stereoInputEnabled"
                 :aria-label="t('noiseSuppression')"
                 @change="onNoiseSuppressionToggle" /></label
             ><template v-if="isMobileViewport"
@@ -105,13 +121,14 @@
                 @input="onInputVolume" /></template
             ><div class="settings-range-row"
               ><label class="settings-label">{{ t("voxThreshold") }}</label
-              ><strong>{{ (voxThreshold * 100).toFixed(1) }}%</strong></div
+              ><strong>{{ stereoInputEnabled ? t("continuousTransmission") : (voxThreshold * 100).toFixed(1) + '%' }}</strong></div
             ><input
               class="settings-range"
               type="range"
               min="1"
               max="80"
               :value="voxThreshold * 1000"
+              :disabled="stereoInputEnabled"
               :style="rangeStyle(voxThreshold, 0.08)"
               :aria-label="t('voxThreshold')"
               @input="onVoxThreshold" /><div class="audio-level-row"
@@ -119,6 +136,19 @@
               ><strong>{{ Math.round(micLevel * 100) }}%</strong></div
             ><div class="audio-level-track"
               ><i :style="{ width: `${Math.round(micLevel * 100)}%` }"></i></div
+            ><template v-if="stereoInputEnabled">
+              <div v-for="(level, index) in [micLeftLevel, micRightLevel]" :key="index">
+                <div class="audio-level-row">
+                  <span>{{ index === 0 ? t("leftChannel") : t("rightChannel") }}</span>
+                  <strong>{{ Math.round(level * 100) }}%</strong>
+                </div>
+                <div class="audio-level-track" role="meter"
+                  :aria-label="index === 0 ? t('leftChannel') : t('rightChannel')"
+                  :aria-valuenow="Math.round(level * 100)" :aria-valuemin="0" :aria-valuemax="100">
+                  <i :style="{ width: `${Math.round(level * 100)}%` }"></i>
+                </div>
+              </div>
+            </template
             ><div class="mic-test"
               ><div class="mic-test-header"
                 ><strong>{{ t("microphoneTest") }}</strong
@@ -257,11 +287,15 @@ type AudioSettingsState = Pick<ReturnType<typeof useVoiceWebSocket>,
   | "audioContextState"
   | "microphoneMuted"
   | "noiseSuppressionEnabled"
+  | "stereoInputEnabled"
+  | "microphoneProcessing"
   | "inputVolume"
   | "outputVolume"
   | "voxThreshold"
   | "notificationVolume"
   | "micLevel"
+  | "micLeftLevel"
+  | "micRightLevel"
   | "microphoneTestActive"
   | "testAudioUrl"
 >;
@@ -269,6 +303,7 @@ type AudioSettingsControls = Pick<ReturnType<typeof useWebClientAudioControls>,
   | "settingsError"
   | "onInputVolume"
   | "onNoiseSuppressionToggle"
+  | "onStereoInputChange"
   | "onOutputVolume"
   | "onVoxThreshold"
   | "onNotificationVolume"
@@ -303,11 +338,15 @@ const {
   audioContextState,
   microphoneMuted,
   noiseSuppressionEnabled,
+  stereoInputEnabled,
+  microphoneProcessing,
   inputVolume,
   outputVolume,
   voxThreshold,
   notificationVolume,
   micLevel,
+  micLeftLevel,
+  micRightLevel,
   microphoneTestActive,
   testAudioUrl,
 } = props.model;
@@ -315,6 +354,7 @@ const {
   settingsError: audioSettingsError,
   onInputVolume,
   onNoiseSuppressionToggle,
+  onStereoInputChange,
   onOutputVolume,
   onVoxThreshold,
   onNotificationVolume,
