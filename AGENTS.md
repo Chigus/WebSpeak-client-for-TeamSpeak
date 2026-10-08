@@ -11,7 +11,8 @@ requirements. The following requirements apply to this user's maintained fork.
   fork's maintained branch (currently `nas/macau`).
 - Preserve the NAS binaural/stereo feature introduced in
   `24304f2d8ec4ecaa2962042dcd7b39a4bbab6851`: independent left/right PCM, Opus Music
-  codec 5 at 192 kbps with two forced channels, codec-aware browser playback and
+  codec 5 at 192 kbps with two forced channels and constant bitrate (480-byte
+  Opus packets per 20 ms frame), codec-aware browser playback and
   the capture/playback regression tests. Ordinary mono voice must keep working.
 - This NAS deployment uses WSS voice; the optional WebRTC voice mixer remains
   disabled because it is mono. Never describe duplicated mono as true stereo.

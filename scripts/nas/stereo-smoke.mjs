@@ -3,11 +3,12 @@
 import assert from "node:assert/strict";
 import { OpusEncoder } from "./dist/server/opus-codec.js";
 
-const encoder = new OpusEncoder(48000, 2, { bitrate: 192000, forceChannels: 2 });
+const encoder = new OpusEncoder(48000, 2, { bitrate: 192000, forceChannels: 2, vbr: false });
 const decoder = new OpusEncoder(48000, 2);
 const left = [];
 const right = [];
 let stereoPackets = 0;
+const packetBytes = [];
 
 function energy(samples, frequency) {
   let real = 0;
@@ -29,6 +30,8 @@ try {
       pcm.writeInt16LE(Math.round(12000 * Math.sin(2 * Math.PI * 1200 * time)), frame * 4 + 2);
     }
     const encoded = encoder.encode(pcm);
+    packetBytes.push(encoded.length);
+    assert.equal(encoded.length, 480, `Packet ${packet}: CBR must stay within the 484-byte TeamSpeak voice payload budget`);
     if (encoded[0] & 4) stereoPackets++;
     const decoded = decoder.decode(encoded);
     assert.equal(decoded.length, 3840, "Decoded frame must contain independent stereo samples");
@@ -46,7 +49,8 @@ try {
   assert.ok(leftSeparationDb > 25 && rightSeparationDb > 25, "Left/right separation must exceed 25 dB");
   console.log(JSON.stringify({
     passed: true, node: process.version, packets: 40, stereoPackets,
-    channels: 2, sampleRate: 48000, bitrate: 192000,
+    channels: 2, sampleRate: 48000, bitrate: 192000, vbr: false,
+    packetBytes: { min: Math.min(...packetBytes), max: Math.max(...packetBytes) },
     leftSeparationDb, rightSeparationDb, microphoneCaptured: false, networkUsed: false,
   }));
 } finally {

@@ -25,9 +25,11 @@ type OpusScriptModule = {
 interface OpusEncoderOptions {
   bitrate?: number;
   forceChannels?: 1 | 2;
+  vbr?: boolean;
 }
 
 const OPUS_SET_FORCE_CHANNELS_REQUEST = 4022;
+const OPUS_SET_VBR_REQUEST = 4006;
 
 /** Keep the existing native codec on servers; the Android bundle uses the WASM codec. */
 export class OpusEncoder {
@@ -53,6 +55,11 @@ export class OpusEncoder {
         // Prevent the encoder from collapsing a stereo source to mono.
         if (this.mobile) (this.codec as ScriptCodec).encoderCTL(OPUS_SET_FORCE_CHANNELS_REQUEST, options.forceChannels);
         else (this.codec as NativeCodec).applyEncoderCTL(OPUS_SET_FORCE_CHANNELS_REQUEST, options.forceChannels);
+      }
+      if (options.vbr !== undefined) {
+        const enabled = options.vbr ? 1 : 0;
+        if (this.mobile) (this.codec as ScriptCodec).encoderCTL(OPUS_SET_VBR_REQUEST, enabled);
+        else (this.codec as NativeCodec).applyEncoderCTL(OPUS_SET_VBR_REQUEST, enabled);
       }
     } catch (error) {
       try { this.dispose(); } catch { /* preserve the configuration failure */ }

@@ -236,7 +236,9 @@ export class VoiceBridge {
           whisperTargets: () => entry!.whisperActive ? [...entry!.whisperTargetIds] : null,
           sendJson: message => sendJson(message),
           createStereoEncoder: this.dependencies.createStereoEncoder
-            ?? (() => new OpusEncoder(48000, 2, { bitrate: 192_000, forceChannels: 2 })),
+            // CBR keeps 20 ms packets at 480 bytes, within TeamSpeak's 484-byte
+            // voice payload budget even at startup or an abrupt audio transient.
+            ?? (() => new OpusEncoder(48000, 2, { bitrate: 192_000, forceChannels: 2, vbr: false })),
         }, this.dependencies.createEncoder?.() ?? new OpusEncoder(48000, 1));
       } catch (error: unknown) {
         this.logger.error({ err: error, entryId }, "Could not create Opus encoder");

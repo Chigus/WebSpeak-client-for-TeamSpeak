@@ -1,6 +1,6 @@
 {
   "name": "webspeak-webclient",
-  "version": "0.2.6-stereo.3",
+  "version": "0.2.6-stereo.4",
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -36,6 +36,7 @@
     "@types/express": "^5.0.3",
     "@types/node": "^22.15.0",
     "@types/ws": "^8.18.1",
+    "opusscript": "^0.1.1",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2"
   },

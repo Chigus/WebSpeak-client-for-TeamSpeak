@@ -159,6 +159,105 @@ function stereoToneAmplitude(pcm: Buffer, channel: 0 | 1, frequency: number): nu
   return 2 * Math.hypot(real, imaginary) / frames;
 }
 
+function stereoStressFrame(frame: number): Buffer {
+  const pcm = Buffer.alloc(3_840);
+  let noise = (frame + 1) * 1_234_567;
+  const randomSample = () => {
+    noise = (Math.imul(noise, 1_664_525) + 1_013_904_223) >>> 0;
+    return (noise / 0x1_0000_0000 * 2 - 1) * 24_000;
+  };
+  for (let sample = 0; sample < 960; sample++) {
+    const time = (frame * 960 + sample) / 48_000;
+    let left = 10_000 * Math.sin(2 * Math.PI * 600 * time);
+    let right = 14_000 * Math.sin(2 * Math.PI * 1_200 * time);
+    if (frame >= 10 && frame < 20) left = right = 0;
+    else if (frame >= 20 && frame < 30) { left = randomSample(); right = randomSample(); }
+    else if (frame >= 30 && frame < 40) right = left;
+    else if (frame >= 40 && frame < 50) {
+      left = sample % 32 === 0 ? 30_000 : 0;
+      right = sample % 47 === 0 ? -30_000 : 0;
+    }
+    pcm.writeInt16LE(Math.round(left), sample * 4);
+    pcm.writeInt16LE(Math.round(right), sample * 4 + 2);
+  }
+  return pcm;
+}
+
+function withOpusRuntime(runtime: "native" | "opusscript", run: () => void): void {
+  const previous = process.env.WEBSPEAK_MOBILE;
+  if (runtime === "opusscript") process.env.WEBSPEAK_MOBILE = "1";
+  else delete process.env.WEBSPEAK_MOBILE;
+  try { run(); }
+  finally {
+    if (previous === undefined) delete process.env.WEBSPEAK_MOBILE;
+    else process.env.WEBSPEAK_MOBILE = previous;
+  }
+}
+
+for (const runtime of ["native", "opusscript"] as const) {
+  test(`${runtime} stereo CBR bounds startup and audio transients without collapsing either channel`, () => {
+    withOpusRuntime(runtime, () => {
+      const fixed = new OpusEncoder(48_000, 2, { bitrate: 192_000, forceChannels: 2, vbr: false });
+      const variable = new OpusEncoder(48_000, 2, { bitrate: 192_000, forceChannels: 2, vbr: true });
+      const decoder = new OpusEncoder(48_000, 2);
+      const variableLengths: number[] = [];
+      let separatedFrames = 0;
+      try {
+        for (let frame = 0; frame < 80; frame++) {
+          const pcm = stereoStressFrame(frame);
+          variableLengths.push(variable.encode(pcm).length);
+          const packet = fixed.encode(pcm);
+          assert.equal(packet.length, 480, `${runtime} frame ${frame}: CBR must fit the 484-byte TeamSpeak voice payload budget`);
+          assert.equal(packet[0]! & 4, 4, `${runtime} frame ${frame}: even silence/correlated audio must remain stereo`);
+          const decoded = decoder.decode(packet);
+          assert.equal(decoded.length, 3_840, "20 ms must retain 960 independent samples per channel");
+          if ((frame < 3 || frame >= 10) && frame < 55) continue;
+          const left600 = stereoToneAmplitude(decoded, 0, 600);
+          const left1200 = stereoToneAmplitude(decoded, 0, 1_200);
+          const right600 = stereoToneAmplitude(decoded, 1, 600);
+          const right1200 = stereoToneAmplitude(decoded, 1, 1_200);
+          assert.ok(left600 > 2_000 && right1200 > 2_000, `${runtime} frame ${frame}: both channels must carry audio`);
+          assert.ok(left600 > left1200 * 18 && right1200 > right600 * 18,
+            `${runtime} frame ${frame}: left/right isolation must exceed 25 dB after codec warmup`);
+          separatedFrames++;
+        }
+        assert.equal(separatedFrames, 32, "Check separated tones before and after the silence/noise/impulse transitions");
+        assert.ok(variableLengths.some(bytes => bytes > 484), "The same stress signal must reproduce oversized VBR packets");
+      } finally {
+        fixed.dispose();
+        variable.dispose();
+        decoder.dispose();
+      }
+    });
+  });
+
+  test(`${runtime} ordinary mono preserves the default VBR encoder behavior`, () => {
+    withOpusRuntime(runtime, () => {
+      const unchanged = new OpusEncoder(48_000, 1);
+      const explicitVbr = new OpusEncoder(48_000, 1, { vbr: true });
+      const decoder = new OpusEncoder(48_000, 1);
+      const lengths = new Set<number>();
+      try {
+        for (let frame = 0; frame < 30; frame++) {
+          const stereo = stereoStressFrame(frame);
+          const mono = Buffer.alloc(1_920);
+          for (let sample = 0; sample < 960; sample++) mono.writeInt16LE(stereo.readInt16LE(sample * 4), sample * 2);
+          const packet = unchanged.encode(mono);
+          assert.deepEqual(packet, explicitVbr.encode(mono), "Omitting vbr must preserve the codec's default variable-rate output");
+          lengths.add(packet.length);
+          assert.equal(packet[0]! & 4, 0, "Ordinary voice must remain mono");
+          assert.equal(decoder.decode(packet).length, 1_920);
+        }
+        assert.ok(lengths.size > 1, "Mono voice must keep variable-size output across signal changes");
+      } finally {
+        unchanged.dispose();
+        explicitVbr.dispose();
+        decoder.dispose();
+      }
+    });
+  });
+}
+
 test("loopback stereo retains separate left and right signals through native Opus music", { timeout: 5_000 }, async t => {
   const f = await fixture(t);
   const decoder = new OpusEncoder(48_000, 2);
@@ -179,7 +278,7 @@ test("loopback stereo retains separate left and right signals through native Opu
     await sent;
     lastPacket = f.sdk.sent[frame]!;
     assert.equal(f.sdk.sentCodecs[frame], 5, "stereo must be marked as TeamSpeak Opus Music");
-    assert.ok(lastPacket.length > 0 && lastPacket.length < pcm.length);
+    assert.equal(lastPacket.length, 480, "The production bridge must use 192 kbps CBR from the very first stereo frame");
     assert.equal(lastPacket[0]! & 4, 4, "Opus TOC must retain its stereo flag");
     const decoded = decoder.decode(lastPacket);
     assert.equal(decoded.length, 3_840, "20 ms must contain 960 samples per channel");
