@@ -29,10 +29,12 @@
 | ブラウザ側ノイズ抑制 | マイクのノイズ抑制をブラウザの音声取得段階で任意に使用でき、サーバー側の追加処理は不要です。 |
 | チャットと操作 | チャンネル/サーバーチャット、個人メッセージ、つつく、ウィスパー対象。 |
 | BGM共有 | デスクトップブラウザで音声付きウィンドウやタブの音をチャンネルに共有。 |
-| ID とアクセス | ID の保存、接続先の指定、期限・回数付き招待リンク。 |
-| 管理コンソール | 接続先、アクセス、WebRTC、中継、招待、セッション、ログ、診断、バックアップ。 |
+| ID とアクセス | ID の保存、接続先の指定、期限・回数付き招待リンクに加え、TeamSpeak 3 ID のインポート、変換、検証、エクスポート。 |
+| 管理コンソール | 接続先、アクセス、公開メディアアドレス、IPv6 候補、音声 STUN、中継、招待、セッション、ログ、診断、バックアップ。 |
+| プロジェクト構造 | 0.2.6 では音声ゲートウェイ、セッションイベント、音声処理、画面共有調整を分割し、音声・管理画面をコンポーネント、composable、サービスに整理しました。ライフサイクルと再接続のテストも追加しました。 |
 | スキン | 保護された昼・夜・ILLUSIA スキンに加え、管理者が有効化とデフォルトを管理するインスタンス `.wskin` に対応。 |
 | インターフェース | 中文、English、Deutsch、Русский、日本語、レスポンシブ表示。 |
+| デプロイ | Windows x64、Linux x64/ARM64 パッケージ、Docker amd64/arm64、Android arm64-v8a・armeabi-v7a・x86_64 APK。 |
 
 ## 🖼️ インターフェースのスクリーンショット
 
@@ -135,7 +137,7 @@ npm start
 
 | バージョン | 内容 |
 | --- | --- |
-| [v0.2.6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.6) | #10 を修正、#9/#12 の設定を実装し、#6/#7 を強化。PR #13 が報告した TS6 共有の見落としも修正しました。Windows x64、Linux x64/ARM64、Docker amd64/arm64、3 ABI の Android APK を追加しました。 |
+| [v0.2.6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.6) | 0.2.5 から音声ゲートウェイ、共有プロトコル、音声ワークスペース、管理モジュールを大規模に再構成。#6/#7/#10 を修正し、#9/#12 を実装。PR #13 が報告した既存 TS6 画面共有の検出漏れも修正しました。Opus、セッションのライフサイクル、モバイル操作を改善。Windows x64、Linux x64/ARM64、Docker amd64/arm64、Android arm64-v8a/armeabi-v7a/x86_64 APK を提供。 |
 | [v0.2.5](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.5) | `.wskin` スキン、管理者向けの有効化/デフォルト設定、保護された昼・夜・ILLUSIA 内蔵スキンを追加。未完成の Aurora Voice サンプルを削除し、読み込み時のちらつき、ダークモードの視認性、音声画面のアートレイヤーを修正。公式スキン開発 Agent Skill も追加しました。 |
 | [v0.2.4](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.4) | ブラウザと TeamSpeak 6 ネイティブクライアント間のクロスプラットフォーム P2P 画面共有を追加しました。STUN/外部 TURN 設定、プレーヤーと視聴者状態、1080p/60 FPS 取得設定、WebRTC 統計に対応し、共有操作と訪問者番号も改善しました。 |
 | [v0.2.3](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.3) | チャンネルメンバーの移動操作と権限に応じた直接移動を追加し、アバター表示、ミュート状態の同期、保存 ID の復元に対応しました。5 言語のスクリーンショットとドキュメントも更新しました。 |
@@ -149,3 +151,9 @@ npm start
 ## ライセンス
 
 WebSpeak は [GNU Affero General Public License v3.0 only](../LICENSE) の下で公開されています。
+
+## 最近マージされた貢献
+
+- GitHub のマージ記録に基づく一覧です。上のバージョン概要には、各リリースに実際に含まれる変更のみを記載しています。
+- [LainHE](https://github.com/LainHE) — [PR #2](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pull/2) でブラウザのエラー翻訳を改善し、[PR #8](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pull/8) で拡大縮小、フローティングレイアウト、ホームのフッターを修正。
+- [TimmySheep](https://github.com/TimmySheep) — [マージ済み PR #13、#15–#24](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pulls?q=is%3Apr+is%3Amerged+author%3ATimmySheep)。既存 TS6 共有の検出、画面比率、モバイル音声・画面点灯・スキンメニュー、ID のチャンネル設定、PWA/テーマ、チャット履歴、メンバー音声状態、マイク権限などに貢献。

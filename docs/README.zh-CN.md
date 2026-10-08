@@ -23,7 +23,8 @@ WebSpeak 是一个可自行部署的 TeamSpeak 3 / TeamSpeak 6 网页客户端�
 | 浏览器端降噪 | 提供可开关的麦克风降噪，在浏览器采集端处理，不增加服务器端音频处理压力。 |
 | 消息与互动 | 支持频道消息、服务器消息、私聊、戳一戳和耳语目标。 |
 | 桌面端伴奏 | 在桌面浏览器选择带音频的窗口或标签页，将声音分享给当前频道。 |
-| 身份与访问 | 支持身份保持、访客自定义目标和可撤销、可过期的邀请链接。 |
+| 身份与访问 | 支持身份保持、访客自定义目标、可撤销/可过期邀请链接，以及 TeamSpeak 3 身份导入、转换、校验与导出。 |
+| 工程结构 | 0.2.6 将网关语音、会话事件、音频和屏幕共享拆分为独立模块；前端语音与管理页拆分为组件、composables 和服务，并补充生命周期与重连测试。 |
 | 管理控制台 | 管理目标、访问策略、WebRTC、中继、邀请、会话、日志、诊断和备份。 |
 | 皮肤 | 提供日间、夜间和 ILLUSIA 三款受保护皮肤，并支持实例自定义 `.wskin` 外观与管理员默认/启用管理。 |
 | 界面体验 | 提供中文、English、Deutsch、Русский、日本語及响应式桌面/移动布局。 |
@@ -164,7 +165,7 @@ docker run -d --name webspeak-relay --restart unless-stopped --network host \
 
 | 版本 | 日期 | 摘要 |
 | --- | --- | --- |
-| [v0.2.6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.6) | 2026-10-08 | 相对 0.2.5 修复 #10、实现 #9/#12，并加固 #6/#7；修复 PR #13 所报告的既有屏幕共享漏同步；改善语音和移动端交互；发布 Windows x64、Linux x64/ARM64、Docker amd64/arm64 和 Android 三种 ABI 构建包。 |
+| [v0.2.6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.6) | 2026-10-08 | 相对 0.2.5 大范围重构语音网关、共享协议、前端语音工作区与管理模块；修复 #6/#7/#10，完成 #9/#12 配置，并修复 PR #13 报告的既有 TS6 屏幕共享漏发现问题；改善 Opus/重连生命周期和移动端控制。提供 Windows x64、Linux x64/ARM64、Docker amd64/arm64，以及 Android arm64-v8a、armeabi-v7a、x86_64 APK。 |
 | [v0.2.5](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.5) | 2026-09-27 | 新增 `.wskin` 皮肤系统、管理员启用/默认管理和受保护的日间/夜间/ILLUSIA 内置皮肤；移除未完成 Aurora Voice 样例，修复皮肤加载闪烁、暗色控件可读性与语音界面美术层级，并加入官方皮肤开发 Agent Skill。 |
 | [v0.2.4](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.4) | 2026-09-22 | 新增浏览器与 TeamSpeak 6 原生客户端之间的跨端 P2P 屏幕共享；提供 STUN/外部 TURN 配置、直播播放器、观众状态、1080p/60 FPS 采集设置和 WebRTC 统计；优化屏幕共享交互并新增访客编号。 |
 | [v0.2.3](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.3) | 2026-09-19 | 新增频道成员调度与按权限直接移动；支持头像、静音状态同步和身份恢复；更新五种语言的功能截图与文档。 |
@@ -256,3 +257,9 @@ npm start
 | 伴奏 | 仅桌面端提供且要求 WebRTC；选择窗口或标签页时还要勾选共享音频。 |
 | 数据 | Docker 数据在 `webspeak-data` volume；发布包和源码运行数据在 `data/`。升级前建议备份。 |
 | 会话上限 | 单实例最多允许 100 个活动网页会话。 |
+
+## 近期合并贡献者
+
+- 以下依据 GitHub 合并记录列出；上方版本摘要只描述对应版本实际纳入的改动。
+- [LainHE](https://github.com/LainHE) — [PR #2](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pull/2) 改进浏览器端报错翻译；[PR #8](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pull/8) 修正缩放、浮动布局和首页脚注。
+- [TimmySheep](https://github.com/TimmySheep) — [已合并 PR #13、#15–#24](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pulls?q=is%3Apr+is%3Amerged+author%3ATimmySheep)，涉及 TS6 既有屏幕共享发现、屏幕比例、移动端语音/常亮/皮肤菜单、身份频道选项、PWA/主题、聊天历史、成员音频状态和麦克风权限等改进。

@@ -23,11 +23,12 @@ Die öffentliche Demo läuft in Hongkong. Netzwerkbedingungen und Auslastung kö
 | Browserseitige Geräuschunterdrückung | Optionale Mikrofon-Geräuschunterdrückung in der Browseraufnahme, ohne zusätzliche serverseitige Audioverarbeitung. |
 | Nachrichten und Aktionen | Kanal- und Serverchat, private Nachrichten, Anstupsen und Flüsterziele. |
 | Desktop-Begleitton | Audio eines freigegebenen Fensters oder Browser-Tabs im aktuellen Kanal teilen. |
-| Identität und Zugriff | Gespeicherte Identität, eigene Ziele und widerrufbare Einladungslinks mit Ablaufzeit. |
-| Administration | Ziele, Zugriff, WebRTC, Relays, Einladungen, Sitzungen, Protokolle, Diagnosen und Backups verwalten. |
+| Identität und Zugriff | Gespeicherte Identität, eigene Ziele, widerrufbare Einladungen sowie Import, Konvertierung, Prüfung und Export von TeamSpeak-3-Identitäten. |
+| Administration | Ziele, Zugriff, öffentliche Medienadresse, IPv6-Kandidaten, Sprach-STUN, Relays, Einladungen, Sitzungen, Protokolle, Diagnosen und Backups verwalten. |
+| Projektstruktur | In 0.2.6 wurden Sprach-Gateway, Sitzungsereignisse, Audio und Bildschirmfreigabe in Module aufgeteilt; Sprach- und Admin-Oberflächen in Komponenten, Composables und Dienste zerlegt und um Lebenszyklus- und Wiederverbindungstests ergänzt. |
 | Skins | Geschützte Tages-, Nacht- und ILLUSIA-Skins sowie instanzverwaltete `.wskin`-Designs mit Aktivierungs- und Standardauswahl im Adminbereich. |
 | Oberfläche | Chinesische, englische, deutsche, russische und japanische Oberfläche sowie responsive Desktop-/Mobilansicht. |
-| Selbsthosting | Daten bleiben beim Betreiber; Docker-, Windows-x64- und Linux-x64-Bereitstellung sind verfügbar. |
+| Selbsthosting | Daten bleiben beim Betreiber; Pakete für Windows x64 und Linux x64/ARM64, Docker für amd64/arm64 und Android-APKs für arm64-v8a, armeabi-v7a und x86_64. |
 
 ## 🖼️ Screenshots
 
@@ -154,7 +155,7 @@ Relay deaktivieren und speichern, um die Option von der Willkommensseite zu entf
 
 | Version | Datum | Zusammenfassung |
 | --- | --- | --- |
-| [v0.2.6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.6) | 2026-10-08 | Gegenüber 0.2.5 #10 behoben, #9/#12 umgesetzt, #6/#7 abgesichert und den in PR #13 beschriebenen TS6-Freigabefall korrigiert; Sprach- und Mobilinteraktionen verbessert; Windows x64, Linux x64/ARM64, Docker amd64/arm64 und Android-APKs für drei ABIs ergänzt. |
+| [v0.2.6](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.6) | 2026-10-08 | Gegenüber 0.2.5 wurden Sprach-Gateway, gemeinsame Protokolle, Sprachoberfläche und Admin-Module umfassend umstrukturiert; #6/#7/#10 behoben, #9/#12 umgesetzt und der in PR #13 gemeldete Fall bereits aktiver TS6-Freigaben behoben. Opus- und Sitzungslebenszyklen sowie mobile Steuerung verbessert. Pakete: Windows x64, Linux x64/ARM64, Docker amd64/arm64 und Android arm64-v8a/armeabi-v7a/x86_64. |
 | [v0.2.5](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.5) | 2026-09-27 | `.wskin`-Skins, Aktivierungs-/Standardverwaltung und geschützte Tages-, Nacht- und ILLUSIA-Skins ergänzt; unfertiges Aurora-Voice-Beispiel entfernt, Skin-Ladeblitze, dunkle Bedienelemente und Artwork-Ebenen im Sprachbereich korrigiert sowie offiziellen Skin-Entwicklungs-Agent-Skill hinzugefügt. |
 | [v0.2.4](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.4) | 2026-09-22 | Plattformübergreifendes P2P-Bildschirmteilen zwischen Browsern und nativen TeamSpeak-6-Clients ergänzt; STUN-/externes-TURN-Konfiguration, Live-Player und Zuschauerstatus, Aufnahmeoptionen bis 1080p/60 FPS und WebRTC-Statistiken hinzugefügt; Bildschirmfreigabe-Interaktion verbessert und Besucherzählung ergänzt. |
 | [v0.2.3](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/tag/v0.2.3) | 2026-09-19 | Mitgliederplanung und direkte Verschiebung nach Berechtigung ergänzt; Avatar-, Stummschaltstatus- und Identitätsunterstützung hinzugefügt; Screenshots und Dokumentation für alle fünf Sprachen aktualisiert. |
@@ -246,3 +247,9 @@ Für den Bau von `@discordjs/opus` werden Python, Make und eine C/C++-Toolchain 
 | Begleitton | Nur auf dem Desktop verfügbar und WebRTC erforderlich. Bei Fenster- oder Tab-Freigabe auch Audio freigeben. |
 | Daten | Docker verwendet `webspeak-data`; Release-Pakete und Quellcode verwenden `data/`. Vor Updates sichern. |
 | Sitzungslimit | Eine Instanz akzeptiert bis zu 100 aktive Browser-Sitzungen. |
+
+## Kürzlich zusammengeführte Beiträge
+
+- Die Liste folgt den GitHub-Merge-Einträgen; die Versionszusammenfassungen oben nennen nur Änderungen, die in der jeweiligen Version enthalten sind.
+- [LainHE](https://github.com/LainHE) — [PR #2](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pull/2) verbesserte Browser-Fehlermeldungen; [PR #8](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pull/8) korrigierte Skalierung, schwebendes Layout und Fußzeile der Startseite.
+- [TimmySheep](https://github.com/TimmySheep) — [zusammengeführte PRs #13 und #15–#24](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pulls?q=is%3Apr+is%3Amerged+author%3ATimmySheep) zu vorhandenen TS6-Freigaben, Seitenverhältnis, mobiler Sprache/Bildschirm-Wachhalten/Skin-Menü, Kanaloptionen der Identität, PWA/Design, Chatverlauf, Mitglieder-Audiozuständen und Mikrofonberechtigungen.
