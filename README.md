@@ -36,18 +36,6 @@
 | **WHY** | 无需安装桌面客户端，用户打开网页即可加入频道；部署者仍然掌控目标服务器、访问策略和数据。 | Users can join a voice channel from a browser without installing a desktop client, while the operator keeps control of servers, access, and data. |
 | **HOW** | 部署后在管理员控制台配置 TeamSpeak 目标和访问方式，浏览器负责交互与音频，WebSpeak 负责网关连接。 | Configure the TeamSpeak target and access policy in the administration console. The browser handles interaction and audio; WebSpeak provides the gateway connection. |
 
-## v0.2.6 更新 · What's new in v0.2.6
-
-本版本相对于 0.2.5 正式版发布。除了功能修复和新构建架构，本次还完成了覆盖服务端、共享协议和前端的工程结构重构。
-
-This release is relative to the official v0.2.5. Alongside fixes and new package targets, it includes a broad structural refactor across the gateway, shared protocol, and frontend.
-
-| 范围 | 更新 |
-| --- | --- |
-| 工程结构 · Architecture | 将原先集中的语音网关拆分为命令处理、会话事件、音频路径和屏幕共享协调模块；提取共享协议契约。前端把语音与管理页面拆为可复用组件、composables 和服务层，并按客户端、管理页、移动端整理样式。Session/connection 生命周期现在负责清理对应事件、媒体和异步操作；测试也随模块边界补齐。 |
-| 功能与稳定性 · Features | 加入 TeamSpeak 身份导入/导出与校验；补充公网媒体地址、IPv6 候选和语音 STUN 配置；修复 Docker 短主机名与 HTTPS 健康检查、静音状态竞态和 TS6 屏幕共享清理，并改善 Opus 协商、重连隔离及移动端语音控制。 |
-| 发布架构 · Packages | Windows x64、Linux x64/ARM64、Docker amd64/arm64；Android 提供 arm64-v8a、armeabi-v7a 和 x86_64 APK。Android APK 使用 debug 签名，供手动安装测试。 |
-
 ## 文档 · Documentation
 
 - [简体中文](./docs/README.zh-CN.md)
