@@ -25,7 +25,7 @@ webspeak/
 ```
 
 NAS 需要 POSIX `sh`、Git、Docker、Compose v2（支持 `config --format json`），以及
-`tar`、`gzip`、`sha256sum`、`awk`、`grep`、`cmp` 等常规系统工具。NAS 不需要安装
+`tar`、`gzip`、`sha256sum`、`awk`、`grep`、`cmp`、`readlink -f` 等常规系统工具。NAS 不需要安装
 Node.js、npm、Python 或编译器；这些依赖由项目 Dockerfile 在 Linux 构建阶段提供。
 
 默认优先使用 `APP/tools/git`，不存在时使用 PATH 中的 `git`。也可以通过环境变量
@@ -33,6 +33,7 @@ Node.js、npm、Python 或编译器；这些依赖由项目 Dockerfile 在 Linux
 可执行文件路径，不接受带空格分隔参数的命令字符串。Git 包装程序必须保留 `-C`、
 `-c` 等 Git 参数和二进制标准输出，不能分配 TTY，尤其不能破坏 `git archive`。
 包装程序、登录凭据及注册表配置不复制进项目仓库或源码下载包。
+发布预检只解析证书目录的实际路径，不进入目录或读取私钥；无需放宽现有证书权限。
 
 ## 初次接入已有部署
 

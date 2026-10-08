@@ -133,7 +133,7 @@ main() {
   fi
   DOCKER=${DOCKER:-/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker}
   COMPOSE=${COMPOSE:-$APP/bin/docker-compose}
-  for REQUIRED in "$GIT" "$DOCKER" "$COMPOSE" tar gzip sha256sum awk grep cmp cp mv mkdir rmdir rm date id sleep cat cut; do
+  for REQUIRED in "$GIT" "$DOCKER" "$COMPOSE" tar gzip sha256sum awk grep cmp cp mv mkdir rmdir rm date id sleep cat cut readlink; do
     require_executable "$REQUIRED"
   done
   CHECK_ROOT=$(git_repo rev-parse --show-toplevel) || die 'APP/repo is not a Git checkout'
@@ -144,7 +144,10 @@ main() {
   for RUNTIME_DIRECTORY in data tls config docker-config releases; do
     if [ "$RUNTIME_DIRECTORY" = releases ] && [ ! -e "$APP/releases" ]; then mkdir "$APP/releases"; fi
     [ -d "$APP/$RUNTIME_DIRECTORY" ] || die "Runtime directory is missing: $RUNTIME_DIRECTORY"
-    RUNTIME_RESOLVED=$(CDPATH= cd "$APP/$RUNTIME_DIRECTORY" && pwd -P) || die 'Cannot resolve a runtime directory'
+    # TLS keys can live in a root-owned 0700 directory. Resolve the directory
+    # itself without entering it or requiring access to its private contents.
+    RUNTIME_RESOLVED=$(readlink -f "$APP/$RUNTIME_DIRECTORY") || die 'Cannot resolve a runtime directory'
+    case "$RUNTIME_RESOLVED" in /*) ;; *) die 'Runtime directory must resolve to an absolute path' ;; esac
     case "$RUNTIME_RESOLVED/" in "$REPO/"*) die 'Runtime files must stay outside the Git checkout' ;; esac
   done
   mkdir "$APP/.git-release-lock" 2>/dev/null || die 'Another release owns the lock; inspect its PID and status before retrying'
