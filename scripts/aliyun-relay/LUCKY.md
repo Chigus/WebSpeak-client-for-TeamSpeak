@@ -90,6 +90,10 @@ add them. The script preserves existing Web/media rules and credentials, saves a
 root-only configuration backup, and refuses occupied ingress ports. Allow public
 TCP 16601 and 20195 in the ECS security group:
 
+For the existing managed installation, `sh lucky-public-install.sh COMMIT`
+performs the certificate expansion, rule addition and renewal-unit update from
+the matching exported CI-verified release. No Lucky restart is required.
+
 - `https://aliyun.narcissu1.top:16601/SAFE_URL/` exposes the existing authenticated
   Lucky interface over HTTPS, through Lucky's own loopback reverse proxy.
 - `https://lucky.aliyun.narcissu1.top:20195/SAFE_URL/` is an equivalent management
