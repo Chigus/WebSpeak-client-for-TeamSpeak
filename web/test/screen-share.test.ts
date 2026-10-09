@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { createScreenShareController } from "../src/voice/screen-share.js";
+import { MAX_SCREEN_SHARE_ICE_SERVERS, type ScreenShareRelayId } from "../../src/shared/screen-share.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -73,7 +74,7 @@ function confirmStart(streamId: string, requestId = sent.findLast(message => mes
   controller.handleMessage({ type: "screenShareStarted", owner: true, requestId, stream: { ...remote, streamId } });
 }
 
-function relay(route: "macau" | "shenzhen" | "cloudflare") {
+function relay(route: ScreenShareRelayId) {
   return { route, expiresAt: Date.now() + 60_000, iceServers: [{ urls: [`turn:${route}.example:3478`], username: "temporary", credential: "signed" }] };
 }
 test("publisher forces the chosen TURN node while viewers keep ordinary ICE", async () => {
@@ -107,6 +108,74 @@ test("automatic screen route retries through TURN without replacing capture", as
   assert.ok(sent.some((m:any)=>m.type==="screenShareSignal"&&m.signal.kind==="offer"));
   controller.stopTransport(false);assert.equal(capture.track.readyState,"ended");
 });
+for (const groupCount of [4, MAX_SCREEN_SHARE_ICE_SERVERS]) {
+  test(`automatic screen fallback covers all ${groupCount} TURN groups once and then stops`, async () => {
+    const capture = stream();
+    Object.assign(navigator.mediaDevices, { getDisplayMedia: async () => capture });
+    const servers = Array.from({ length: groupCount }, (_, i) => ({
+      urls: [`turn:${i === groupCount - 1 ? "aliyun" : `relay-${i}`}.example:3478`], username: "temporary", credential: "signed",
+    }));
+    await controller.api.startScreenShare(true, { route: "auto" });
+    controller.handleMessage({ type: "screenShareStarted", owner: true, requestId: sent.at(-1)?.requestId,
+      stream: { ...remote, route: "auto" }, relay: { route: "auto", expiresAt: Date.now() + 60_000, iceServers: servers } });
+    controller.handleMessage({ type: "screenShareSignal", streamId: remote.streamId, fromPeerId: "viewer", signal: { kind: "offer", sdp: "offer" } });
+    await nextTurn();
+    const peer = Peer.instances.at(-1)!;
+    for (const expected of [servers, ...servers.map(server => [server])]) {
+      peer.connectionState = "failed";
+      (peer as any).onconnectionstatechange();
+      await nextTurn();
+      assert.deepEqual(peer.configuration, { iceServers: expected, iceTransportPolicy: "relay" });
+      assert.equal(peer.closed, false);
+      assert.equal(capture.track.readyState, "live");
+    }
+    assert.equal(Peer.instances.length, 1, "Retries retain the same media peer and capture");
+    assert.equal(sent.filter((m: any) => m.type === "screenShareSignal" && m.signal.kind === "offer").length, groupCount + 1);
+    (peer as any).onconnectionstatechange();
+    await nextTurn();
+    assert.equal(peer.closed, true, "Exhausted candidates must not start an unbounded cycle");
+    assert.equal(controller.api.screenShareErrorCode.value, "SCREEN_SHARE_RELAY_FAILED");
+  });
+}
+
+test("automatic viewers wait for every configured fallback group without creating competing offers", async () => {
+  const servers = ["macau", "shenzhen", "cloudflare", "aliyun"].map(name => ({
+    urls: [`turn:${name}.example:3478`], username: "temporary", credential: "signed",
+  }));
+  controller.handleMessage({ type: "screenShareJoined", stream: { ...remote, route: "auto" },
+    relay: { route: "auto", expiresAt: Date.now() + 60_000, iceServers: servers } });
+  await nextTurn();
+  const peer = Peer.instances.at(-1)!;
+  const offers = sent.filter((m: any) => m.type === "screenShareSignal" && m.signal.kind === "offer").length;
+  peer.connectionState = "failed";
+  for (let i = 0; i <= servers.length; i++) {
+    (peer as any).onconnectionstatechange();
+    assert.equal(peer.closed, false);
+  }
+  assert.equal(sent.filter((m: any) => m.type === "screenShareSignal" && m.signal.kind === "offer").length, offers);
+  (peer as any).onconnectionstatechange();
+  assert.equal(peer.closed, true);
+  assert.ok(sent.some(m => m.type === "screenShareLeave"));
+});
+
+test("a pending automatic restart cannot publish signaling after transport disposal", async () => {
+  await controller.api.startScreenShare(true, { route: "auto" });
+  controller.handleMessage({ type: "screenShareStarted", owner: true, requestId: sent.at(-1)?.requestId,
+    stream: { ...remote, route: "auto" }, relay: { ...relay("aliyun"), route: "auto" } });
+  controller.handleMessage({ type: "screenShareSignal", streamId: remote.streamId, fromPeerId: "viewer", signal: { kind: "offer", sdp: "offer" } });
+  await nextTurn();
+  const offer = deferred<{ type: string; sdp: string }>();
+  Peer.offer = () => offer.promise;
+  const peer = Peer.instances.at(-1)!;
+  peer.connectionState = "failed";
+  (peer as any).onconnectionstatechange();
+  controller.stopTransport(false);
+  offer.resolve({ type: "offer", sdp: "obsolete-restart" });
+  await nextTurn();
+  assert.equal(peer.closed, true);
+  assert.equal(sent.some((m: any) => m.type === "screenShareSignal" && m.signal.sdp === "obsolete-restart"), false);
+});
+
 test("missing, expired or mismatched relay authorization releases capture without fallback", async () => {
   controller.setRelays(["macau"]);
   for (const lease of [undefined, relay("shenzhen"), { ...relay("macau"), expiresAt: 1 }]) {

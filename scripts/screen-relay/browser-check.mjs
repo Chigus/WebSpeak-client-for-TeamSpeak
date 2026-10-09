@@ -3,9 +3,10 @@ const state = document.querySelector('#state'), result = document.querySelector(
 const crossNetwork = location.hash === '#remote';
 const bitrateCheck = location.hash === '#bitrate';
 const cloudflareCheck = location.hash.includes('cloudflare');
+const aliyunCheck = location.hash.includes('aliyun');
 let networkScenario = null;
-const cases = cloudflareCheck ? [['cloudflare','udp'],['cloudflare','tcp'],['cloudflare','tls'],['auto',null]] : crossNetwork ? [['macau', 'udp'], ['macau', 'tcp']] : bitrateCheck ? [['p2p', null]] : [['p2p', null], ['shenzhen', 'udp'], ['shenzhen', 'tcp']];
-document.querySelector('#start').textContent = cloudflareCheck ? '开始 Cloudflare 与自动线路验收' : crossNetwork ? '开始澳门跨网往返测试' : bitrateCheck ? '开始实时码率验收' : '开始 P2P 与深圳线路测试';
+const cases = aliyunCheck ? [['aliyun','udp'],['aliyun','tcp'],['aliyun','tls'],['auto',null]] : cloudflareCheck ? [['cloudflare','udp'],['cloudflare','tcp'],['cloudflare','tls'],['auto',null]] : crossNetwork ? [['macau', 'udp'], ['macau', 'tcp']] : bitrateCheck ? [['p2p', null]] : [['p2p', null], ['shenzhen', 'udp'], ['shenzhen', 'tcp']];
+document.querySelector('#start').textContent = aliyunCheck ? '开始阿里云与自动线路验收' : cloudflareCheck ? '开始 Cloudflare 与自动线路验收' : crossNetwork ? '开始澳门跨网往返测试' : bitrateCheck ? '开始实时码率验收' : '开始 P2P 与深圳线路测试';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function wait(check, label, timeout = 25000) {
   const until = Date.now() + timeout;
@@ -75,7 +76,7 @@ document.querySelector('#start').onclick = async event => {
   try {
     audio = new AudioContext(); await audio.resume();
     await wait(() => owner.connected && (!viewer || viewer.connected), 'Protected channel connection');
-    if (cloudflareCheck ? !owner.controller.api.screenShareRelays.value.includes('cloudflare') : !['macau','shenzhen'].every(r=>owner.controller.api.screenShareRelays.value.includes(r))) throw new Error('Required relays must be advertised');
+    if (aliyunCheck ? !owner.controller.api.screenShareRelays.value.includes('aliyun') : cloudflareCheck ? !owner.controller.api.screenShareRelays.value.includes('cloudflare') : !['macau','shenzhen'].every(r=>owner.controller.api.screenShareRelays.value.includes(r))) throw new Error('Required relays must be advertised');
     for (const [route, transport] of cases) {
       protocol = transport; state.textContent = `${route} ${transport ?? 'direct'}`;
       const start = peers.length;
@@ -90,14 +91,15 @@ document.querySelector('#start').onclick = async event => {
       } else await wait(() => document.querySelector('#remote').srcObject, 'Cross-network return stream');
       await document.querySelector('#remote').play();
       await wait(() => peers.slice(start).length === (crossNetwork ? 1 : 2) && peers.slice(start).every(p => p.connectionState === 'connected'), 'ICE/DTLS connection');
-      await delay(2200);
+      await delay(aliyunCheck ? 20000 : 2200);
       const snapshots = await Promise.all(peers.slice(start).map(async p => {
         const stats = [...(await p.getStats()).values()];
         const selected = stats.find(s => s.type === 'transport' && s.selectedCandidatePairId);
         const pair = stats.find(s => s.id === selected?.selectedCandidatePairId);
         const local = stats.find(s => s.id === pair?.localCandidateId), remote = stats.find(s => s.id === pair?.remoteCandidateId);
         const inbound = stats.filter(s => s.type === 'inbound-rtp');
-        return { policy: p.testConfig.iceTransportPolicy ?? 'all', local: { type: local?.candidateType, address: local?.address, relayProtocol: local?.relayProtocol }, remote: { type: remote?.candidateType, address: remote?.address }, bytesSent: pair?.bytesSent, bytesReceived: pair?.bytesReceived, videoFrames: inbound.find(s => s.kind === 'video')?.framesDecoded ?? 0, audioPackets: inbound.find(s => s.kind === 'audio')?.packetsReceived ?? 0 };
+        const video = inbound.find(s => s.kind === 'video');
+        return { policy: p.testConfig.iceTransportPolicy ?? 'all', local: { type: local?.candidateType, address: local?.address, relayProtocol: local?.relayProtocol, url: local?.url }, remote: { type: remote?.candidateType, address: remote?.address }, bytesSent: pair?.bytesSent, bytesReceived: pair?.bytesReceived, rtt: pair?.currentRoundTripTime, videoFrames: video?.framesDecoded ?? 0, videoWidth: video?.frameWidth, videoHeight: video?.frameHeight, videoFps: video?.framesPerSecond, videoPacketsLost: video?.packetsLost, audioPackets: inbound.find(s => s.kind === 'audio')?.packetsReceived ?? 0 };
       }));
       const receiver = snapshots.find(s => s.videoFrames > 0), publisher = snapshots.find(s => s.policy === 'relay');
       if (!receiver || receiver.audioPackets < 1) throw new Error('Video/audio did not decode');

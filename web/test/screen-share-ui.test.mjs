@@ -84,16 +84,20 @@ test("share settings submit the selected resolution and frame rate", async t => 
 test("server routes are enabled only when configured and selection persists", async t => {
   const f = mount(t);
   try {
-    assert.deepEqual(f.ui.routeOptions.value.map(x => x.available), [true, true, false, false, false]);
+    assert.deepEqual(f.ui.routeOptions.value.map(x => x.available), [true, true, false, false, false, false]);
     f.ui.route.value = "macau"; await f.ui.startWithSettings();
     assert.equal(f.starts.length, 0);
-    f.relays.value = ["macau", "shenzhen"];
+    f.relays.value = ["macau", "shenzhen", "aliyun", "cloudflare"];
+    assert.equal(f.ui.routeOptions.value.every(x => x.available), true);
     await f.ui.startWithSettings();
     assert.equal(f.starts[0][1].route, "macau");
     assert.equal(f.storage.get("webspeak:screen-share-route"), "macau");
+    f.ui.route.value = "aliyun"; await f.ui.startWithSettings();
+    assert.equal(f.starts[1][1].route, "aliyun");
+    assert.equal(f.storage.get("webspeak:screen-share-route"), "aliyun");
     f.relays.value = []; await f.ui.startWithSettings();
-    assert.equal(f.starts.length, 1);
-    assert.equal(f.ui.route.value, "macau");
+    assert.equal(f.starts.length, 2);
+    assert.equal(f.ui.route.value, "aliyun");
   } finally { f.app.unmount(); }
 });
 

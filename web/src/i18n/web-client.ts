@@ -1956,6 +1956,7 @@ const automaticNetworkTranslations: Record<Language, Record<string, string>> = {
     "voiceQualityPolicy_quality": "音质优先",
     "voiceQualityStereo": "码率只影响你自己的传输；立体声输入保持原始双声道，下行按个人带宽调整。",
     "screenShareRoute_auto": "自动选择（推荐）",
+    "screenShareRoute_aliyun": "阿里云中转",
     "screenShareRoute_cloudflare": "Cloudflare 中转",
     "screenShareRouteAutoHint": "自动检查直连及可用中转；连接失败时重试线路，画质根据带宽持续调整。"
   },
@@ -1972,6 +1973,7 @@ const automaticNetworkTranslations: Record<Language, Record<string, string>> = {
     "voiceQualityPolicy_quality": "Audio quality first",
     "voiceQualityStereo": "Only your transport changes. Stereo input retains both channels; your download adapts independently.",
     "screenShareRoute_auto": "Automatic (recommended)",
+    "screenShareRoute_aliyun": "Alibaba Cloud relay",
     "screenShareRoute_cloudflare": "Cloudflare relay",
     "screenShareRouteAutoHint": "Checks direct and relay connectivity, retries failed routes and adapts video to available bandwidth."
   },
@@ -1988,6 +1990,7 @@ const automaticNetworkTranslations: Record<Language, Record<string, string>> = {
     "voiceQualityPolicy_quality": "Klangqualität bevorzugen",
     "voiceQualityStereo": "Nur Ihre Übertragung wird angepasst. Der Stereoeingang behält beide Kanäle; der Download wird unabhängig angepasst.",
     "screenShareRoute_auto": "Automatisch (empfohlen)",
+    "screenShareRoute_aliyun": "Alibaba-Cloud-Relay",
     "screenShareRoute_cloudflare": "Cloudflare-Relay",
     "screenShareRouteAutoHint": "Prüft direkte und Relay-Verbindungen, wiederholt fehlgeschlagene Wege und passt die Bildqualität an."
   },
@@ -2004,6 +2007,7 @@ const automaticNetworkTranslations: Record<Language, Record<string, string>> = {
     "voiceQualityPolicy_quality": "Приоритет качества звука",
     "voiceQualityStereo": "Меняется только ваша передача. Стереовход сохраняет оба канала; приём настраивается отдельно.",
     "screenShareRoute_auto": "Автовыбор (рекомендуется)",
+    "screenShareRoute_aliyun": "Ретранслятор Alibaba Cloud",
     "screenShareRoute_cloudflare": "Ретранслятор Cloudflare",
     "screenShareRouteAutoHint": "Проверяет прямые и промежуточные пути, повторяет соединение при сбое и адаптирует качество видео."
   },
@@ -2020,6 +2024,7 @@ const automaticNetworkTranslations: Record<Language, Record<string, string>> = {
     "voiceQualityPolicy_quality": "音質優先",
     "voiceQualityStereo": "自分の通信だけを調整します。ステレオ入力は左右を維持し、受信は個別に調整されます。",
     "screenShareRoute_auto": "自動選択（推奨）",
+    "screenShareRoute_aliyun": "Alibaba Cloud 中継",
     "screenShareRoute_cloudflare": "Cloudflare 中継",
     "screenShareRouteAutoHint": "直接接続と中継を確認し、失敗時に再試行して帯域に応じて画質を調整します。"
   }

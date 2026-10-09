@@ -1,5 +1,5 @@
 import { computed, onMounted, onBeforeUnmount, ref, watch, type Ref } from "vue";
-import { isScreenShareRoute, type ScreenShareRelayId, type ScreenShareRoute } from "../../../src/shared/screen-share.js";
+import { SCREEN_SHARE_RELAY_IDS, isScreenShareRoute, type ScreenShareRelayId, type ScreenShareRoute } from "../../../src/shared/screen-share.js";
 import type { ChannelMember, ScreenShareOutputSettings, ScreenShareStream } from "./useVoiceWebSocket.js";
 import { normalizeScreenShareBitrate, SCREEN_SHARE_BITRATE_OPTIONS, type ScreenShareBitrateSettings } from "../voice/screen-share-bitrate.js";
 
@@ -96,7 +96,7 @@ export function useWebClientScreenShare({
   watch(sharing, () => { applyGeneration++; applying.value = false; bitrateApplyError.value = false; });
   const storedRoute = localStorage.getItem("webspeak:screen-share-route");
   const route = ref<ScreenShareRoute>(isScreenShareRoute(storedRoute) ? storedRoute : "auto");
-  const routeOptions = computed(() => (["auto", "p2p", "macau", "shenzhen", "cloudflare"] as const).map(id => ({
+  const routeOptions = computed(() => (["auto", "p2p", ...SCREEN_SHARE_RELAY_IDS] as const).map(id => ({
     value: id, label: `screenShareRoute_${id}`, available: id === "auto" || id === "p2p" || relays.value.includes(id),
   })));
   const routeAvailable = computed(() => route.value === "auto" || route.value === "p2p" || relays.value.includes(route.value));

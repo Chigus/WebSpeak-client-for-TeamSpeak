@@ -55,20 +55,20 @@ test("late cloud relay credentials cannot publish a departed session", async t =
   await nextTurn();assert.equal(f.messages.filter(m=>m.message.type==="screenShareStarted").length,0);
 });
 
-test("relay authorization reaches only the publisher and joined viewers, never public listings", () => {
+for (const route of ["macau", "aliyun"] as const) test(`${route} relay authorization reaches only the publisher and joined viewers, never public listings`, () => {
   const secret = "s".repeat(48);
-  const f = fixture(new ScreenShareRelays([{ id: "macau", urls: ["turn:relay.example:3478"], secret }]));
+  const f = fixture(new ScreenShareRelays([{ id: route, urls: [`turn:${route}.example:3478`], secret }]));
   const owner = f.participant("owner", 1), viewer = f.participant("viewer", 2);
   f.handle(owner, { type: "screenShareStart", route: "shenzhen" });
   assert.equal(f.messages.at(-1)?.message.type, "screenShareError");
   assert.equal(f.list(owner).length, 0);
   f.messages.length = 0;
-  f.handle(owner, { type: "screenShareStart", route: "macau", requestId: "start" });
+  f.handle(owner, { type: "screenShareStart", route, requestId: "start" });
   const reply = f.messages[0]!.message;
   assert.ok(reply.type === "screenShareStarted" && reply.owner && reply.relay);
   const credential = reply.relay.iceServers[0]!.credential!;
   f.handle(viewer, { type: "screenShareJoin", streamId: reply.stream.streamId });
-  assert.equal(f.list(viewer)[0]?.route, "macau");
+  assert.equal(f.list(viewer)[0]?.route, route);
   assert.equal(JSON.stringify(f.messages).includes(secret), false);
   assert.equal(JSON.stringify(f.messages.filter(({ message }) => message.type !== "screenShareStarted" && message.type !== "screenShareJoined")).includes(credential), false);
   assert.equal(JSON.stringify(f.list(viewer)).includes(credential), false);

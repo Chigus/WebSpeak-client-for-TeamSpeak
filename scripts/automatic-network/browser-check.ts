@@ -49,7 +49,7 @@ async function relay(route:string){
    if(m.action!=='offer')return;
    try{
     const transport=location.hash.slice(1);
-    const servers=m.relay?.iceServers?.map((s:any)=>({...s,urls:(Array.isArray(s.urls)?s.urls:[s.urls]).filter((url:string)=>transport==='tcp'?url.startsWith('turn:')&&url.includes('transport=tcp'):transport==='tls'?url.startsWith('turns:'):true)})).filter((s:any)=>s.urls.length);
+    const servers=m.relay?.iceServers?.map((s:any)=>({...s,urls:(Array.isArray(s.urls)?s.urls:[s.urls]).filter((url:string)=>transport==='udp'||transport==='tcp'?url.startsWith('turn:')&&url.includes('transport='+transport):transport==='tls'?url.startsWith('turns:'):true)})).filter((s:any)=>s.urls.length);
     pc=new RTCPeerConnection({iceServers:servers??[{urls:'stun:stun.cloudflare.com:3478'}],iceTransportPolicy:servers?'relay':'all'});
     pc.ondatachannel=e=>{channel=e.channel;channel.binaryType='arraybuffer';channel.onmessage=e=>{
       if(typeof e.data==='string'){const at=pingAt.get(e.data);if(at!==undefined){rtts.push(performance.now()-at);pingAt.delete(e.data);}return;}
@@ -70,12 +70,13 @@ async function relay(route:string){
   for(let n=0;n<50;n++){sendAudio(new Uint8Array(pcm(2,n).buffer));await sleep(20);}
   await sleep(500);
   const stats=await pc!.getStats();let candidate:unknown;
-  stats.forEach(s=>{if(s.type==='candidate-pair'&&s.nominated&&s.state==='succeeded'){const remote=stats.get(s.remoteCandidateId),local=stats.get(s.localCandidateId);candidate={local:local?.candidateType,remote:remote?.candidateType,protocol:remote?.protocol,relayProtocol:local?.relayProtocol,rtt:s.currentRoundTripTime};}});
+  stats.forEach(s=>{if(s.type==='candidate-pair'&&s.nominated&&s.state==='succeeded'){const remote=stats.get(s.remoteCandidateId),local=stats.get(s.localCandidateId);candidate={local:local?.candidateType,remote:remote?.candidateType,protocol:remote?.protocol,relayProtocol:local?.relayProtocol,url:local?.url,localAddress:local?.address,remoteAddress:remote?.address,bytesSent:s.bytesSent,bytesReceived:s.bytesReceived,rtt:s.currentRoundTripTime};}});
   if(failure||decoded<40||isolation<25||counts.mono<40||counts.stereo<40||sizes.size!==1||!sizes.has(480))throw Error(`Incomplete real media ${JSON.stringify(counts)}`);
-  if(route==='cloudflare'&&(candidate as any)?.remote!=='relay')throw Error('Cloudflare test did not select a relay');
+  if(route!=='direct'&&((candidate as any)?.remote!=='relay'||(candidate as any)?.local!=='relay'))throw Error('Test did not select both relay candidates');
+  if(['udp','tcp','tls'].includes(location.hash.slice(1))&&(candidate as any)?.relayProtocol!==location.hash.slice(1))throw Error('Requested TURN transport was not selected');
   if(acceptance&&(acceptance.upstreamCounts.mono<40||acceptance.upstreamCounts.stereo<40))throw Error('Native TS did not receive browser uplink');
   await report({kind:'voice-relay',route,passed:true,received,counts,stereoPayloadBytes:[...sizes],decodedStereoFrames:decoded,minimumChannelSeparationDb:Math.round(isolation),rttMs:Math.round(rtts.reduce((a,b)=>a+b)/rtts.length),candidate,selection:'Simulated degraded WSS baseline; real TURN/media',scope:acceptance?.scope??'Local gateway transport and codec; synthetic audio',upstreamCounts:acceptance?.upstreamCounts});
  }finally{clearInterval(heartbeat);decoder.close();encoder.close();if(socket.readyState===WebSocket.OPEN)send({action:'stop'});socket.close();pc?.close();}
 }
-for(const route of ['direct','cloudflare'])document.querySelector('#'+route)!.addEventListener('click',()=>{result.textContent='Running '+route;relay(route).catch(error=>report({kind:'voice-relay',route,passed:false,error:String(error)}));});
+for(const route of ['direct','cloudflare','aliyun'])document.querySelector('#'+route)!.addEventListener('click',()=>{result.textContent='Running '+route;relay(route).catch(error=>report({kind:'voice-relay',route,passed:false,error:String(error)}));});
 document.querySelector('#codec')!.addEventListener('click',()=>{result.textContent='Testing browser Opus';codecs().catch(error=>report({kind:'browser-opus',passed:false,error:String(error)}));});

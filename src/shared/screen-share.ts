@@ -13,7 +13,9 @@ export interface ScreenShareIceServer {
   credential?: string;
 }
 
-export type ScreenShareRelayId = "macau" | "shenzhen" | "cloudflare";
+export const SCREEN_SHARE_RELAY_IDS = ["macau", "shenzhen", "aliyun", "cloudflare"] as const;
+export type ScreenShareRelayId = typeof SCREEN_SHARE_RELAY_IDS[number];
+export const MAX_SCREEN_SHARE_ICE_SERVERS = 8;
 export type ScreenShareRoute = "auto" | "p2p" | ScreenShareRelayId;
 export interface ScreenShareRelayCredentials {
   route: ScreenShareRelayId | "auto";
@@ -21,14 +23,14 @@ export interface ScreenShareRelayCredentials {
   iceServers: ScreenShareIceServer[];
 }
 export function isScreenShareRelayId(value: unknown): value is ScreenShareRelayId {
-  return value === "macau" || value === "shenzhen" || value === "cloudflare";
+  return SCREEN_SHARE_RELAY_IDS.some(id => id === value);
 }
 export function isScreenShareRoute(value: unknown): value is ScreenShareRoute {
   return value === "auto" || value === "p2p" || isScreenShareRelayId(value);
 }
 export function parseScreenShareRelayCredentials(value: unknown): ScreenShareRelayCredentials | null {
   if (!isRecord(value) || !(isScreenShareRelayId(value.route) || value.route === "auto") || typeof value.expiresAt !== "number" || !Number.isSafeInteger(value.expiresAt)
-    || !Array.isArray(value.iceServers) || (value.route !== "auto" && value.iceServers.length < 1) || value.iceServers.length > 8) return null;
+    || !Array.isArray(value.iceServers) || (value.route !== "auto" && value.iceServers.length < 1) || value.iceServers.length > MAX_SCREEN_SHARE_ICE_SERVERS) return null;
   // Do not use the STUN fallback normalizer here: a forced relay must fail closed.
   const servers: ScreenShareIceServer[] = [];
   for (const raw of value.iceServers) {
@@ -48,7 +50,6 @@ export const DEFAULT_SCREEN_SHARE_ICE_SERVERS: readonly ScreenShareIceServer[] =
 ];
 
 const SCREEN_SHARE_ICE_URL_PATTERN = /^(?:stun|stuns|turn|turns):/i;
-const MAX_ICE_SERVER_COUNT = 8;
 const MAX_ICE_URL_LENGTH = 512;
 const MAX_ICE_CREDENTIAL_LENGTH = 512;
 
@@ -85,7 +86,7 @@ export function normalizeScreenShareIceServers(value?: readonly unknown[]): Scre
       ...(username !== undefined ? { username } : {}),
       ...(credential !== undefined ? { credential } : {}),
     });
-    if (normalized.length >= MAX_ICE_SERVER_COUNT) break;
+    if (normalized.length >= MAX_SCREEN_SHARE_ICE_SERVERS) break;
   }
   if (normalized.length) return normalized;
   return DEFAULT_SCREEN_SHARE_ICE_SERVERS.map((server) => ({ ...server }));

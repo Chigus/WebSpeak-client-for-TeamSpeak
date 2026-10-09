@@ -49,7 +49,7 @@ export class VoiceRelaySession {
       const lease = route === "direct" ? null : await this.options.relays.issueAsync(route);
       if (!this.current(c)) return;
       if (route !== "direct" && !lease) throw Error("Relay unavailable");
-      const pc = c.pc = new RTCPeerConnection({ iceServers: lease?.iceServers ?? [{ urls: "stun:stun.cloudflare.com:3478" }],
+      const pc = c.pc = new RTCPeerConnection({ iceServers: lease ? this.options.relays.gatewayIceServers(lease) : [{ urls: "stun:stun.cloudflare.com:3478" }],
         iceTransportPolicy: route === "direct" ? "all" : "relay", maxMessageSize: 8192 });
       const channel = c.channel = pc.createDataChannel("webspeak-voice-v1", { ordered: false, maxRetransmits: 0 });
       channel.onMessage.subscribe(data => {

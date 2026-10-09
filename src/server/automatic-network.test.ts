@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DEFAULT_VOICE_QUALITY, adaptVoiceQuality, initialVoiceAdaptation, isVoiceNetworkFeedback, validVoiceOpusPacket, VOICE_OPUS_HEADER } from "../shared/voice-quality.js";
-import { preferVoiceRelay, isVoiceRelayMessage } from "../shared/voice-relay.js";
+import { preferVoiceRelay, isVoiceRelayMessage, type VoiceRelayMessage } from "../shared/voice-relay.js";
+import { RTCPeerConnection } from "werift";
 import { SessionVoiceQuality } from "./voice-quality.js";
 import { OpusEncoder } from "./opus-codec.js";
 import { ScreenShareRelays } from "./screen-share-relays.js";
 import { parseScreenShareRelayCredentials } from "../shared/screen-share.js";
 import { readGatewayOrigins } from "./gateway-routes.js";
+import { VoiceRelaySession } from "./voice-relay.js";
 const sample = { sequence: 1, rttMs: 30, uplinkBufferedMs: 0, playbackFrames: 100, playbackDropPercent: 0 };
 test("weak networks downshift promptly but silence cannot inflate bandwidth", () => {
   let state = initialVoiceAdaptation(DEFAULT_VOICE_QUALITY);
@@ -72,7 +74,58 @@ test("automatic screen credentials survive one unavailable provider", async t =>
   const relays=new ScreenShareRelays([{id:"cloudflare",provider:"cloudflare",keyId:"id",apiToken:"token",urls:[],secret:""},{id:"macau",urls:["turn:relay.example:3478"],secret:"s".repeat(32)}]);
   const lease=await relays.issueAsync("auto"); assert.ok(parseScreenShareRelayCredentials(lease)); assert.equal(lease!.iceServers.length,1);
 });
+test("automatic leases retain every configured relay within the browser ICE limit", async t => {
+  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify({ iceServers: Array.from({ length: 4 }, (_, group) => ({
+    urls: Array.from({ length: 8 }, (_, n) => `turn:cloudflare.example:${3478 + group * 8 + n}?transport=udp`),
+    username: `provider-user-${group}`, credential: `provider-credential-${group}`,
+  })) }), { status: 201 }));
+  const relays = new ScreenShareRelays([
+    { id: "cloudflare", provider: "cloudflare", keyId: "id", apiToken: "private-token", urls: [], secret: "" },
+    ...(["macau", "shenzhen", "aliyun"] as const).map(id => ({ id, urls: [`turn:${id}.example:3478`], secret: "s".repeat(48) })),
+  ]);
+  const lease = await relays.issueAsync("auto");
+  assert.ok(parseScreenShareRelayCredentials(lease));
+  assert.equal(lease!.iceServers.length, 8);
+  assert.deepEqual(lease!.iceServers.slice(0, 4).map(server => (server.urls as string[])[0]!.split(":")[1]),
+    ["cloudflare.example", "macau.example", "shenzhen.example", "aliyun.example"]);
+  assert.equal(JSON.stringify(lease).includes("private-token"), false);
+});
 test("gateway destinations must be explicit HTTPS origins", () => {
   assert.deepEqual(readGatewayOrigins('["https://a.example:5555","https://b.example:5555"]'),["https://a.example:5555","https://b.example:5555"]);
   for (const url of ["http://a.example","https://user:pass@a.example","https://a.example/path","https://a.example/#secret"]) assert.throws(()=>readGatewayOrigins(JSON.stringify([url])));
+  const four = ["https://a.example:5555", "https://b.example:5555", "https://c.example:5555", "https://aliyun.example"];
+  assert.deepEqual(readGatewayOrigins(JSON.stringify(four)), four);
+  assert.throws(() => readGatewayOrigins(JSON.stringify([...four, "https://fifth.example"])));
+});
+
+test("voice uses the private gateway TURN path while signaling only the browser's Alibaba lease", { timeout: 5000 }, async t => {
+  const peers: RTCPeerConnection[] = [];
+  // Keep real Werift configuration and SDP construction, without external ICE traffic.
+  t.mock.method(RTCPeerConnection.prototype, "setLocalDescription", async function(this: RTCPeerConnection, description: Parameters<RTCPeerConnection["setLocalDescription"]>[0]) {
+    peers.push(this);
+    Object.defineProperty(this, "localDescription", { configurable: true, value: description });
+  });
+  const config = { id: "aliyun" as const, urls: ["turn:aliyun.example:3478?transport=udp", "turns:aliyun.example:5349?transport=tcp"],
+    serverUrls: ["turn:gateway-shenzhen.example:33478?transport=udp"], secret: "s".repeat(48) };
+  let resolve!: (message: VoiceRelayMessage) => void, reject!: (error: Error) => void;
+  const offered = new Promise<VoiceRelayMessage>((done, fail) => { resolve = done; reject = fail; });
+  const session = new VoiceRelaySession({ relays: new ScreenShareRelays([config]), current: () => true, audio() {}, send(message) {
+    if (message.action === "offer") resolve(message);
+    if (message.action === "error") reject(new Error("Voice relay preparation failed"));
+  } });
+  t.after(async () => { session.close(); await Promise.all(peers.map(peer => peer.close())); });
+  session.handle({ type: "voiceRelay", action: "request", id: "voice-aliyun", route: "aliyun" });
+  const offer = await offered;
+  assert.ok(isVoiceRelayMessage(offer));
+  assert.equal(peers.length, 1);
+  const gateway = peers[0]!.getConfiguration();
+  assert.equal(gateway.iceTransportPolicy, "relay");
+  assert.deepEqual(gateway.iceServers[0]!.urls, config.serverUrls);
+  assert.deepEqual(offer.relay!.iceServers[0]!.urls, config.urls);
+  assert.equal(gateway.iceServers[0]!.username, offer.relay!.iceServers[0]!.username);
+  assert.equal(gateway.iceServers[0]!.credential, offer.relay!.iceServers[0]!.credential);
+  const wire = JSON.stringify(offer);
+  assert.equal(wire.includes("serverUrls"), false);
+  assert.equal(wire.includes("gateway-shenzhen.example"), false);
+  assert.equal(wire.includes(config.secret), false);
 });

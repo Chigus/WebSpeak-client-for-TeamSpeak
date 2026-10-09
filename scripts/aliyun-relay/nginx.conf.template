@@ -1,0 +1,129 @@
+user nginx;
+worker_processes 1;
+pid /tmp/nginx.pid;
+# WebSocket URLs contain short-lived join tickets; never log request URLs.
+error_log /dev/null;
+
+events { worker_connections 1024; }
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    access_log off;
+    server_tokens off;
+    sendfile on;
+    tcp_nodelay on;
+    keepalive_timeout 65s;
+    client_max_body_size 20m;
+    client_body_temp_path /tmp/nginx/client_body;
+    proxy_temp_path /tmp/nginx/proxy;
+    fastcgi_temp_path /tmp/nginx/fastcgi;
+    uwsgi_temp_path /tmp/nginx/uwsgi;
+    scgi_temp_path /tmp/nginx/scgi;
+    resolver 223.5.5.5 119.29.29.29 valid=60s ipv6=off;
+    resolver_timeout 5s;
+    map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+
+    server {
+        listen 127.0.0.1:18080;
+        location = /health { default_type text/plain; return 200 'ok\n'; }
+        # Container readiness includes Shenzhen -> Macau, not just this process.
+        location = /upstream-health {
+            set $webspeak_health https://${UPSTREAM_HOST}:5555/health;
+            proxy_pass $webspeak_health;
+            proxy_set_header Host ${RELAY_HOST}:5555;
+            proxy_ssl_server_name on;
+            proxy_ssl_name ${UPSTREAM_HOST};
+            proxy_ssl_verify on;
+            proxy_ssl_verify_depth 3;
+            proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+            proxy_connect_timeout 4s;
+            proxy_read_timeout 8s;
+            proxy_buffering off;
+        }
+        location / { return 404; }
+    }
+
+    server {
+        listen 5555 ssl;
+        server_name ${RELAY_HOST};
+        error_page 497 =301 https://${RELAY_HOST}:5555$request_uri;
+        ssl_certificate /tmp/webspeak-tls/fullchain.pem;
+        ssl_certificate_key /tmp/webspeak-tls/privkey.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_session_cache shared:WebSpeakAliyunTLS:2m;
+        ssl_session_timeout 1d;
+        ssl_session_tickets off;
+
+        # Public /health and /api/health deliberately follow this same chain.
+        location / {
+            set $webspeak_origin https://${UPSTREAM_HOST}:5555;
+            proxy_pass $webspeak_origin;
+            proxy_http_version 1.1;
+            proxy_set_header Host $http_host;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header X-Forwarded-Host $http_host;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_ssl_server_name on;
+            proxy_ssl_name ${UPSTREAM_HOST};
+            proxy_ssl_verify on;
+            proxy_ssl_verify_depth 3;
+            proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+            proxy_ssl_session_reuse on;
+            proxy_connect_timeout 5s;
+            proxy_read_timeout 3600s;
+            proxy_send_timeout 3600s;
+            proxy_buffering off;
+            proxy_request_buffering off;
+            proxy_cookie_flags webspeak_admin secure;
+        }
+    }
+}
+
+stream {
+    resolver 223.5.5.5 119.29.29.29 valid=60s ipv6=off;
+    resolver_timeout 5s;
+    # Bound total media sessions without penalizing a campus sharing one IP.
+    limit_conn_zone $server_addr zone=WebSpeakAliyunMedia:32k;
+    limit_conn WebSpeakAliyunMedia 256;
+    proxy_connect_timeout 5s;
+    proxy_buffer_size 64k;
+    proxy_timeout 10m;
+
+    # Preserve a distinct upstream socket for each browser UDP tuple. TURN sends
+    # asynchronous data and refreshes; do not set proxy_responses or a request cap.
+    server {
+        listen 33478 udp reuseport;
+        set $turn_origin ${UPSTREAM_HOST}:33478;
+        proxy_pass $turn_origin;
+        proxy_requests 0;
+    }
+    server {
+        listen 33478;
+        set $turn_origin ${UPSTREAM_HOST}:33478;
+        proxy_pass $turn_origin;
+        proxy_socket_keepalive on;
+    }
+    server {
+        listen 5349 ssl;
+        ssl_certificate /tmp/webspeak-tls/fullchain.pem;
+        ssl_certificate_key /tmp/webspeak-tls/privkey.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_session_cache shared:WebSpeakAliyunTurnTLS:2m;
+        ssl_session_timeout 1d;
+        ssl_session_tickets off;
+        ssl_handshake_timeout 10s;
+        set $turn_origin ${UPSTREAM_HOST}:33478;
+        proxy_pass $turn_origin;
+        proxy_socket_keepalive on;
+    }
+    server {
+        listen 9987 udp reuseport;
+        set $teamspeak_origin ${UPSTREAM_HOST}:9988;
+        proxy_pass $teamspeak_origin;
+        proxy_requests 0;
+    }
+}

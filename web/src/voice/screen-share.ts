@@ -1,6 +1,6 @@
 import { reactive, ref } from "vue";
 import { createScreenShareEncoder, normalizeScreenShareBitrate, type ScreenShareBitrateSettings, type ScreenShareBitrateMode, type ScreenShareBitratePolicy, type ScreenShareBitrateReason } from "./screen-share-bitrate.js";
-import { isScreenShareRelayId, parseScreenShareRelayCredentials, type ScreenShareRelayCredentials, type ScreenShareRelayId, type ScreenShareRoute } from "../../../src/shared/screen-share.js";
+import { isScreenShareRelayId, MAX_SCREEN_SHARE_ICE_SERVERS, parseScreenShareRelayCredentials, type ScreenShareRelayCredentials, type ScreenShareRelayId, type ScreenShareRoute } from "../../../src/shared/screen-share.js";
 import { parseScreenShareStream, parseScreenShareViewers, type ServerMessage } from "../../../src/shared/server-messages.js";
 import { normalizeScreenShareIceServers, type ScreenShareIceServer, type ScreenShareClientMessage, type ScreenShareStreamDescription as ScreenShareStream, type ScreenSharePeerSignal as ScreenShareSignal } from "../../../src/shared/screen-share.js";
 
@@ -325,20 +325,25 @@ export function createScreenShareController(transport: ScreenShareTransport) {
   const autoRetrying = new WeakSet<RTCPeerConnection>();
   function retryAutomaticPeer(peerId: string): boolean {
     const peer = screenSharePeers.get(peerId);
-    const stream = screenShareStreams.find(item => item.streamId === screenShareActiveStreamId.value || item.streamId === screenShareViewingStreamId.value);
+    const role = screenSharePeerRoles.get(peerId);
+    const streamId = role === "owner" ? screenShareActiveStreamId.value : screenShareViewingStreamId.value;
+    const stream = screenShareStreams.find(item => item.streamId === streamId);
     if (!peer || stream?.route !== "auto") return false;
     if (autoRetrying.has(peer)) return true;
+    const lease = role === "owner" ? screenShareOwnerRelay : screenShareViewerRelay;
+    const servers = lease?.iceServers.slice(0, MAX_SCREEN_SHARE_ICE_SERVERS) ?? [];
+    if (!servers.length) return false;
     const attempts = autoRetries.get(peer) ?? 0;
-    if (attempts >= 3) return false;
+    // Try all TURN candidates, then each credential/transport group once. Every
+    // configured node remains reachable without letting failed ICE retry forever.
+    if (attempts >= servers.length + 1) return false;
     autoRetries.set(peer, attempts + 1);
     // The publisher owns retries; the viewer keeps its video and answers.
-    if (screenSharePeerRoles.get(peerId) !== "owner") { armScreenSharePeerTimer(peerId); return true; }
-    if (!screenShareOwnerRelay?.iceServers.length) return false;
+    if (role !== "owner") { armScreenSharePeerTimer(peerId); return true; }
     autoRetrying.add(peer);
     void (async () => {
       try {
-        const servers = screenShareOwnerRelay!.iceServers;
-        peer.setConfiguration({ iceServers: attempts === 0 ? servers : [servers[(attempts - 1) % servers.length]!], iceTransportPolicy: "relay" });
+        peer.setConfiguration({ iceServers: attempts === 0 ? servers : [servers[attempts - 1]!], iceTransportPolicy: "relay" });
         const offer = await peer.createOffer({ iceRestart: true });
         if (!isCurrentPeer(peerId, peer)) return;
         await peer.setLocalDescription(offer);

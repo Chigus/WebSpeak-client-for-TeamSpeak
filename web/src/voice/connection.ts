@@ -64,6 +64,13 @@ export function createVoiceConnection(options: ConnectionOptions) {
     options.onFailure(failure);
   }
 
+  function failNetwork(record: Attempt, failure: ConnectionFailure): void {
+    if (!isCurrent(record)) return;
+    // Cool the selected entry before stop aborts the request and retires it.
+    if (record.origin) markGatewayFailed(record.origin);
+    fail(record, failure);
+  }
+
   function openSocket(record: Attempt, ticket: string): void {
     const origin = record.origin ?? `${location.protocol}//${location.host}`;
     const socket = new WebSocket(`${origin.replace(/^http/, "ws")}/ws/voice?ticket=${encodeURIComponent(ticket)}`);
@@ -110,6 +117,10 @@ export function createVoiceConnection(options: ConnectionOptions) {
       const raw: unknown = await response.json().catch(() => null);
       if (!isCurrent(record)) return;
       const result = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+      if (response.status === 502 || response.status === 504) {
+        failNetwork(record, { code: "REQUEST_FAILED" });
+        return;
+      }
       if (!response.ok || typeof result.ticket !== "string" || !result.ticket) {
         fail(record, { code: result.code ?? "CONNECTION_FAILED", detail: result.detail });
         return;
@@ -120,8 +131,7 @@ export function createVoiceConnection(options: ConnectionOptions) {
       record.controller = null;
       openSocket(record, result.ticket);
     } catch (cause) {
-      if (isCurrent(record) && record.origin) markGatewayFailed(record.origin);
-      fail(record, { code: "REQUEST_FAILED", cause });
+      failNetwork(record, { code: "REQUEST_FAILED", cause });
     }
   }
 
@@ -132,7 +142,7 @@ export function createVoiceConnection(options: ConnectionOptions) {
       stop();
       const record: Attempt = { controller: new AbortController(), timer: null, socket: null };
       current = record;
-      record.timer = setTimeout(() => fail(record, { code: "REQUEST_TIMEOUT" }), 15_000);
+      record.timer = setTimeout(() => failNetwork(record, { code: "REQUEST_TIMEOUT" }), 15_000);
       void requestTicket(record, body, ready);
     },
   };
