@@ -52,6 +52,31 @@ blocked. TURN TCP is supported for the browser-to-node connection; media relay
 sockets are UDP. TURN TLS is not configured; WebRTC media itself is DTLS-SRTP
 encrypted end-to-end. Networks blocking both TCP/UDP 33478 cannot use these nodes.
 
+Some routers rewrite a same-LAN public-address loopback into a private address.
+The private-peer restriction then prevents that local TURN path. For participants
+on the node's own LAN, use P2P or the other regional node. Do not remove private
+destination protection merely to make a same-machine acceptance test pass.
+
+## Synthetic media acceptance
+
+`browser-check-server.mjs` needs `SCREEN_TEST_GATEWAY` (HTTPS), `SCREEN_TEST_ROOM`
+(an owned, password-protected test-channel JSON record) and `SCREEN_TEST_REPORT`.
+It binds only `127.0.0.1:8848` and uses the gateway's actual advertised ICE settings.
+The normal `/screen-relay-check` page tests P2P and Shenzhen UDP/TCP from Macau.
+It verifies selected candidates and decoded video/audio, then releases both peers.
+
+To verify Macau without a same-LAN loopback, run the committed
+`remote-reflector.mjs` on a Shenzhen Node 22 host with `werift@0.24.4` and
+`ws@8.20.0`. Pass `{ "gateway": "https://gateway.example", "room": { ... } }`
+through stdin, using the same private test-room record; never publish that record.
+After it reports readiness, load `/screen-relay-check#remote`. The reflector joins
+only that room and returns received synthetic VP8/Opus RTP. The page verifies
+Macau UDP/TCP relay candidates and browser decoding after the cross-network round
+trip. It captures no screen or microphone. This proves synthetic media transport,
+not a physical display capture, a native TeamSpeak viewer, or general LAN hairpin
+compatibility. Remove the temporary reflector runtime and empty owned test room
+after checking both reports.
+
 Rollback: stop the two named coturn containers and remove only this project's
 crontab lines. Delete only mappings described `WebSpeak-Screen` with matching LAN
 address and port. Restore the gateway's saved Compose/config and previous image;
