@@ -89,8 +89,11 @@ document.querySelector('#start').onclick = async event => {
         await wait(() => viewer.controller.api.screenShareRemoteStream.value, 'Remote media: '+viewer.controller.api.screenShareError.value);
         document.querySelector('#remote').srcObject = viewer.controller.api.screenShareRemoteStream.value;
       } else await wait(() => document.querySelector('#remote').srcObject, 'Cross-network return stream');
-      await document.querySelector('#remote').play();
       await wait(() => peers.slice(start).length === (crossNetwork ? 1 : 2) && peers.slice(start).every(p => p.connectionState === 'connected'), 'ICE/DTLS connection');
+      await Promise.race([
+        document.querySelector('#remote').play(),
+        delay(15000).then(() => { throw new Error('Remote video playback deadline'); }),
+      ]);
       // Exceed Lucky's 30-second UDP idle timeout to exercise active consent traffic.
       await delay(aliyunCheck ? 45000 : 2200);
       const snapshots = await Promise.all(peers.slice(start).map(async p => {
