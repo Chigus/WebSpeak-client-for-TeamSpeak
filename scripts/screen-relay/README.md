@@ -11,14 +11,17 @@ coturn reads only its `coturn/` subdirectory through a read-only bind mount. The
 official binary requires NET_BIND_SERVICE in its capability bounding set; every
 other capability is dropped and privilege escalation is disabled.
 
-Create a private `node.json` (mode 600) with `lanIp`, `gateway`, `realm` and a
+Create a private `node.json` (mode 600) with `lanIp`, `gateway`, `realm`, optional
+`publicPort` (default 33478, forwarded to coturn's internal 3478), and a
 separately generated 32-byte random hexadecimal `secret` for that node.
 Create private `runtime.env` with quoted `DOCKER`, `DOCKER_CONFIG`, and a pinned
 `NODE_IMAGE` providing Node 22. The helper receives no Docker socket.
 
 `sh reconcile.sh RUNTIME_DIRECTORY` discovers only the local configured gateway,
-queries its external IPv4 and restores missing UPnP mappings: TCP/UDP 3478 and UDP
-49160–49259. Existing mappings to another target fail closed. Add this command to
+queries its external IPv4 and restores missing UPnP mappings: TCP/UDP 33478 and UDP
+49160–49259. Audit router static/game forwards as well as UPnP before installing;
+game forwarding may intercept 3478 ahead of UPnP. Existing UPnP mappings to another
+target fail closed. The helper retires only its own old 3478 mappings. Add this command to
 the host's persistent crontab every five minutes. It restarts only coturn when the
 public address/config changes, or starts it if missing. Docker restores coturn on
 host boot; the next successful reconciliation restores router mappings after a
@@ -31,8 +34,8 @@ Mount a private gateway JSON array read-only and set
 
 ```json
 [
-  {"id":"macau","urls":["turn:1.example:3478?transport=udp","turn:1.example:3478?transport=tcp"],"secret":"REPLACE_WITH_MACAU_SECRET_AT_LEAST_32_CHARACTERS"},
-  {"id":"shenzhen","urls":["turn:2.example:3478?transport=udp","turn:2.example:3478?transport=tcp"],"secret":"REPLACE_WITH_SHENZHEN_SECRET_AT_LEAST_32_CHARACTERS"}
+  {"id":"macau","urls":["turn:1.example:33478?transport=udp","turn:1.example:33478?transport=tcp"],"secret":"REPLACE_WITH_MACAU_SECRET_AT_LEAST_32_CHARACTERS"},
+  {"id":"shenzhen","urls":["turn:2.example:33478?transport=udp","turn:2.example:33478?transport=tcp"],"secret":"REPLACE_WITH_SHENZHEN_SECRET_AT_LEAST_32_CHARACTERS"}
 ]
 ```
 
@@ -47,7 +50,7 @@ Each node limits allocations to 100 total and 12 per temporary user, with
 measured capacity promise. Private, loopback and multicast destinations are
 blocked. TURN TCP is supported for the browser-to-node connection; media relay
 sockets are UDP. TURN TLS is not configured; WebRTC media itself is DTLS-SRTP
-encrypted end-to-end. Networks blocking both TCP/UDP 3478 cannot use these nodes.
+encrypted end-to-end. Networks blocking both TCP/UDP 33478 cannot use these nodes.
 
 Rollback: stop the two named coturn containers and remove only this project's
 crontab lines. Delete only mappings described `WebSpeak-Screen` with matching LAN

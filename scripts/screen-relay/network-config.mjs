@@ -5,8 +5,9 @@ import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { isIPv4 } from 'node:net';
 const root = '/runtime';
 const config = JSON.parse(await readFile(`${root}/node.json`, 'utf8'));
+const publicPort = config.publicPort ?? 33478;
 if (!isIPv4(config.lanIp) || !isIPv4(config.gateway) || !/^[a-z0-9.-]+$/.test(config.realm)
-    || !/^[a-f0-9]{64}$/.test(config.secret)) throw new Error('Invalid private node configuration');
+    || !/^[a-f0-9]{64}$/.test(config.secret) || !Number.isInteger(publicPort) || publicPort < 1024 || publicPort > 65535) throw new Error('Invalid private node configuration');
 const xmlEscape = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const xmlText = (xml, key) => xml.match(new RegExp(`<${key}[^>]*>([^<]*)</${key}>`))?.[1]?.replace(/&amp;/g, '&');
 
@@ -48,18 +49,27 @@ const external = await soap('GetExternalIPAddress');
 const publicIp = xmlText(external.text, 'NewExternalIPAddress');
 if (!external.ok || !isIPv4(publicIp) || /^(0|10|127|192\.168|169\.254)\./.test(publicIp)
   || /^172\.(1[6-9]|2\d|3[01])\./.test(publicIp) || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(publicIp)) throw new Error('Gateway has no usable public IPv4');
-const mappings = [{ port: 3478, protocol: 'TCP' }, { port: 3478, protocol: 'UDP' }, ...Array.from({ length: 100 }, (_, i) => ({ port: 49160 + i, protocol: 'UDP' }))];
+const mappings = [{ port: publicPort, internalPort: 3478, protocol: 'TCP' }, { port: publicPort, internalPort: 3478, protocol: 'UDP' }, ...Array.from({ length: 100 }, (_, i) => ({ port: 49160 + i, internalPort: 49160 + i, protocol: 'UDP' }))];
 let restored = 0;
-for (const { port, protocol } of mappings) {
+for (const { port, internalPort, protocol } of mappings) {
   const fields = { NewRemoteHost: '', NewExternalPort: port, NewProtocol: protocol };
   const current = await soap('GetSpecificPortMappingEntry', fields);
   if (current.ok) {
-    if (xmlText(current.text, 'NewInternalClient') !== config.lanIp || Number(xmlText(current.text, 'NewInternalPort')) !== port || xmlText(current.text, 'NewEnabled') !== '1') throw new Error(`Port mapping conflict: ${protocol} ${port}`);
+    if (xmlText(current.text, 'NewInternalClient') !== config.lanIp || Number(xmlText(current.text, 'NewInternalPort')) !== internalPort || xmlText(current.text, 'NewEnabled') !== '1') throw new Error(`Port mapping conflict: ${protocol} ${port}`);
   } else {
     if (current.code !== '714') throw new Error(`Cannot inspect mapping: ${protocol} ${port}`);
-    const added = await soap('AddPortMapping', { ...fields, NewInternalPort: port, NewInternalClient: config.lanIp, NewEnabled: 1, NewPortMappingDescription: 'WebSpeak-Screen', NewLeaseDuration: 0 });
+    const added = await soap('AddPortMapping', { ...fields, NewInternalPort: internalPort, NewInternalClient: config.lanIp, NewEnabled: 1, NewPortMappingDescription: 'WebSpeak-Screen', NewLeaseDuration: 0 });
     if (!added.ok) throw new Error(`Cannot restore mapping: ${protocol} ${port}`);
     restored++;
+  }
+}
+// Retire only this project's earlier default listener mappings. A router may
+// hide static/game forwards from UPnP; audit those independently before install.
+if (publicPort !== 3478) for (const protocol of ['TCP', 'UDP']) {
+  const fields = { NewRemoteHost: '', NewExternalPort: 3478, NewProtocol: protocol };
+  const old = await soap('GetSpecificPortMappingEntry', fields);
+  if (old.ok && xmlText(old.text, 'NewInternalClient') === config.lanIp && xmlText(old.text, 'NewInternalPort') === '3478' && xmlText(old.text, 'NewPortMappingDescription') === 'WebSpeak-Screen') {
+    if (!(await soap('DeletePortMapping', fields)).ok) throw new Error('Cannot retire owned listener mapping');
   }
 }
 const contents = `listening-port=3478
