@@ -43,6 +43,7 @@ export interface RecentServer {
 }
 
 export interface LocalPreferences {
+  voiceQuality?: import("../../../src/shared/voice-quality.js").VoiceQualitySettings;
   schemaVersion: 1;
   locale?: "auto" | "zh-CN" | "en";
   theme?: "system" | "light" | "dark";

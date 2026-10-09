@@ -76,7 +76,7 @@ test("known screen owner IDs cannot fall back to another member with the same ni
 test("share settings submit the selected resolution and frame rate", async t => {
   const f = mount(t);
   try { f.ui.settingsOpen.value = true; f.ui.resolutionPreset.value = "720p"; f.ui.frameRate.value = 30; await f.ui.startWithSettings();
-    assert.deepEqual(f.starts, [[true, { maxWidth: 1280, maxHeight: 720, maxFrameRate: 30, bitrateMode: "auto", bitrateMbps: 12, bitratePolicy: "balanced" }]]);
+    assert.deepEqual(f.starts, [[true, { maxWidth: 1280, maxHeight: 720, maxFrameRate: 30, route: "auto", bitrateMode: "auto", bitrateMbps: 12, bitratePolicy: "balanced" }]]);
     assert.equal(f.ui.settingsOpen.value, false); assert.equal(f.storage.get("webspeak:screen-share-framerate"), "30");
   } finally { f.app.unmount(); }
 });
@@ -84,7 +84,7 @@ test("share settings submit the selected resolution and frame rate", async t => 
 test("server routes are enabled only when configured and selection persists", async t => {
   const f = mount(t);
   try {
-    assert.deepEqual(f.ui.routeOptions.value.map(x => x.available), [true, false, false]);
+    assert.deepEqual(f.ui.routeOptions.value.map(x => x.available), [true, true, false, false, false]);
     f.ui.route.value = "macau"; await f.ui.startWithSettings();
     assert.equal(f.starts.length, 0);
     f.relays.value = ["macau", "shenzhen"];

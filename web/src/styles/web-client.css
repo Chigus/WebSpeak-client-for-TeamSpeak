@@ -2128,6 +2128,28 @@
   backdrop-filter: blur(5px);
 }
 
+:deep(.audio-settings-backdrop) {
+  z-index: 150;
+}
+
+:deep(.settings-section.voice-network-settings) {
+  margin-bottom: 28px;
+}
+
+:deep(.voice-network-settings summary) {
+  min-height: 44px;
+  padding: 12px 0;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+
+:deep(.voice-network-settings .settings-hint) {
+  color: var(--text-secondary, var(--text-primary));
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0 0 12px;
+}
+
 :deep(.settings-modal) {
   display: flex;
   width: min(920px, 100%);

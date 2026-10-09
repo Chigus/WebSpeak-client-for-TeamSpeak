@@ -3,12 +3,14 @@ import type { ChannelInfo } from "../shared/voice-models.js";
 import type { ClientCommand } from "../shared/client-commands.js";
 import type { TSClient } from "./ts-client.js";
 import type { WebRtcAudioSession } from "./webrtc-audio.js";
+import type { SessionAudioTransport } from "./session-audio.js";
 import { snapshotAudioStatus, type AudioStatsSource } from "./audio-stats.js";
 import { pingTeamSpeakSession } from "./network-probe.js";
 import { teamSpeakServerErrorCode } from "../errors.js";
 
 /** Only the session capabilities used by control commands cross this boundary. */
 export interface VoiceCommandContext extends AudioStatsSource {
+  audioTransport?: Pick<SessionAudioTransport, "configureQuality" | "qualityFeedback"> | null;
   tsClient: Pick<TSClient, "execCommandWithResponse" | "switchChannel" | "getClientId" | "getChannelId" | "moveClient" | "sendTextMessage" | "poke" | "setAway" | "setInputMuted" | "setAccompanimentActive">;
   channelTree: ChannelInfo[];
   members: ReadonlyMap<number, { uid?: string }>;
@@ -25,6 +27,17 @@ export async function handleCommand(
   sendJson: (message: ServerMessage) => void,
   clock: () => number = Date.now,
 ): Promise<void> {
+  if (command.type === "setVoiceQuality" || command.type === "voiceNetworkFeedback") {
+    try {
+      if (!entry.audioTransport) throw new Error("Audio session unavailable");
+      if (command.type === "setVoiceQuality") entry.audioTransport.configureQuality(command.payload, command.payload.compressedUplink);
+      else entry.audioTransport.qualityFeedback(command.payload);
+      if (command.requestId) sendJson({ type: "commandCompleted", requestId: command.requestId });
+    } catch {
+      sendJson({ type: "error", requestId: command.requestId, error: { code: "VOICE_QUALITY_UNAVAILABLE", message: "语音调优暂不可用", recoverable: true } });
+    }
+    return;
+  }
   if (command.type === "latencyProbe") {
     // Keep the control-path probe for already-open older browser clients. The
     // current voice status panel exclusively requests actual audio counters.

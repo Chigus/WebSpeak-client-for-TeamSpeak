@@ -1,3 +1,4 @@
+import { setGatewayOrigins } from "../voice/gateway-routes.js";
 import { computed, reactive, ref, type Ref } from "vue";
 import { DEFAULT_TEAM_SPEAK_PORT, splitTeamSpeakTarget } from "../services/teamspeak-target.js";
 import type { Language } from "../i18n/web-client.js";
@@ -44,6 +45,7 @@ export function useWebClientPublicConfig({
       const response = await fetch("/api/public-config", { headers: { accept: "application/json" } });
       if (!response.ok) return;
       const config = await response.json() as {
+        gatewayOrigins?: unknown;
         version?: unknown;
         initialized?: unknown;
         mobile?: unknown;
@@ -58,6 +60,7 @@ export function useWebClientPublicConfig({
         visitorTotal?: unknown;
         accelerationRelays?: unknown;
       };
+      setGatewayOrigins(config.gatewayOrigins);
       if (typeof config.version === "string" && config.version.trim()) appVersion.value = config.version.trim();
       visitorNumber.value = Number.isSafeInteger(config.visitorNumber) && Number(config.visitorNumber) > 0 ? Number(config.visitorNumber) : null;
       visitorTotal.value = Number.isSafeInteger(config.visitorTotal) && Number(config.visitorTotal) > 0 ? Number(config.visitorTotal) : null;

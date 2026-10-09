@@ -64,6 +64,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
   let screenShareIceServers: RTCIceServer[] = normalizeScreenShareIceServers();
   const screenShareRelays = ref<ScreenShareRelayId[]>([]);
   let screenShareOwnerRelay: ScreenShareRelayCredentials | null = null;
+  let screenShareViewerRelay: ScreenShareRelayCredentials | null = null;
   const screenShareStreams = reactive<ScreenShareStream[]>([]);
   const screenShareActive = ref(false);
   const screenShareStarting = ref(false);
@@ -320,7 +321,38 @@ export function createScreenShareController(transport: ScreenShareTransport) {
     screenShareError.value = message;
   }
 
+  const autoRetries = new WeakMap<RTCPeerConnection, number>();
+  const autoRetrying = new WeakSet<RTCPeerConnection>();
+  function retryAutomaticPeer(peerId: string): boolean {
+    const peer = screenSharePeers.get(peerId);
+    const stream = screenShareStreams.find(item => item.streamId === screenShareActiveStreamId.value || item.streamId === screenShareViewingStreamId.value);
+    if (!peer || stream?.route !== "auto") return false;
+    if (autoRetrying.has(peer)) return true;
+    const attempts = autoRetries.get(peer) ?? 0;
+    if (attempts >= 3) return false;
+    autoRetries.set(peer, attempts + 1);
+    // The publisher owns retries; the viewer keeps its video and answers.
+    if (screenSharePeerRoles.get(peerId) !== "owner") { armScreenSharePeerTimer(peerId); return true; }
+    if (!screenShareOwnerRelay?.iceServers.length) return false;
+    autoRetrying.add(peer);
+    void (async () => {
+      try {
+        const servers = screenShareOwnerRelay!.iceServers;
+        peer.setConfiguration({ iceServers: attempts === 0 ? servers : [servers[(attempts - 1) % servers.length]!], iceTransportPolicy: "relay" });
+        const offer = await peer.createOffer({ iceRestart: true });
+        if (!isCurrentPeer(peerId, peer)) return;
+        await peer.setLocalDescription(offer);
+        if (!isCurrentPeer(peerId, peer)) return;
+        armScreenSharePeerTimer(peerId);
+        sendScreenShareMessage({ type: "screenShareSignal", streamId: stream.streamId, targetPeerId: peerId,
+          signal: { kind: "offer", sdp: peer.localDescription?.sdp ?? offer.sdp ?? "" } });
+      } catch { if (isCurrentPeer(peerId, peer)) armScreenSharePeerTimer(peerId); }
+      finally { autoRetrying.delete(peer); }
+    })();
+    return true;
+  }
   function failScreenSharePeer(peerId: string, message?: string): void {
+    if (retryAutomaticPeer(peerId)) return;
     const viewingStream = screenShareStreams.find((stream) => stream.streamId === screenShareViewingStreamId.value && stream.ownerPeerId === peerId);
     const relay = viewingStream?.route ?? screenShareStreams.find(stream => stream.streamId === screenShareActiveStreamId.value)?.route;
     if (viewingStream) sendScreenShareMessage({ type: "screenShareLeave", streamId: viewingStream.streamId });
@@ -341,10 +373,9 @@ export function createScreenShareController(transport: ScreenShareTransport) {
     const existing = screenSharePeers.get(peerId);
     if (existing) return existing;
     const route = screenShareStreams.find(stream => stream.streamId === streamId)?.route ?? "p2p";
-    // Forcing the publisher through one TURN node makes every viewer's media
-    // traverse that node, without creating a redundant second relay allocation
-    // on the viewer. Native TS6 viewers need no protocol/credential changes.
-    const relay = role === "owner" && route !== "p2p" ? screenShareOwnerRelay : null;
+    // Viewers also need a TURN candidate when their own network blocks UDP.
+    // Keep ordinary ICE preferred on viewers, allocating relay only as needed.
+    const relay = route === "p2p" ? null : role === "owner" ? screenShareOwnerRelay : screenShareViewerRelay;
     if (role === "owner" && route !== "p2p" && (!relay || relay.route !== route || relay.expiresAt <= Date.now())) {
       stopScreenShare();
       screenShareErrorCode.value = "SCREEN_SHARE_RELAY_UNAVAILABLE";
@@ -352,7 +383,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
       return null;
     }
     const peer = new RTCPeerConnection(relay
-      ? { iceServers: relay.iceServers, iceTransportPolicy: "relay" }
+      ? { iceServers: [...(route === "auto" || role === "viewer" ? screenShareIceServers : []), ...relay.iceServers], iceTransportPolicy: route === "auto" || role === "viewer" ? "all" : "relay" }
       : { iceServers: screenShareIceServers });
     screenSharePeers.set(peerId, peer);
     screenSharePeerRoles.set(peerId, role);
@@ -530,7 +561,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
       return;
     }
 
-    if (stream.source === "teamspeak" && screenShareViewingStreamId.value === streamId && fromPeerId === stream.ownerPeerId && signal.kind === "offer") {
+    if (screenShareViewingStreamId.value === streamId && fromPeerId === stream.ownerPeerId && signal.kind === "offer") {
       const peer = screenSharePeers.get(fromPeerId) ?? createScreenSharePeer(streamId, fromPeerId, "viewer");
       if (!peer) return;
       if (!signal.sdp) return;
@@ -552,7 +583,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
       return;
     }
 
-    if (stream.source === "browser" && screenShareActiveStreamId.value === streamId && stream.ownerPeerId === screenShareLocalPeerId() && fromPeerId.startsWith("ts-viewer-") && signal.kind === "answer") {
+    if (stream.source === "browser" && screenShareActiveStreamId.value === streamId && stream.ownerPeerId === screenShareLocalPeerId() && signal.kind === "answer") {
       const peer = screenSharePeers.get(fromPeerId);
       if (!peer || !signal.sdp) return;
       try {
@@ -612,7 +643,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
 
   async function startScreenShare(audio = true, settings?: ScreenShareOutputSettings): Promise<void> {
     if (!transport.isOpen() || screenShareActive.value || screenShareStarting.value) return;
-    if (settings?.route && settings.route !== "p2p" && !screenShareRelays.value.includes(settings.route)) {
+    if (settings?.route && settings.route !== "p2p" && settings.route !== "auto" && !screenShareRelays.value.includes(settings.route)) {
       screenShareErrorCode.value = "SCREEN_SHARE_RELAY_UNAVAILABLE";
       screenShareError.value = "所选屏幕共享服务器未配置，请选择其他线路";
       return;
@@ -695,6 +726,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
   }
 
   function leaveScreenShare(): void {
+    screenShareViewerRelay = null;
     if (screenShareViewingStreamId.value) sendScreenShareMessage({ type: "screenShareLeave", streamId: screenShareViewingStreamId.value });
     closeAllScreenSharePeers();
     screenShareViewing.value = false;
@@ -703,6 +735,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
   }
 
   function stopScreenShareTransport(sendStop: boolean): void {
+    screenShareViewerRelay = null;
     screenShareOwnerRelay = null;
     screenShareStartGeneration += 1;
     if (sendStop && screenShareActive.value && screenShareActiveStreamId.value) sendScreenShareMessage({ type: "screenShareStop", streamId: screenShareActiveStreamId.value });
@@ -801,6 +834,8 @@ export function createScreenShareController(transport: ScreenShareTransport) {
       case "screenShareJoined": {
         const stream = upsertScreenShareStream(msg.stream);
         if (!stream) break;
+        const lease = parseScreenShareRelayCredentials(msg.relay);
+        screenShareViewerRelay = lease && lease.route === stream.route && lease.expiresAt > Date.now() ? lease : null;
         void startScreenShareViewer(stream);
         break;
       }

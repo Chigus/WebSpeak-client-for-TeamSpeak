@@ -45,7 +45,17 @@ function fixture(relays = new ScreenShareRelays()) {
   return { entries, messages, commands, coordinator, participant, handle, list, start };
 }
 
-test("relay authorization goes only to the publisher; route is public to viewers", () => {
+test("late cloud relay credentials cannot publish a departed session", async t => {
+  const relays=new ScreenShareRelays();let resolve!:(value:any)=>void;
+  t.mock.method(relays,"issueAsync",()=>new Promise(done=>{resolve=done;}));
+  const f=fixture(relays),owner=f.participant("owner",1);
+  f.handle(owner,{type:"screenShareStart",requestId:"start",route:"cloudflare",audio:false});
+  f.coordinator.removePeer(owner.id);f.entries.delete(owner.id);
+  resolve({route:"cloudflare",expiresAt:Date.now()+60000,iceServers:[{urls:["turn:relay.example:3478"],username:"lease",credential:"lease"}]});
+  await nextTurn();assert.equal(f.messages.filter(m=>m.message.type==="screenShareStarted").length,0);
+});
+
+test("relay authorization reaches only the publisher and joined viewers, never public listings", () => {
   const secret = "s".repeat(48);
   const f = fixture(new ScreenShareRelays([{ id: "macau", urls: ["turn:relay.example:3478"], secret }]));
   const owner = f.participant("owner", 1), viewer = f.participant("viewer", 2);
@@ -60,7 +70,9 @@ test("relay authorization goes only to the publisher; route is public to viewers
   f.handle(viewer, { type: "screenShareJoin", streamId: reply.stream.streamId });
   assert.equal(f.list(viewer)[0]?.route, "macau");
   assert.equal(JSON.stringify(f.messages).includes(secret), false);
-  assert.equal(JSON.stringify(f.messages.slice(1)).includes(credential), false);
+  assert.equal(JSON.stringify(f.messages.filter(({ message }) => message.type !== "screenShareStarted" && message.type !== "screenShareJoined")).includes(credential), false);
+  assert.equal(JSON.stringify(f.list(viewer)).includes(credential), false);
+  assert.ok(f.messages.some(({ to, message }) => to === viewer.id && message.type === "screenShareJoined" && message.relay));
 });
 
 test("sharing is isolated by server and channel, and only its owner can stop it", () => {

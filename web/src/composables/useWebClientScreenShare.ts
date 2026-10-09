@@ -95,11 +95,11 @@ export function useWebClientScreenShare({
   watch(settingsOpen, () => { applyGeneration++; applying.value = false; bitrateApplyError.value = false; });
   watch(sharing, () => { applyGeneration++; applying.value = false; bitrateApplyError.value = false; });
   const storedRoute = localStorage.getItem("webspeak:screen-share-route");
-  const route = ref<ScreenShareRoute>(isScreenShareRoute(storedRoute) ? storedRoute : "p2p");
-  const routeOptions = computed(() => (["p2p", "macau", "shenzhen"] as const).map(id => ({
-    value: id, label: `screenShareRoute_${id}`, available: id === "p2p" || relays.value.includes(id),
+  const route = ref<ScreenShareRoute>(isScreenShareRoute(storedRoute) ? storedRoute : "auto");
+  const routeOptions = computed(() => (["auto", "p2p", "macau", "shenzhen", "cloudflare"] as const).map(id => ({
+    value: id, label: `screenShareRoute_${id}`, available: id === "auto" || id === "p2p" || relays.value.includes(id),
   })));
-  const routeAvailable = computed(() => route.value === "p2p" || relays.value.includes(route.value));
+  const routeAvailable = computed(() => route.value === "auto" || route.value === "p2p" || relays.value.includes(route.value));
   const activeStream = computed<ScreenShareStream | null>(() => streams.find((stream) => stream.streamId === viewingStreamId.value) ?? null);
   const viewers = computed(() => activeStream.value?.viewers.slice(-5) ?? []);
   const viewerCount = computed(() => activeStream.value?.viewerCount ?? activeStream.value?.viewers.length ?? 0);

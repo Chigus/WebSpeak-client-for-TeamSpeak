@@ -802,6 +802,26 @@ test("command timeout and disconnect settle once without touching replacement co
   assert.equal(timers.active.size, 0);
 });
 
+test("page-local identity survives reconnect without enabling remembered identity", async () => {
+  const requests = [];
+  globalThis.fetch = (_, options) => {
+    requests.push(JSON.parse(options.body));
+    return Promise.resolve({ ok: true, json: async () => ({ ticket: "test-ticket" }) });
+  };
+  voice.connect("voice.example:9987", "", "Visitor");
+  await nextTurn();
+  TestSocket.instances.at(-1).receive({ type: "connected", tsClientId: 1, identity: "page-only-identity" });
+  assert.equal(voice.identityMaterial.value, "");
+  voice.reconnectNow();
+  await nextTurn();
+  assert.equal(requests.at(-1).identity, "page-only-identity");
+  assert.equal(requests.at(-1).rememberIdentity, undefined);
+  voice.disconnect();
+  voice.connect("voice.example:9987", "", "Visitor");
+  await nextTurn();
+  assert.equal(requests.at(-1).identity, undefined);
+});
+
 test("disconnect immediately aborts a pending join request and releases its deadline", async t => {
   const timers = controlRequestTimers(t);
   const response = deferred();

@@ -31,6 +31,9 @@
         ><h2 id="screen-share-settings-title">{{ t("screenShareSettings") }}</h2
         ><p>{{ t("screenShareSettingsHint") }}</p></div
       >
+      <p class="settings-hint">{{ t("screenShareRouteAutoHint") }}</p>
+      <details :open="route !== 'auto' || bitrateMode === 'manual'">
+        <summary>{{ t("networkAdvanced") }}</summary>
       <div
         class="screen-share-settings-fields"
         data-ws-part="voice.screen-share-settings.fields"
@@ -42,7 +45,7 @@
               {{ t(option.label) }}{{ option.available ? "" : ` · ${t("screenShareRouteUnconfigured")}` }}
             </option>
           </select>
-          <small id="screen-share-route-hint">{{ t(route === "p2p" ? "screenShareRouteP2PHint" : "screenShareRouteRelayHint") }}</small>
+          <small id="screen-share-route-hint">{{ t(route === "auto" ? "screenShareRouteAutoHint" : route === "p2p" ? "screenShareRouteP2PHint" : "screenShareRouteRelayHint") }}</small>
         </label>
         <label
           ><span>{{ t("screenShareResolution") }}</span
@@ -100,6 +103,7 @@
         data-ws-part="voice.screen-share-settings.note"
         >{{ t(sharing ? "screenShareBitrateLiveHint" : "screenShareSettingsNote") }}</p
       >
+      </details>
       <footer
         class="screen-share-settings-footer"
         data-ws-part="voice.screen-share-settings.actions"

@@ -2,9 +2,10 @@ import { createScreenShareController } from '/src/voice/screen-share.ts';
 const state = document.querySelector('#state'), result = document.querySelector('#result');
 const crossNetwork = location.hash === '#remote';
 const bitrateCheck = location.hash === '#bitrate';
+const cloudflareCheck = location.hash.includes('cloudflare');
 let networkScenario = null;
-const cases = crossNetwork ? [['macau', 'udp'], ['macau', 'tcp']] : bitrateCheck ? [['p2p', null]] : [['p2p', null], ['shenzhen', 'udp'], ['shenzhen', 'tcp']];
-document.querySelector('#start').textContent = crossNetwork ? '开始澳门跨网往返测试' : bitrateCheck ? '开始实时码率验收' : '开始 P2P 与深圳线路测试';
+const cases = cloudflareCheck ? [['cloudflare','udp'],['cloudflare','tcp'],['cloudflare','tls'],['auto',null]] : crossNetwork ? [['macau', 'udp'], ['macau', 'tcp']] : bitrateCheck ? [['p2p', null]] : [['p2p', null], ['shenzhen', 'udp'], ['shenzhen', 'tcp']];
+document.querySelector('#start').textContent = cloudflareCheck ? '开始 Cloudflare 与自动线路验收' : crossNetwork ? '开始澳门跨网往返测试' : bitrateCheck ? '开始实时码率验收' : '开始 P2P 与深圳线路测试';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function wait(check, label, timeout = 25000) {
   const until = Date.now() + timeout;
@@ -49,7 +50,7 @@ function participant() {
     // Both protocols are deployed. Restrict the lease only in the test harness
     // to prove that UDP and TCP TURN listeners each carry actual media.
     if (m.type === 'screenShareStarted' && m.owner && m.relay && protocol) {
-      m.relay.iceServers = m.relay.iceServers.map(s => ({ ...s, urls: [].concat(s.urls).filter(url => url.endsWith(`transport=${protocol}`)) }));
+      m.relay.iceServers = m.relay.iceServers.map(s => ({ ...s, urls: [].concat(s.urls).filter(url => protocol === "tls" ? url.startsWith("turns:") && url.endsWith("transport=tcp") : url.startsWith("turn:") && url.endsWith(`transport=${protocol}`)) })).filter(s => s.urls.length);
     }
     controller.handleMessage(m);
   };
@@ -57,7 +58,7 @@ function participant() {
 }
 document.querySelector('#start').onclick = async event => {
   event.target.disabled = true;
-  const report = { status: 'running', checkedAt: new Date().toISOString(), scope: crossNetwork ? 'Production WSS; Macau browser and Shenzhen RTP reflector; synthetic media crosses Macau TURN and returns for browser decoding.' : 'Production WSS and ICE configuration; two browser peers on one Macau Windows host; synthetic canvas and oscillator only.', cases: [] };
+  const report = { status: 'running', checkedAt: new Date().toISOString(), scope: location.hash === '#local-cloudflare' ? 'Local production coordinator; real Cloudflare TURN, synthetic canvas and oscillator.' : crossNetwork ? 'Production WSS; Macau browser and Shenzhen RTP reflector; synthetic media crosses Macau TURN and returns for browser decoding.' : 'Production WSS and ICE configuration; two browser peers on one Macau Windows host; synthetic canvas and oscillator only.', cases: [] };
   const owner = participant(), viewer = crossNetwork ? null : participant();
   const canvas = document.createElement('canvas'); canvas.width = bitrateCheck ? 1920 : 960; canvas.height = bitrateCheck ? 1080 : 540;
   const ctx = canvas.getContext('2d'); let frame = 0, tracks = [], audio;
@@ -74,7 +75,7 @@ document.querySelector('#start').onclick = async event => {
   try {
     audio = new AudioContext(); await audio.resume();
     await wait(() => owner.connected && (!viewer || viewer.connected), 'Protected channel connection');
-    if (owner.controller.api.screenShareRelays.value.length !== 2) throw new Error('Both production nodes must be advertised');
+    if (cloudflareCheck ? !owner.controller.api.screenShareRelays.value.includes('cloudflare') : !['macau','shenzhen'].every(r=>owner.controller.api.screenShareRelays.value.includes(r))) throw new Error('Required relays must be advertised');
     for (const [route, transport] of cases) {
       protocol = transport; state.textContent = `${route} ${transport ?? 'direct'}`;
       const start = peers.length;
@@ -100,7 +101,7 @@ document.querySelector('#start').onclick = async event => {
       }));
       const receiver = snapshots.find(s => s.videoFrames > 0), publisher = snapshots.find(s => s.policy === 'relay');
       if (!receiver || receiver.audioPackets < 1) throw new Error('Video/audio did not decode');
-      if (route !== 'p2p' && (!publisher || publisher.local.type !== 'relay' || publisher.local.relayProtocol !== transport)) throw new Error('Selected TURN route was not used');
+      if (route !== 'p2p' && route !== 'auto' && (!publisher || publisher.local.type !== 'relay' || publisher.local.relayProtocol !== transport)) throw new Error('Selected TURN route was not used');
       if (route === 'p2p' && snapshots.some(s => s.local.type === 'relay')) throw new Error('P2P unexpectedly relayed');
       report.cases.push({ route, transport, passed: true, snapshots });
       if (bitrateCheck) {

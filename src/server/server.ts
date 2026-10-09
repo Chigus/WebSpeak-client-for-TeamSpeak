@@ -1,4 +1,5 @@
 import express from "express";
+import { readGatewayOrigins } from "./gateway-routes.js";
 import { createServer as createHttpsServer } from "node:https";
 import { createServer as createHttpServer } from "node:http";
 import { readFileSync } from "node:fs";
@@ -52,6 +53,17 @@ export function createWebServer(options: WebServerOptions): WebServer {
     server = createHttpServer(app);
   }
 
+  const gatewayOrigins = readGatewayOrigins();
+  app.use((request, response, next) => {
+    const origin = request.header("origin");
+    if (origin && gatewayOrigins.includes(origin) && ["/api/health", "/api/join-ticket"].includes(request.path)) {
+      response.setHeader("Access-Control-Allow-Origin", origin); response.vary("Origin");
+      response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      response.setHeader("Access-Control-Allow-Headers", "content-type");
+      if (request.method === "OPTIONS") { response.sendStatus(204); return; }
+    }
+    next();
+  });
   app.use(express.json({ limit: "100kb" }));
 
   const voiceBridge = new VoiceBridge(options.voiceBridgeOptions, logger);
@@ -103,6 +115,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     }
     response.json({
       ...publicConfig,
+      gatewayOrigins,
       target,
       targetPrefillBlocked,
       ...(visitorNumber === null ? {} : { visitorNumber }),
@@ -149,7 +162,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
   app.post("/api/join-ticket", async (request, response) => {
     response.setHeader("Cache-Control", "no-store");
-    if (!request.is("application/json") || !isSameOrigin(request)) {
+    if (!request.is("application/json") || (!isSameOrigin(request) && !gatewayOrigins.includes(request.header("origin") ?? ""))) {
       response.status(403).json({ ok: false, code: "ORIGIN_REJECTED" });
       return;
     }
@@ -229,7 +242,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
       serverPassword,
       nickname,
       ...(channel ? { channel } : {}),
-      ...(identity ? { identity, rememberIdentity: true } : body.rememberIdentity === true ? { rememberIdentity: true } : {}),
+      ...(identity ? { identity } : {}),
+      ...(body.rememberIdentity === true ? { rememberIdentity: true } : {}),
       ...(accelerationRequested ? { accelerated: true, ...(requestedRelayId ? { accelerationRelayId: requestedRelayId } : {}) } : {}),
     });
     response.status(201).json({ ok: true, ticket });

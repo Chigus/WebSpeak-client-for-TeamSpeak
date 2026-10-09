@@ -1,6 +1,6 @@
 <template>
   <div
-    class="modal-backdrop"
+    class="modal-backdrop audio-settings-backdrop"
     @click.self="emit('close')"
   >
     <section
@@ -24,6 +24,32 @@
               name="close"
               :size="19" /></button></header
         ><div class="settings-content">
+          <section class="settings-section voice-network-settings" v-if="voiceQualitySettings">
+            <h3>{{ t("voiceQualityTitle") }}</h3>
+            <p class="settings-hint">{{ t("voiceQualityHint") }}</p>
+            <p class="noise-settings-status" role="status" v-if="voiceQualityStatus">{{ t("voiceQualityCurrent", { up: stereoInputEnabled ? 1536 : voiceQualityStatus.compressedUplink ? voiceQualityStatus.uplinkKbps : 768, down: voiceQualityStatus.downlinkKbps }) }}</p>
+            <details>
+              <summary>{{ t("networkAdvanced") }}</summary>
+              <p class="settings-hint" role="status">{{ t('voiceQualityTitle') }} · {{ voiceRelayRoute === 'wss' ? 'WSS' : voiceRelayRoute === 'direct' ? t('screenShareRoute_p2p') : t(`screenShareRoute_${voiceRelayRoute}`) }}</p>
+              <label class="settings-label" for="voice-quality-mode">{{ t("voiceQualityMode") }}</label>
+              <select id="voice-quality-mode" class="settings-select" :value="voiceQualitySettings.mode" @change="setVoiceQuality({ ...voiceQualitySettings, mode: ($event.target as HTMLSelectElement).value as 'auto' | 'manual' })">
+                <option value="auto">{{ t("networkAuto") }}</option><option value="manual">{{ t("networkManual") }}</option>
+              </select>
+              <template v-if="voiceQualitySettings.mode === 'manual'">
+                <label class="settings-label" for="voice-quality-rate">{{ t("voiceQualityBitrate") }}</label>
+                <select id="voice-quality-rate" class="settings-select" :value="voiceQualitySettings.bitrateKbps" @change="setVoiceQuality({ ...voiceQualitySettings, bitrateKbps: Number(($event.target as HTMLSelectElement).value) })">
+                  <option v-for="rate in [16,24,32,48,64,96,128,192]" :key="rate" :value="rate">{{ rate }} kbps</option>
+                </select>
+              </template>
+              <template v-else>
+                <label class="settings-label" for="voice-quality-policy">{{ t("voiceQualityPolicy") }}</label>
+                <select id="voice-quality-policy" class="settings-select" :value="voiceQualitySettings.policy" @change="setVoiceQuality({ ...voiceQualitySettings, policy: ($event.target as HTMLSelectElement).value as 'balanced' | 'smooth' | 'quality' })">
+                  <option v-for="policy in ['balanced','smooth','quality']" :key="policy" :value="policy">{{ t(policy === 'quality' ? 'voiceQualityPolicy_quality' : `screenShareBitratePolicy_${policy}`) }}</option>
+                </select>
+              </template>
+              <p class="settings-hint">{{ t("voiceQualityStereo") }}</p>
+            </details>
+          </section>
           <section class="settings-section"
             ><h3
               ><Icon
@@ -345,6 +371,7 @@ import type { useVoiceWebSocket } from "../../composables/useVoiceWebSocket.js";
 import type { useWebClientAudioControls } from "../../composables/useWebClientAudioControls.js";
 
 type AudioSettingsState = Pick<ReturnType<typeof useVoiceWebSocket>,
+  | "voiceQualitySettings" | "voiceQualityStatus" | "setVoiceQuality" | "voiceRelayRoute"
   | "peerVoiceEnabled" | "peerVoiceAvailable" | "peerVoiceSupported" | "peerVoiceStatus" | "peerVoiceConnectedPeers" | "setPeerVoiceEnabled"
   | "inputDevices"
   | "outputDevices"
@@ -407,6 +434,7 @@ const { onDialogKeydown } = useDialogFocus(dialog, () => emit("close"));
 
 // The page owns the stable voice refs and audio controller; this dialog only presents them.
 const {
+  voiceQualitySettings, voiceQualityStatus, setVoiceQuality, voiceRelayRoute,
   peerVoiceEnabled, peerVoiceAvailable, peerVoiceSupported, peerVoiceStatus, peerVoiceConnectedPeers, setPeerVoiceEnabled,
   inputDevices,
   outputDevices,

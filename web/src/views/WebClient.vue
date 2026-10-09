@@ -865,6 +865,7 @@ const {
   clearError,
   measureVoiceAudioStatus,
   requestMusic,
+  voiceQualitySettings, voiceQualityStatus, setVoiceQuality, voiceRelayRoute,
 } = useVoiceWebSocket();
 const performance = useWebClientPerformance(computed(() => voiceState.connected), measureVoiceAudioStatus);
 const { panelOpen: performancePanelOpen } = performance;
@@ -1031,6 +1032,7 @@ const audioDockState = {
   stereoInputEnabled, accompanimentActive,
 };
 const audioSettingsState = {
+  voiceQualitySettings, voiceQualityStatus, setVoiceQuality, voiceRelayRoute,
   peerVoiceEnabled, peerVoiceAvailable, peerVoiceSupported, peerVoiceStatus, peerVoiceConnectedPeers, setPeerVoiceEnabled,
   inputDevices,
   outputDevices,

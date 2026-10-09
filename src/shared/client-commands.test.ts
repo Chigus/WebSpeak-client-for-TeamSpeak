@@ -5,6 +5,8 @@ import { normalizeScreenShareIceServers, parseScreenShareMessage } from "./scree
 
 test("all command payloads preserve request IDs through the shared parser", () => {
   const payloads: ClientCommandPayloads = {
+    setVoiceQuality: { mode: "auto", bitrateKbps: 48, policy: "balanced", compressedUplink: true },
+    voiceNetworkFeedback: { sequence: 1, rttMs: 40, uplinkBufferedMs: 0, playbackDropPercent: 0, playbackFrames: 100 },
     switchChannel: { channelId: "18446744073709551615", password: "secret" },
     moveClient: { clientId: 2, channelId: "1" }, sendTextMessage: { message: "hello" },
     sendServerMessage: { message: "hello" }, sendPrivateMessage: { clientId: 2, message: "hello" },

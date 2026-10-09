@@ -1,3 +1,4 @@
+import { selectGateway, hasGatewayChoices, markGatewayFailed } from "./gateway-routes.js";
 export interface ConnectionFailure {
   code: unknown;
   detail?: unknown;
@@ -16,6 +17,7 @@ interface Attempt {
   controller: AbortController | null;
   timer: ReturnType<typeof setTimeout> | null;
   socket: WebSocket | null;
+  origin?: string;
 }
 
 // A connection owns its ticket request and socket. UI/media stay with the
@@ -63,8 +65,8 @@ export function createVoiceConnection(options: ConnectionOptions) {
   }
 
   function openSocket(record: Attempt, ticket: string): void {
-    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const socket = new WebSocket(`${protocol}//${location.host}/ws/voice?ticket=${encodeURIComponent(ticket)}`);
+    const origin = record.origin ?? `${location.protocol}//${location.host}`;
+    const socket = new WebSocket(`${origin.replace(/^http/, "ws")}/ws/voice?ticket=${encodeURIComponent(ticket)}`);
     record.socket = socket;
     socket.binaryType = "arraybuffer";
     options.onSocket(socket);
@@ -82,6 +84,7 @@ export function createVoiceConnection(options: ConnectionOptions) {
     };
     socket.onclose = event => {
       if (!isCurrent(record) || record.socket !== socket) return;
+      if (event.code === 1006 && record.origin) markGatewayFailed(record.origin);
       stop();
       options.onClose(event);
     };
@@ -94,7 +97,10 @@ export function createVoiceConnection(options: ConnectionOptions) {
     try {
       await ready;
       if (!isCurrent(record)) return;
-      const response = await fetch("/api/join-ticket", {
+      if (hasGatewayChoices()) record.origin = await selectGateway(record.controller!.signal);
+      if (!isCurrent(record)) return;
+      const destination = record.origin && record.origin !== location.origin ? record.origin : "";
+      const response = await fetch(`${destination}/api/join-ticket`, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json" },
         body,
@@ -114,6 +120,7 @@ export function createVoiceConnection(options: ConnectionOptions) {
       record.controller = null;
       openSocket(record, result.ticket);
     } catch (cause) {
+      if (isCurrent(record) && record.origin) markGatewayFailed(record.origin);
       fail(record, { code: "REQUEST_FAILED", cause });
     }
   }

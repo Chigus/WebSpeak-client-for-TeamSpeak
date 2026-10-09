@@ -3,6 +3,8 @@ import type { ServerMessage } from "../shared/server-messages.js";
 import type { AudioFlowStats } from "./audio-stats.js";
 import type { TSClient, TSVoiceData } from "./ts-client.js";
 import type { WebRtcAudioSession } from "./webrtc-audio.js";
+import { SessionVoiceQuality } from "./voice-quality.js";
+import { validVoiceOpusPacket, type VoiceQualitySettings, type VoiceNetworkFeedback } from "../shared/voice-quality.js";
 
 // Fixed 20 ms frames at 48 kHz: mono Int16 or interleaved L/R Int16.
 const MONO_FRAME_BYTES = 1_920;
@@ -12,6 +14,7 @@ const MAX_BUFFERED_BYTES = 4_096;
 
 export interface VoiceEncoder {
   encode(frame: Buffer): Buffer;
+  setBitrate?(bitrate: number): void;
   dispose(): void;
 }
 
@@ -25,12 +28,18 @@ export interface SessionAudioOptions {
   peer(): Pick<WebRtcAudioSession, "pushTeamSpeakVoice"> | null;
   whisperTargets(): readonly number[] | null;
   sendJson(message: ServerMessage): void;
+  sendDatagram?(packet: Buffer): "sent" | "dropped" | false;
+  datagramBufferedAmount?(): number | null;
   directVoice?(clientId: number): "normal" | "fallback" | "suppress";
   createStereoEncoder?(): VoiceEncoder;
 }
 
 /** A session owns its encoders and one active audio route in each direction. */
 export class SessionAudioTransport {
+  private readonly quality = new SessionVoiceQuality();
+  private compressedFrames = 0;
+  private compressedWindowAt = 0;
+  private qualityFeedbackAt = -Infinity;
   private encoder: VoiceEncoder | null;
   private stereoEncoder: VoiceEncoder | null = null;
   private closed = false;
@@ -81,6 +90,14 @@ export class SessionAudioTransport {
   receivePcm(frame: Buffer): void {
     if (!this.isCurrent()) return;
     const stats = this.options.audio;
+    if (frame.length < MONO_FRAME_BYTES && frame[0] === 0x57 && frame[1] === 0x53 && frame[2] === 0x56) {
+      if (!this.quality.snapshot().compressedUplink || !validVoiceOpusPacket(frame)
+        || !this.options.isReady() || this.options.peer()) { stats.ingressDroppedFrames++; return; }
+      const now = this.clock();
+      if (now - this.compressedWindowAt >= 1000) { this.compressedWindowAt = now; this.compressedFrames = 0; }
+      if (++this.compressedFrames > 75) { stats.ingressDroppedFrames++; return; }
+      this.recordIngress(); this.sendVoice(frame.subarray(5), 4); return;
+    }
     const stereo = frame.length === STEREO_FRAME_BYTES;
     if (frame.length !== MONO_FRAME_BYTES && !stereo) {
       stats.ingressDroppedFrames++;
@@ -141,15 +158,23 @@ export class SessionAudioTransport {
     }
     const directRoute = this.options.directVoice?.(data.clientId) ?? "normal";
     if (directRoute === "suppress") return;
-    const bufferedBytes = this.options.socket.bufferedAmount;
+    const bufferedBytes = this.options.datagramBufferedAmount?.() ?? this.options.socket.bufferedAmount;
     stats.egressPeakBufferedBytes = Math.max(stats.egressPeakBufferedBytes, bufferedBytes);
-    if (bufferedBytes > MAX_BUFFERED_BYTES) { stats.egressDroppedFrames++; return; }
-    const packet = Buffer.allocUnsafe(3 + data.data.length);
+
+    let payload: Buffer;
+    try { payload = this.quality.encodeForListener(data.clientId, data.data, data.codec, now); }
+    catch { stats.egressDroppedFrames++; return; }
+    const packet = Buffer.allocUnsafe(3 + payload.length);
     packet[0] = data.codec | (directRoute === "fallback" ? 0x80 : 0);
     packet.writeUInt16BE(data.clientId, 1);
-    data.data.copy(packet, 3);
+    payload.copy(packet, 3);
     try {
-      this.options.socket.send(packet);
+      const datagram = this.options.sendDatagram?.(packet);
+      if (datagram === "dropped") { stats.egressDroppedFrames++; return; }
+      if (!datagram) {
+        if (bufferedBytes > MAX_BUFFERED_BYTES) { stats.egressDroppedFrames++; return; }
+        this.options.socket.send(packet);
+      }
       stats.egressFrames++;
       const sentAt = this.clock();
       if (stats.egressSentLastAt !== null) stats.egressSentMaxGapMs = Math.max(stats.egressSentMaxGapMs, sentAt - stats.egressSentLastAt);
@@ -161,11 +186,29 @@ export class SessionAudioTransport {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.quality.close();
     const encoder = this.encoder;
     const stereoEncoder = this.stereoEncoder;
     this.encoder = null;
     this.stereoEncoder = null;
     try { encoder?.dispose(); } catch { /* other session resources must still be released */ }
     try { stereoEncoder?.dispose(); } catch { /* other session resources must still be released */ }
+  }
+
+  configureQuality(settings: VoiceQualitySettings, compressedUplink: boolean): void {
+    if (!this.isCurrent()) return;
+    const status = this.quality.configure(settings, compressedUplink);
+    this.encoder?.setBitrate?.(status.uplinkKbps * 1000);
+    this.options.sendJson({ type: "voiceQuality", ...status });
+  }
+
+  qualityFeedback(sample: VoiceNetworkFeedback): void {
+    if (!this.isCurrent()) return;
+    const now = this.clock();
+    if (now - this.qualityFeedbackAt < 750) return;
+    this.qualityFeedbackAt = now;
+    const status = this.quality.feedback(sample, now, this.options.datagramBufferedAmount?.() ?? this.options.socket.bufferedAmount);
+    this.encoder?.setBitrate?.(status.uplinkKbps * 1000);
+    this.options.sendJson({ type: "voiceQuality", ...status });
   }
 }

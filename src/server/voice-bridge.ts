@@ -5,6 +5,8 @@ import { parsePeerVoiceClientMessage } from "../shared/peer-voice.js";
 import { SessionAudioTransport } from "./session-audio.js";
 import { SessionEventCoordinator, type SessionDirectoryState } from "./session-events.js";
 import { ScreenShareCoordinator } from "./screen-share-coordinator.js";
+import { VoiceRelaySession } from "./voice-relay.js";
+import { isVoiceRelayMessage } from "../shared/voice-relay.js";
 import { ScreenShareRelays, type ScreenShareRelayConfig } from "./screen-share-relays.js";
 import { handleCommand } from "./voice-commands.js";
 import { createAudioFlowStats, snapshotAudioStats, type AudioFlowStats } from "./audio-stats.js";
@@ -88,6 +90,7 @@ interface WebClientEntry extends SessionDirectoryState {
   events: SessionEventCoordinator | null;
   eventLog: ServerEvent[];
   audioTransport: SessionAudioTransport | null;
+  voiceRelay?: VoiceRelaySession;
   isAlive: boolean;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   audio: AudioFlowStats;
@@ -240,10 +243,17 @@ export class VoiceBridge {
       const sendJson = (message: ServerMessage) => {
         if (this.entries.get(entryId) === entry && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
       };
+      entry.voiceRelay = new VoiceRelaySession({
+        relays: new ScreenShareRelays(this.options.screenShareRelays),
+        current: () => process.env.WEBSPEAK_MOBILE !== "1" && this.entries.get(entryId) === entry && tsReady && session.state === "connected" && !entry!.webrtc,
+        send: sendJson, audio: frame => entry!.audioTransport?.receivePcm(frame),
+      });
       try {
         entry.audioTransport = new SessionAudioTransport({
           audio: entry.audio, socket: ws, client: tsClient,
           isCurrent: () => this.entries.get(entryId) === entry,
+          sendDatagram: packet => entry!.voiceRelay?.sendAudio(packet) ?? false,
+          datagramBufferedAmount: () => entry!.voiceRelay?.bufferedAmount() ?? null,
           directVoice: clientId => this.peerVoice.route(entryId, clientId),
           isReady: () => tsReady && session.state === "connected",
           selfId: () => entry!.events?.selfId ?? 0,
@@ -296,6 +306,8 @@ export class VoiceBridge {
         session.transition("connected");
         sendJson({
           type: "connected",
+          voiceQualityAvailable: process.env.WEBSPEAK_MOBILE !== "1",
+          voiceRelayAvailable: process.env.WEBSPEAK_MOBILE !== "1",
           tsClientId: events.selfId,
           members: Array.from(entry!.members.values()),
           serverEventLog: entry!.eventLog,
@@ -307,7 +319,8 @@ export class VoiceBridge {
           screenShareIceServers: this.getScreenShareIceServers(),
           screenShareRelays: (this.options.screenShareRelays ?? []).map(relay => relay.id),
           accelerated: Boolean(entry!.acceleration),
-          ...(entry!.rememberIdentity ? { identity: tsClient.getIdentityString() } : {}),
+          // The browser retains an ephemeral identity only for this page's reconnects.
+          identity: tsClient.getIdentityString(),
         });
         sendJson({ type: "channelList", channels: entry!.channelTree });
         if (wasReconnecting) sendJson({ type: "reconnected" });
@@ -316,6 +329,7 @@ export class VoiceBridge {
 
       const resetDirectoryForReconnect = () => {
         tsReady = false;
+        entry!.voiceRelay?.reset();
         this.peerVoice.remove(entryId);
         events.reset();
         void this.stopWebRtc(entry!);
@@ -480,6 +494,7 @@ export class VoiceBridge {
         const rawMessage = typeof data === "string" ? data : data.toString("utf-8");
         let musicEnvelope: unknown;
         try { musicEnvelope = JSON.parse(rawMessage); } catch {}
+        if (isVoiceRelayMessage(musicEnvelope)) { entry!.voiceRelay?.handle(musicEnvelope); return; }
         if (musicEnvelope && typeof musicEnvelope === "object" && (musicEnvelope as { type?: unknown }).type === "musicRequest") {
           const request = parseMusicRequest(musicEnvelope);
           if (!request) { sendProtocolError(sendJson, "INVALID_MUSIC_REQUEST", "音乐请求无效"); return; }
@@ -648,6 +663,7 @@ export class VoiceBridge {
       clearTimeout(entry.reconnectTimer);
       entry.reconnectTimer = null;
     }
+    entry.voiceRelay?.close();
     entry.audioTransport?.close();
     entry.audioTransport = null;
     await this.stopWebRtc(entry);

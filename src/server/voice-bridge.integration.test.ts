@@ -25,6 +25,7 @@ class TeamSpeakStub extends EventEmitter {
   async connect() { this.disconnected = false; this.emit("directorySnapshot", this.directory); }
   async disconnect() { this.disconnected = true; }
   getClientId() { return 1; }
+  getIdentityString() { return "page-local-test-identity"; }
   getChannelId() { return 1n; }
   isConnected() { return !this.disconnected; }
   async sendProtocolCommand() {}

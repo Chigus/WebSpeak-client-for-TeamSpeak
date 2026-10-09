@@ -1941,6 +1941,91 @@ for (const language of Object.keys(screenShareRouteTranslations) as Language[]) 
   Object.assign(webClientTranslations[language]!, screenShareRouteTranslations[language]);
 }
 
+
+const automaticNetworkTranslations: Record<Language, Record<string, string>> = {
+  "zh": {
+    "voiceQualityTitle": "语音连接与音质",
+    "voiceQualityHint": "自动根据你的连接情况调整，弱网优先保持语音连续。",
+    "voiceQualityCurrent": "当前上行 {{up}} / 下行 {{down}} kbps",
+    "networkAdvanced": "高级网络设置",
+    "voiceQualityMode": "调节方式",
+    "networkAuto": "自动（推荐）",
+    "networkManual": "手动",
+    "voiceQualityBitrate": "个人码率上限",
+    "voiceQualityPolicy": "自动调节偏好",
+    "voiceQualityPolicy_quality": "音质优先",
+    "voiceQualityStereo": "码率只影响你自己的传输；立体声输入保持原始双声道，下行按个人带宽调整。",
+    "screenShareRoute_auto": "自动选择（推荐）",
+    "screenShareRoute_cloudflare": "Cloudflare 中转",
+    "screenShareRouteAutoHint": "自动检查直连及可用中转；连接失败时重试线路，画质根据带宽持续调整。"
+  },
+  "en": {
+    "voiceQualityTitle": "Voice connection and quality",
+    "voiceQualityHint": "Adapts to your connection and prioritizes continuous voice on weak networks.",
+    "voiceQualityCurrent": "Current upload {{up}} / download {{down}} kbps",
+    "networkAdvanced": "Advanced network settings",
+    "voiceQualityMode": "Quality control",
+    "networkAuto": "Automatic (recommended)",
+    "networkManual": "Manual",
+    "voiceQualityBitrate": "Personal bitrate cap",
+    "voiceQualityPolicy": "Automatic preference",
+    "voiceQualityPolicy_quality": "Audio quality first",
+    "voiceQualityStereo": "Only your transport changes. Stereo input retains both channels; your download adapts independently.",
+    "screenShareRoute_auto": "Automatic (recommended)",
+    "screenShareRoute_cloudflare": "Cloudflare relay",
+    "screenShareRouteAutoHint": "Checks direct and relay connectivity, retries failed routes and adapts video to available bandwidth."
+  },
+  "de": {
+    "voiceQualityTitle": "Sprachverbindung und Qualität",
+    "voiceQualityHint": "Passt sich Ihrer Verbindung an und priorisiert flüssige Sprache.",
+    "voiceQualityCurrent": "Upload {{up}} / Download {{down}} kbit/s",
+    "networkAdvanced": "Erweiterte Netzwerkeinstellungen",
+    "voiceQualityMode": "Qualitätsregelung",
+    "networkAuto": "Automatisch (empfohlen)",
+    "networkManual": "Manuell",
+    "voiceQualityBitrate": "Persönliche Bitratengrenze",
+    "voiceQualityPolicy": "Automatische Präferenz",
+    "voiceQualityPolicy_quality": "Klangqualität bevorzugen",
+    "voiceQualityStereo": "Nur Ihre Übertragung wird angepasst. Der Stereoeingang behält beide Kanäle; der Download wird unabhängig angepasst.",
+    "screenShareRoute_auto": "Automatisch (empfohlen)",
+    "screenShareRoute_cloudflare": "Cloudflare-Relay",
+    "screenShareRouteAutoHint": "Prüft direkte und Relay-Verbindungen, wiederholt fehlgeschlagene Wege und passt die Bildqualität an."
+  },
+  "ru": {
+    "voiceQualityTitle": "Голосовое соединение и качество",
+    "voiceQualityHint": "Автоматическая настройка для непрерывного голоса в слабой сети.",
+    "voiceQualityCurrent": "Отправка {{up}} / приём {{down}} кбит/с",
+    "networkAdvanced": "Расширенные настройки сети",
+    "voiceQualityMode": "Управление качеством",
+    "networkAuto": "Автоматически (рекомендуется)",
+    "networkManual": "Вручную",
+    "voiceQualityBitrate": "Личный предел битрейта",
+    "voiceQualityPolicy": "Приоритет настройки",
+    "voiceQualityPolicy_quality": "Приоритет качества звука",
+    "voiceQualityStereo": "Меняется только ваша передача. Стереовход сохраняет оба канала; приём настраивается отдельно.",
+    "screenShareRoute_auto": "Автовыбор (рекомендуется)",
+    "screenShareRoute_cloudflare": "Ретранслятор Cloudflare",
+    "screenShareRouteAutoHint": "Проверяет прямые и промежуточные пути, повторяет соединение при сбое и адаптирует качество видео."
+  },
+  "ja": {
+    "voiceQualityTitle": "音声接続と音質",
+    "voiceQualityHint": "接続状況に合わせて調整し、弱い回線では音声の連続性を優先します。",
+    "voiceQualityCurrent": "送信 {{up}} / 受信 {{down}} kbps",
+    "networkAdvanced": "ネットワークの詳細設定",
+    "voiceQualityMode": "音質調整",
+    "networkAuto": "自動（推奨）",
+    "networkManual": "手動",
+    "voiceQualityBitrate": "個人のビットレート上限",
+    "voiceQualityPolicy": "自動調整の優先項目",
+    "voiceQualityPolicy_quality": "音質優先",
+    "voiceQualityStereo": "自分の通信だけを調整します。ステレオ入力は左右を維持し、受信は個別に調整されます。",
+    "screenShareRoute_auto": "自動選択（推奨）",
+    "screenShareRoute_cloudflare": "Cloudflare 中継",
+    "screenShareRouteAutoHint": "直接接続と中継を確認し、失敗時に再試行して帯域に応じて画質を調整します。"
+  }
+};
+for (const language of Object.keys(automaticNetworkTranslations) as Language[]) Object.assign(webClientTranslations[language]!, automaticNetworkTranslations[language]);
+
 export function getInitialLanguage(): Language {
   const stored = localStorage.getItem("webspeak:language");
   if (stored === "zh" || stored === "en" || stored === "de" || stored === "ru" || stored === "ja") return stored;

@@ -1,3 +1,7 @@
+import { hasGatewayChoices } from "../voice/gateway-routes.js";
+import { createVoiceRelay } from "../voice/voice-relay.js";
+import { createVoiceQuality } from "../voice/voice-quality.js";
+import type { VoiceQualitySettings } from "../../../src/shared/voice-quality.js";
 import { createMusicRequests } from "../voice/music-requests.js";
 import { createRemotePlayback } from "../voice/remote-playback.js";
 import { createMicrophoneTest } from "../voice/microphone-test.js";
@@ -214,6 +218,8 @@ export function useVoiceWebSocket() {
     onMessage: handleMessage,
     onAudio: handleAudioFrame,
     onClose(event) {
+      const previousChannel = channels.find(channel => channel.members?.some(member => member.id === state.tsClientId));
+      if (lastConnection && previousChannel) lastConnection.channel = String(previousChannel.id);
       releaseSessionResources();
       state.connected = false;
       state.connecting = false;
@@ -226,15 +232,30 @@ export function useVoiceWebSocket() {
       }
       clearMicrophoneError();
       clearAudioNotice();
+      if (event.code === 1006) scheduleGatewayRecovery();
     },
     onFailure({ code, detail, cause }) {
       state.connecting = false;
       state.errorCode = normalizedClientErrorCode(code, "REQUEST_FAILED");
       state.error = cause instanceof Error ? cause.message : joinTicketReason(state.errorCode, detail);
+      if (state.errorCode === "REQUEST_FAILED" || state.errorCode === "REQUEST_TIMEOUT") scheduleGatewayRecovery();
     },
   });
   const commands = createVoiceCommands({ socket: () => ws.value, generation: () => voiceConnection.generation });
   let lastConnection: { target: string; channel: string; nickname: string; serverPassword: string; identity?: string; rememberIdentity: boolean; accelerated: boolean; accelerationRelayId: string } | null = null;
+  let gatewayRetry: ReturnType<typeof setTimeout> | undefined;
+  let gatewayRetryCount = 0, gatewayRetryWindow = 0;
+  function scheduleGatewayRecovery() {
+    if (!hasGatewayChoices() || !lastConnection) return;
+    if (Date.now() - gatewayRetryWindow > 120000) { gatewayRetryWindow = Date.now(); gatewayRetryCount = 0; }
+    if (++gatewayRetryCount > 3) return;
+    const owner = voiceConnection.generation;
+    clearTimeout(gatewayRetry); state.reconnecting = true; state.reconnectAttempt = gatewayRetryCount;
+    state.error = ""; state.errorCode = "";
+    gatewayRetry = setTimeout(() => {
+      if (owner === voiceConnection.generation && lastConnection) reconnectNow();
+    }, Math.min(12000, 3000 * gatewayRetryCount));
+  }
   const identityMaterial = ref("");
   const storedVolumesByUid = reactive<Record<string, number>>({});
   let microphoneStartPromise: Promise<void> | null = null;
@@ -425,6 +446,36 @@ export function useVoiceWebSocket() {
     send: (source, sequence) => source.socket.send(JSON.stringify({ type: "audioStatsProbe", payload: { sequence } })),
   });
 
+  const voiceRelay = createVoiceRelay({
+    ready: () => state.connected && !webrtc.active && ws.value?.readyState === WebSocket.OPEN,
+    send: message => ws.value?.send(JSON.stringify(message)),
+    audio: handleAudioFrame,
+    baseline: async () => {
+      const started = performance.now();
+      const sample = await audioDiagnostics.measure();
+      return sample ? performance.now() - started : 1800;
+    },
+  });
+  const voiceRelayRoute = voiceRelay.route;
+  function voiceBufferedAmount(): number { return voiceRelay.metrics()?.bufferedAmount ?? ws.value?.bufferedAmount ?? 0; }
+  function sendVoicePacket(packet: Uint8Array) {
+    if (!voiceRelay.sendAudio(packet)) ws.value?.send(packet.slice().buffer);
+  }
+  const voiceQuality = createVoiceQuality({
+    socket: () => ws.value,
+    send: (type, payload) => sendCmd(type, payload),
+    measure: () => audioDiagnostics.measure(),
+    routeMetrics: () => voiceRelay.metrics(),
+    canSend: () => Boolean(state.connected && !microphoneMuted.value && !microphoneTestActive.value && !webrtc.active
+      && activeCaptureChannels === 1 && ws.value?.readyState === WebSocket.OPEN && voiceBufferedAmount() < 2048),
+    sendAudio: sendVoicePacket,
+  });
+  const voiceQualitySettings = voiceQuality.settings, voiceQualityStatus = voiceQuality.status;
+  function setVoiceQuality(settings: VoiceQualitySettings) {
+    voiceQuality.set(settings);
+    void saveLocalPreferences({ schemaVersion: 1, voiceQuality: { ...voiceQualitySettings.value } }).catch(() => undefined);
+  }
+
   async function saveAudioPreferences(): Promise<void> {
     await saveLocalPreferences({
       schemaVersion: 1,
@@ -458,6 +509,7 @@ export function useVoiceWebSocket() {
   }
 
   const audioPreferencesReady = loadLocalPreferences().then((preferences) => {
+    voiceQuality.restore(preferences.voiceQuality);
     if (!inputDeviceTouched) {
       if (!selectedInputDeviceId.value) selectedInputDeviceId.value = preferences.preferredInputDeviceId ?? preferences.inputDeviceId ?? "";
       committedInputDeviceId = selectedInputDeviceId.value;
@@ -695,6 +747,7 @@ export function useVoiceWebSocket() {
       && socket?.readyState === WebSocket.OPEN
       && (activeCaptureChannels === 2 || voxGate(input));
     if (!shouldSend) {
+      voiceQuality.invalidate();
       accumLen = 0;
       if (microphoneMuted.value) {
         voxAttack = 0;
@@ -706,7 +759,7 @@ export function useVoiceWebSocket() {
       accumLen = 0;
       return;
     }
-    if (!peerVoiceEnabled.value && socket.bufferedAmount > maxBufferedBytes) {
+    if (!peerVoiceEnabled.value && voiceBufferedAmount() > maxBufferedBytes) {
       accumLen = 0;
       return;
     }
@@ -731,7 +784,7 @@ export function useVoiceWebSocket() {
       if (!whisperActive.value) peerVoice.sendPcm(frame, activeCaptureChannels);
       // Direct peers must keep receiving when the TCP uplink is congested.
       // Discard the stale fallback frame instead of accumulating TCP latency.
-      if (socket.bufferedAmount <= maxBufferedBytes) socket.send(frame.buffer);
+      if (voiceBufferedAmount() <= maxBufferedBytes && !(activeCaptureChannels === 1 && voiceQuality.push(frame))) sendVoicePacket(new Uint8Array(frame.buffer));
       offset += frameSamples;
     }
     if (offset > 0) markSpeaking(state.tsClientId);
@@ -1027,7 +1080,7 @@ export function useVoiceWebSocket() {
       target, nickname, channel, serverPassword,
       ...(inviteToken ? { invite: inviteToken } : {}),
       ...(accelerated ? { accelerated: true, ...(accelerationRelayId ? { accelerationRelayId } : {}) } : {}),
-      ...(rememberIdentity && identity ? { identity } : {}),
+      ...(identity ? { identity } : {}),
       ...(rememberIdentity ? { rememberIdentity: true } : {}),
     }), audioPreferencesReady);
   }
@@ -1096,6 +1149,7 @@ export function useVoiceWebSocket() {
   }
 
   function disconnect(preserveConnection = false): void {
+    clearTimeout(gatewayRetry);
     const keepRememberedIdentity = lastConnection?.rememberIdentity === true;
     if (!preserveConnection) lastConnection = null;
     voiceConnection.stop(() => releaseSessionResources(!preserveConnection));
@@ -1117,6 +1171,8 @@ export function useVoiceWebSocket() {
   /** All ways a session ends release the same owned media and pending work. */
   function releaseSessionResources(sendScreenStop = false): void {
     chatGeneration++;
+    voiceRelay.stop();
+    voiceQuality.stop();
     inputDeviceGeneration++;
     outputDeviceGeneration++;
     deviceListGeneration++;
@@ -1139,6 +1195,7 @@ export function useVoiceWebSocket() {
   }
 
   function handleMessage(raw: unknown): void {
+    if (voiceRelay.receive(raw)) return;
     const msg = parseServerMessage(raw);
     if (!msg || screenShare.handleMessage(msg) || sessionState.receive(msg)) return;
     if (msg.type === "peerVoiceRoster" || msg.type === "peerVoiceSignal") { peerVoice.handleMessage(msg); return; }
@@ -1159,6 +1216,8 @@ export function useVoiceWebSocket() {
         // as soon as the session is ready so a muted reconnect is visible to
         // native TeamSpeak users even before WebRTC negotiation completes.
         sendCmd("setMicrophoneMuted", { muted: microphoneMuted.value });
+        void voiceQuality.start(msg.voiceQualityAvailable === true);
+        voiceRelay.start(msg.screenShareRelays ?? [], msg.voiceRelayAvailable === true);
         peerVoice.connect(msg.peerVoiceAvailable === true, msg.screenShareIceServers);
         screenShare.setIceServers(msg.screenShareIceServers);
         screenShare.setRelays(msg.screenShareRelays);
@@ -1166,7 +1225,7 @@ export function useVoiceWebSocket() {
         sessionState.connected(msg);
         applyWhisperState(msg.whisperTargetIds, msg.whisperActive);
         if (typeof msg.identity === "string" && msg.identity.length <= 8192) {
-          identityMaterial.value = msg.identity;
+          if (lastConnection?.rememberIdentity) identityMaterial.value = msg.identity;
           if (lastConnection) lastConnection.identity = msg.identity;
         }
         if (wasReconnecting) {
@@ -1183,6 +1242,7 @@ export function useVoiceWebSocket() {
         }
         screenShare.refreshStreams();
         break;
+      case "voiceQuality": voiceQuality.receive(msg); break;
       case "musicResult": musicRequests.receive(msg); break;
       case "channelSwitched":
         musicRequests.clear();
@@ -1390,7 +1450,7 @@ export function useVoiceWebSocket() {
 
   function reconnectNow(): void {
     if (!lastConnection || state.connecting) return;
-    connect(lastConnection.target, lastConnection.channel, lastConnection.nickname, lastConnection.serverPassword, lastConnection.rememberIdentity ? identityMaterial.value || lastConnection.identity : "", lastConnection.rememberIdentity, "", lastConnection.accelerated, lastConnection.accelerationRelayId);
+    connect(lastConnection.target, lastConnection.channel, lastConnection.nickname, lastConnection.serverPassword, lastConnection.identity ?? "", lastConnection.rememberIdentity, "", lastConnection.accelerated, lastConnection.accelerationRelayId);
   }
 
   function setMicrophoneMuted(muted: boolean): void {
@@ -1571,6 +1631,7 @@ export function useVoiceWebSocket() {
 
   return {
     ...screenShare.api,
+    voiceQualitySettings, voiceQualityStatus, setVoiceQuality, voiceRelayRoute,
     ws,
     state,
     sessionEpoch: sessionState.epoch,

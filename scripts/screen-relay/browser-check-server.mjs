@@ -8,9 +8,10 @@ import { randomBytes } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const { createServer } = createRequire(path.join(root, 'web/package.json'))('vite');
-const gateway = new URL(process.env.SCREEN_TEST_GATEWAY);
+const localCoordinator = process.env.SCREEN_TEST_LOCAL === '1';
+const gateway = new URL(process.env.SCREEN_TEST_GATEWAY ?? 'https://fixture.invalid');
 if (gateway.protocol !== 'https:') throw new Error('HTTPS gateway required');
-const room = JSON.parse(await readFile(process.env.SCREEN_TEST_ROOM, 'utf8'));
+const room = localCoordinator ? {ownedByThisTask:true,channelPassword:'synthetic'} : JSON.parse(await readFile(process.env.SCREEN_TEST_ROOM, 'utf8'));
 if (!room.ownedByThisTask || !room.channelPassword) throw new Error('Owned protected test room required');
 const origin = 'http://127.0.0.1:8848';
 const suffix = randomBytes(4).toString('hex');
@@ -36,6 +37,14 @@ const wss = new WebSocketServer({ noServer: true });
 vite.httpServer.on('upgrade', (req, socket, head) => {
   if (req.url === '/screen-relay-check/ws' && req.headers.origin === origin) wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws));
 });
+const entries = new Map(), locals = new Map();
+let coordinator, relayConfig=[];
+if (localCoordinator) {
+  const {ScreenShareCoordinator}=await import('../../src/server/screen-share-coordinator.ts');
+  const {ScreenShareRelays,readScreenShareRelays}=await import('../../src/server/screen-share-relays.ts');
+  relayConfig=readScreenShareRelays();
+  coordinator=new ScreenShareCoordinator(entries,(id,message)=>{const ws=locals.get(id);if(ws?.readyState===1)ws.send(JSON.stringify(message));},{debug(){},warn(){}},new ScreenShareRelays(relayConfig));
+}
 let count = 0;
 let sequence = 0;
 wss.on('connection', async local => {
@@ -44,6 +53,14 @@ wss.on('connection', async local => {
   const id = sequence++;
   let remote;
   local.on('close', () => { count--; remote?.close(); });
+  if (localCoordinator) {
+    const key=String(id),entry={id:key,screenPeerId:key,nickname:'Synthetic '+key,target:{host:'fixture.invalid',port:9987},members:new Map(),channelTree:[],tsClient:{getClientId:()=>id+1,getChannelId:()=>1n,isConnected:()=>local.readyState===1,sendProtocolCommand:async()=>{}}};
+    entries.set(key,entry);locals.set(key,local);
+    local.send(JSON.stringify({type:'connected',tsClientId:id+1,screenShareRelays:relayConfig.map(r=>r.id)}));
+    local.on('message',raw=>{try{coordinator.handleMessage(entry,JSON.parse(raw.toString()),m=>local.send(JSON.stringify(m)));}catch{}});
+    local.on('close',()=>{coordinator.removePeer(key);entries.delete(key);locals.delete(key);});
+    return;
+  }
   try {
     const response = await fetch(new URL('/api/join-ticket', gateway), { method: 'POST', headers: { 'Content-Type': 'application/json', origin: gateway.origin }, body: JSON.stringify({ nickname: `Screen-Test-${id}-${suffix}`, rememberIdentity: false }), signal: AbortSignal.timeout(15000) });
     if (response.status !== 201) throw new Error('Ticket rejected: '+response.status);

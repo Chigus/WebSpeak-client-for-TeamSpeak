@@ -13,22 +13,22 @@ export interface ScreenShareIceServer {
   credential?: string;
 }
 
-export type ScreenShareRelayId = "macau" | "shenzhen";
-export type ScreenShareRoute = "p2p" | ScreenShareRelayId;
+export type ScreenShareRelayId = "macau" | "shenzhen" | "cloudflare";
+export type ScreenShareRoute = "auto" | "p2p" | ScreenShareRelayId;
 export interface ScreenShareRelayCredentials {
-  route: ScreenShareRelayId;
+  route: ScreenShareRelayId | "auto";
   expiresAt: number;
   iceServers: ScreenShareIceServer[];
 }
 export function isScreenShareRelayId(value: unknown): value is ScreenShareRelayId {
-  return value === "macau" || value === "shenzhen";
+  return value === "macau" || value === "shenzhen" || value === "cloudflare";
 }
 export function isScreenShareRoute(value: unknown): value is ScreenShareRoute {
-  return value === "p2p" || isScreenShareRelayId(value);
+  return value === "auto" || value === "p2p" || isScreenShareRelayId(value);
 }
 export function parseScreenShareRelayCredentials(value: unknown): ScreenShareRelayCredentials | null {
-  if (!isRecord(value) || !isScreenShareRelayId(value.route) || typeof value.expiresAt !== "number" || !Number.isSafeInteger(value.expiresAt)
-    || !Array.isArray(value.iceServers) || value.iceServers.length < 1 || value.iceServers.length > 4) return null;
+  if (!isRecord(value) || !(isScreenShareRelayId(value.route) || value.route === "auto") || typeof value.expiresAt !== "number" || !Number.isSafeInteger(value.expiresAt)
+    || !Array.isArray(value.iceServers) || (value.route !== "auto" && value.iceServers.length < 1) || value.iceServers.length > 8) return null;
   // Do not use the STUN fallback normalizer here: a forced relay must fail closed.
   const servers: ScreenShareIceServer[] = [];
   for (const raw of value.iceServers) {

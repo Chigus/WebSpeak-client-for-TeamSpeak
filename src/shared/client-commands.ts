@@ -1,5 +1,8 @@
+import { isVoiceQualitySettings, isVoiceNetworkFeedback, type VoiceQualitySettings, type VoiceNetworkFeedback } from "./voice-quality.js";
 /** Payloads stay correlated with their command names across both runtimes. */
 export interface ClientCommandPayloads {
+  setVoiceQuality: VoiceQualitySettings & { compressedUplink: boolean };
+  voiceNetworkFeedback: VoiceNetworkFeedback;
   switchChannel: { channelId: string; password?: string };
   moveClient: { clientId: number; channelId: string; password?: string };
   sendTextMessage: { message: string; channelId?: string };
@@ -36,12 +39,18 @@ export function parseClientCommand(raw: string): ClientCommandResult {
   if (value.requestId !== undefined && (typeof value.requestId !== "string" || value.requestId.length > 64)) {
     return { error: { code: "INVALID_REQUEST_ID", message: "请求标识无效" } };
   }
-  const supportedTypes = new Set(["switchChannel", "moveClient", "sendTextMessage", "sendServerMessage", "sendPrivateMessage", "poke", "setAway", "setWhisperTargets", "setWhisperActive", "setMicrophoneMuted", "setAccompanimentActive", "setMemberVolume", "latencyProbe", "audioStatsProbe"]);
+  const supportedTypes = new Set(["setVoiceQuality", "voiceNetworkFeedback", "switchChannel", "moveClient", "sendTextMessage", "sendServerMessage", "sendPrivateMessage", "poke", "setAway", "setWhisperTargets", "setWhisperActive", "setMicrophoneMuted", "setAccompanimentActive", "setMemberVolume", "latencyProbe", "audioStatsProbe"]);
   if (!supportedTypes.has(value.type)) {
     return { error: { code: "UNKNOWN_MESSAGE_TYPE", message: "不支持的消息类型" } };
   }
   if (!isRecord(value.payload)) {
     return { error: { code: "INVALID_PAYLOAD", message: "消息参数无效" } };
+  }
+  if (value.type === "setVoiceQuality" && (!isVoiceQualitySettings(value.payload) || typeof value.payload.compressedUplink !== "boolean")) {
+    return { error: { code: "INVALID_VOICE_QUALITY", message: "语音质量设置无效" } };
+  }
+  if (value.type === "voiceNetworkFeedback" && !isVoiceNetworkFeedback(value.payload)) {
+    return { error: { code: "INVALID_VOICE_FEEDBACK", message: "语音网络反馈无效" } };
   }
   if (value.type === "switchChannel" && (typeof value.payload.channelId !== "string" || !/^\d{1,20}$/.test(value.payload.channelId))) {
     return { error: { code: "INVALID_CHANNEL_ID", message: "频道标识无效" } };

@@ -5,7 +5,7 @@ import type { TSClient, TSRawNotification } from "./ts-client.js";
 import { formatTeamSpeakTarget, teamSpeakTargetKey, type TeamSpeakTarget } from "../domain/teamspeak-target.js";
 import type { ServerMessage } from "../shared/server-messages.js";
 import type { ChannelInfo } from "../shared/voice-models.js";
-import type { ScreenShareClientMessage, ScreenSharePeerSignal, ScreenShareStreamDescription, ScreenShareViewerDescription } from "../shared/screen-share.js";
+import type { ScreenShareRelayCredentials, ScreenShareClientMessage, ScreenSharePeerSignal, ScreenShareStreamDescription, ScreenShareViewerDescription } from "../shared/screen-share.js";
 
 export interface ScreenShareParticipant {
   id: string;
@@ -18,6 +18,7 @@ export interface ScreenShareParticipant {
 }
 
 interface ScreenStreamRecord extends ScreenShareStreamDescription {
+  relay?: ScreenShareRelayCredentials;
   targetKey: string;
   channelId: bigint;
   ownerEntryId: string;
@@ -39,6 +40,7 @@ function screenStreamKey(targetKey: string, streamId: string): string {
 
 /** Coordinates channel-scoped browser/native sharing; media stays peer-to-peer. */
 export class ScreenShareCoordinator {
+  private readonly pendingStarts = new Map<string, symbol>();
   private readonly screenStreams = new Map<string, ScreenStreamRecord>();
   private readonly discoveries = new Map<string, {
     pendingEntry: ScreenShareParticipant | undefined;
@@ -56,6 +58,7 @@ export class ScreenShareCoordinator {
     entry: ScreenShareParticipant,
     message: ScreenShareClientMessage,
     sendJson: (message: ServerMessage) => void,
+    preparedRelay?: ScreenShareRelayCredentials | null,
   ): void {
     if (message.type === "screenShareList") {
       sendJson({ type: "screenShareList", streams: this.listScreenStreamsFor(entry) });
@@ -67,7 +70,19 @@ export class ScreenShareCoordinator {
         sendJson({ type: "screenShareError", requestId: message.requestId, code: "SCREEN_SHARE_ALREADY_ACTIVE", message: "你已经在共享屏幕" });
         return;
       }
-      const relay = message.route && message.route !== "p2p" ? this.relays.issue(message.route) : null;
+      if ((message.route === "auto" || message.route === "cloudflare") && preparedRelay === undefined) {
+        if (this.pendingStarts.has(entry.id)) return;
+        const token = Symbol(); this.pendingStarts.set(entry.id, token);
+        const channel = entry.tsClient.getChannelId();
+        void this.relays.issueAsync(message.route).then(lease => {
+          if (this.pendingStarts.get(entry.id) !== token) return;
+          this.pendingStarts.delete(entry.id);
+          if (this.entries.get(entry.id) !== entry || !entry.tsClient.isConnected() || entry.tsClient.getChannelId() !== channel) return;
+          this.handleMessage(entry, message, sendJson, lease);
+        }).catch(() => { if (this.pendingStarts.get(entry.id) === token) this.pendingStarts.delete(entry.id); });
+        return;
+      }
+      const relay = preparedRelay !== undefined ? preparedRelay : message.route && message.route !== "p2p" && message.route !== "auto" ? this.relays.issue(message.route) : null;
       if (message.route && message.route !== "p2p" && !relay) {
         sendJson({ type: "screenShareError", requestId: message.requestId, code: "SCREEN_SHARE_RELAY_UNAVAILABLE", message: "所选屏幕共享服务器未配置，请选择其他线路" });
         return;
@@ -75,6 +90,7 @@ export class ScreenShareCoordinator {
       const stream: ScreenStreamRecord = {
         streamId: `screen-${randomUUID()}`,
         ...(message.route ? { route: message.route } : {}),
+        ...(relay ? { relay } : {}),
         source: "browser",
         ownerPeerId: entry.screenPeerId,
         ownerClientId: entry.tsClient.getClientId() || undefined,
@@ -132,6 +148,7 @@ export class ScreenShareCoordinator {
       stream.viewerCount = this.screenShareViewerCount(stream);
       sendJson({
         type: "screenShareJoined",
+        ...(stream.relay ? { relay: stream.relay } : {}),
         requestId: message.requestId,
         stream: this.describeScreenStream(stream),
         ownerPeerId: stream.ownerPeerId,
@@ -486,6 +503,7 @@ export class ScreenShareCoordinator {
   }
 
   removePeer(entryId: string): void {
+    this.pendingStarts.delete(entryId);
     for (const stream of [...this.screenStreams.values()]) {
       if (stream.ownerEntryId === entryId) {
         this.stopScreenStream(stream, "owner-disconnected");

@@ -33,6 +33,7 @@ class Peer {
   createOffer() { return Peer.offer(); }
   createAnswer() { return Promise.resolve({ type: "answer", sdp: "answer" }); }
   setLocalDescription(description: unknown) { this.localDescription = description; return Promise.resolve(); }
+  setConfiguration(configuration: RTCConfiguration) { this.configuration = configuration; }
   setRemoteDescription() { return Promise.resolve(); }
   addIceCandidate() { return Promise.resolve(); }
   addTransceiver() {}
@@ -72,12 +73,12 @@ function confirmStart(streamId: string, requestId = sent.findLast(message => mes
   controller.handleMessage({ type: "screenShareStarted", owner: true, requestId, stream: { ...remote, streamId } });
 }
 
-function relay(route: "macau" | "shenzhen") {
+function relay(route: "macau" | "shenzhen" | "cloudflare") {
   return { route, expiresAt: Date.now() + 60_000, iceServers: [{ urls: [`turn:${route}.example:3478`], username: "temporary", credential: "signed" }] };
 }
 test("publisher forces the chosen TURN node while viewers keep ordinary ICE", async () => {
-  controller.setRelays(["macau", "shenzhen"]);
-  for (const route of ["macau", "shenzhen"] as const) {
+  controller.setRelays(["macau", "shenzhen", "cloudflare"]);
+  for (const route of ["macau", "shenzhen", "cloudflare"] as const) {
     await controller.api.startScreenShare(true, { route });
     controller.handleMessage({ type: "screenShareStarted", owner: true, requestId: sent.at(-1)?.requestId, stream: { ...remote, route }, relay: relay(route) });
     controller.handleMessage({ type: "screenShareSignal", streamId: remote.streamId, fromPeerId: "viewer", signal: { kind: "offer", sdp: "offer" } });
@@ -89,6 +90,22 @@ test("publisher forces the chosen TURN node while viewers keep ordinary ICE", as
   controller.handleMessage({ type: "screenShareJoined", stream: { ...remote, route: "macau" } });
   await nextTurn();
   assert.deepEqual(Peer.instances.at(-1)?.configuration, { iceServers: [{ urls: "stun:ordinary.example" }] });
+  controller.handleMessage({ type: "screenShareJoined", stream: { ...remote, route: "macau" }, relay: relay("macau") });
+  await nextTurn();
+  assert.deepEqual(Peer.instances.at(-1)?.configuration, { iceServers: [{ urls: "stun:ordinary.example" }, ...relay("macau").iceServers], iceTransportPolicy: "all" });
+});
+
+test("automatic screen route retries through TURN without replacing capture", async () => {
+  const capture=stream(); Object.assign(navigator.mediaDevices,{getDisplayMedia:async()=>capture});
+  await controller.api.startScreenShare(true,{route:"auto"});
+  controller.handleMessage({type:"screenShareStarted",owner:true,requestId:sent.at(-1)?.requestId,stream:{...remote,route:"auto"},relay:{...relay("cloudflare"),route:"auto"}});
+  controller.handleMessage({type:"screenShareSignal",streamId:remote.streamId,fromPeerId:"viewer",signal:{kind:"offer",sdp:"offer"}});
+  await nextTurn(); const peer=Peer.instances.at(-1)!;
+  assert.equal(peer.configuration.iceTransportPolicy,"all");
+  peer.connectionState="failed";(peer as any).onconnectionstatechange();await nextTurn();
+  assert.equal(peer.configuration.iceTransportPolicy,"relay");assert.equal(capture.track.readyState,"live");assert.equal(Peer.instances.length,1);
+  assert.ok(sent.some((m:any)=>m.type==="screenShareSignal"&&m.signal.kind==="offer"));
+  controller.stopTransport(false);assert.equal(capture.track.readyState,"ended");
 });
 test("missing, expired or mismatched relay authorization releases capture without fallback", async () => {
   controller.setRelays(["macau"]);

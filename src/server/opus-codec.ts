@@ -76,6 +76,11 @@ export class OpusEncoder {
     return Buffer.isBuffer(encoded) ? encoded : Buffer.from(encoded);
   }
 
+  setBitrate(bitrate: number): void {
+    if (!this.codec) throw new Error("Opus codec is disposed");
+    this.codec.setBitrate(bitrate);
+  }
+
   decode(data: Buffer): Buffer {
     if (!this.codec) throw new Error("Opus codec is disposed");
     const decoded = this.codec.decode(data);
