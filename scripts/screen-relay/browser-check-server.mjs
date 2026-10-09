@@ -37,21 +37,25 @@ vite.httpServer.on('upgrade', (req, socket, head) => {
   if (req.url === '/screen-relay-check/ws' && req.headers.origin === origin) wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws));
 });
 let count = 0;
+let sequence = 0;
 wss.on('connection', async local => {
-  const id = count++;
-  if (id >= 2) { local.close(); return; }
+  if (count >= 2) { local.close(); return; }
+  count++;
+  const id = sequence++;
   let remote;
-  local.on('close', () => remote?.close());
+  local.on('close', () => { count--; remote?.close(); });
   try {
     const response = await fetch(new URL('/api/join-ticket', gateway), { method: 'POST', headers: { 'Content-Type': 'application/json', origin: gateway.origin }, body: JSON.stringify({ nickname: `Screen-Test-${id}-${suffix}`, rememberIdentity: false }), signal: AbortSignal.timeout(15000) });
-    if (response.status !== 201) throw new Error('Ticket rejected');
+    if (response.status !== 201) throw new Error('Ticket rejected: '+response.status);
     const ticket = await response.json();
+    if (local.readyState !== 1) return;
     const url = new URL('/ws/voice', gateway); url.protocol = 'wss:'; url.searchParams.set('ticket', ticket.ticket);
     remote = new WebSocket(url, { origin: gateway.origin, handshakeTimeout: 15000, perMessageDeflate: false });
     let connected, joined = false;
     remote.on('message', (raw, binary) => {
       if (binary) return;
       const message = JSON.parse(raw.toString());
+      if (message.type === 'error' || message.type === 'commandError') console.log(JSON.stringify({ participant: id, type: message.type, code: message.code }));
       if (message.type === 'connected') {
         connected = message;
         remote.send(JSON.stringify({ type: 'switchChannel', requestId: 'screen-test-room', payload: { channelId: String(room.channelId), password: room.channelPassword } }));
@@ -63,11 +67,11 @@ wss.on('connection', async local => {
       }
       if (joined && local.readyState === 1) local.send(raw.toString());
     });
-    remote.on('error', () => local.close()); remote.on('close', () => local.close());
+    remote.on('error', () => local.close()); remote.on('close', code => { console.log(JSON.stringify({ participant: id, closed: code })); local.close(); });
     local.on('message', raw => {
       const message = JSON.parse(raw.toString());
       if (joined && message.type?.startsWith('screenShare') && remote.readyState === 1) remote.send(raw.toString());
     });
-  } catch { local.close(); }
+  } catch (error) { console.log(JSON.stringify({ participant: id, error: error.message })); local.close(); }
 });
 console.log('Synthetic acceptance harness ready: '+origin+'/screen-relay-check');

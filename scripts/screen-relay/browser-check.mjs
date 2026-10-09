@@ -1,12 +1,33 @@
 import { createScreenShareController } from '/src/voice/screen-share.ts';
 const state = document.querySelector('#state'), result = document.querySelector('#result');
+const crossNetwork = location.hash === '#remote';
+const cases = crossNetwork ? [['macau', 'udp'], ['macau', 'tcp']] : [['p2p', null], ['shenzhen', 'udp'], ['shenzhen', 'tcp']];
+document.querySelector('#start').textContent = crossNetwork ? '开始澳门跨网往返测试' : '开始 P2P 与深圳线路测试';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function wait(check, label, timeout = 25000) {
   const until = Date.now() + timeout;
   while (!check()) { if (Date.now() > until) throw new Error(label); await delay(100); }
 }
 const realPeer = window.RTCPeerConnection, peers = [];
-window.RTCPeerConnection = class extends realPeer { constructor(config) { super(config); this.testConfig = config; peers.push(this); } };
+const diagnosticKeys = new Set(['id', 'type', 'localCandidateId', 'remoteCandidateId', 'address', 'port', 'candidateType', 'state', 'requestsSent', 'responsesReceived', 'requestsReceived', 'bytesSent', 'bytesReceived', 'relayProtocol']);
+window.RTCPeerConnection = class extends realPeer { constructor(config) {
+  super(config); this.testConfig = config; this.candidates = []; this.errors = []; this.samples = []; this.remoteCandidates = []; peers.push(this);
+  this.sampleTimer = setInterval(async () => { try {
+    this.samples = [[...(await this.getStats()).values()]
+      .filter(s => ['candidate-pair', 'local-candidate', 'remote-candidate'].includes(s.type))
+      .map(s => Object.fromEntries(Object.entries(s).filter(([key]) => diagnosticKeys.has(key))))];
+  } catch {} }, 2000);
+  this.addEventListener('icecandidate', e => { if (e.candidate) this.candidates.push({ type: e.candidate.type, address: e.candidate.address, port: e.candidate.port, protocol: e.candidate.protocol, relayProtocol: e.candidate.relayProtocol }); });
+  this.addEventListener('icecandidateerror', e => this.errors.push({ code: e.errorCode, text: e.errorText, url: e.url }));
+  if (crossNetwork) this.addEventListener('track', e => {
+    const video = document.querySelector('#remote');
+    const stream = video.srcObject ?? new MediaStream(); stream.addTrack(e.track); video.srcObject = stream;
+    void video.play().catch(() => {});
+  });
+}
+async addIceCandidate(c) { this.remoteCandidates.push(c?.candidate?.replace(/ ufrag .*/,'')); return super.addIceCandidate(c); }
+close() { clearInterval(this.sampleTimer); return super.close(); }
+};
 let protocol;
 function participant() {
   const socket = new WebSocket(`ws://${location.host}/screen-relay-check/ws`);
@@ -26,8 +47,8 @@ function participant() {
 }
 document.querySelector('#start').onclick = async event => {
   event.target.disabled = true;
-  const report = { status: 'running', scope: 'Production WSS and TURN nodes; two browser peers on one Macau Windows host; synthetic canvas and oscillator only.', cases: [] };
-  const owner = participant(), viewer = participant();
+  const report = { status: 'running', checkedAt: new Date().toISOString(), scope: crossNetwork ? 'Production WSS; Macau browser and Shenzhen RTP reflector; synthetic media crosses Macau TURN and returns for browser decoding.' : 'Production WSS and ICE configuration; two browser peers on one Macau Windows host; synthetic canvas and oscillator only.', cases: [] };
+  const owner = participant(), viewer = crossNetwork ? null : participant();
   const canvas = document.createElement('canvas'); canvas.width = 960; canvas.height = 540;
   const ctx = canvas.getContext('2d'); let frame = 0, tracks = [], audio;
   const timer = setInterval(() => { ctx.fillStyle = '#123c40'; ctx.fillRect(0, 0, 960, 540); ctx.fillStyle = '#92e3c4'; ctx.font = '42px sans-serif'; ctx.fillText('WebSpeak · '+state.textContent, 45, 100); ctx.fillRect(40 + frame++ % 800, 200, 80, 180); ctx.fillText('Frame '+frame, 45, 480); }, 66);
@@ -40,20 +61,22 @@ document.querySelector('#start').onclick = async event => {
   } });
   try {
     audio = new AudioContext(); await audio.resume();
-    await wait(() => owner.connected && viewer.connected, 'Protected channel connection');
+    await wait(() => owner.connected && (!viewer || viewer.connected), 'Protected channel connection');
     if (owner.controller.api.screenShareRelays.value.length !== 2) throw new Error('Both production nodes must be advertised');
-    for (const [route, transport] of [['p2p', null], ['macau', 'udp'], ['shenzhen', 'udp'], ['macau', 'tcp'], ['shenzhen', 'tcp']]) {
+    for (const [route, transport] of cases) {
       protocol = transport; state.textContent = `${route} ${transport ?? 'direct'}`;
       const start = peers.length;
       await owner.controller.api.startScreenShare(true, { route, maxWidth: 960, maxHeight: 540, maxFrameRate: 15 });
       await wait(() => owner.controller.api.screenShareActive.value, 'Publisher start: '+owner.controller.api.screenShareError.value);
       const streamId = owner.controller.api.screenShareActiveStreamId.value;
-      await wait(() => viewer.controller.api.screenShareStreams.some(s => s.streamId === streamId), 'Share announcement');
-      await viewer.controller.api.joinScreenShare(streamId);
-      await wait(() => viewer.controller.api.screenShareRemoteStream.value, 'Remote media: '+viewer.controller.api.screenShareError.value);
-      document.querySelector('#remote').srcObject = viewer.controller.api.screenShareRemoteStream.value;
+      if (viewer) {
+        await wait(() => viewer.controller.api.screenShareStreams.some(s => s.streamId === streamId), 'Share announcement');
+        await viewer.controller.api.joinScreenShare(streamId);
+        await wait(() => viewer.controller.api.screenShareRemoteStream.value, 'Remote media: '+viewer.controller.api.screenShareError.value);
+        document.querySelector('#remote').srcObject = viewer.controller.api.screenShareRemoteStream.value;
+      } else await wait(() => document.querySelector('#remote').srcObject, 'Cross-network return stream');
       await document.querySelector('#remote').play();
-      await wait(() => peers.slice(start).length === 2 && peers.slice(start).every(p => p.connectionState === 'connected'), 'ICE/DTLS connection');
+      await wait(() => peers.slice(start).length === (crossNetwork ? 1 : 2) && peers.slice(start).every(p => p.connectionState === 'connected'), 'ICE/DTLS connection');
       await delay(2200);
       const snapshots = await Promise.all(peers.slice(start).map(async p => {
         const stats = [...(await p.getStats()).values()];
@@ -69,14 +92,18 @@ document.querySelector('#start').onclick = async event => {
       if (route === 'p2p' && snapshots.some(s => s.local.type === 'relay')) throw new Error('P2P unexpectedly relayed');
       report.cases.push({ route, transport, passed: true, snapshots });
       result.textContent = JSON.stringify(report, null, 2);
-      viewer.controller.api.leaveScreenShare(); owner.controller.api.stopScreenShare();
-      await wait(() => !viewer.controller.api.screenShareStreams.some(s => s.streamId === streamId), 'Share cleanup');
+      viewer?.controller.api.leaveScreenShare(); owner.controller.api.stopScreenShare();
+      document.querySelector('#remote').srcObject = null;
+      await wait(() => !owner.controller.api.screenShareStreams.some(s => s.streamId === streamId), 'Share cleanup');
     }
-    report.status = 'passed'; state.textContent = '五条路径：视频及音频全部通过';
-  } catch (error) { report.status = 'failed'; report.error = error.message; state.textContent = '验证失败：'+error.message; }
+    report.status = 'passed'; state.textContent = `${cases.length} 条路径：视频及音频全部通过`;
+  } catch (error) {
+    report.status = 'failed'; report.error = error.message; state.textContent = '验证失败：'+error.message;
+    report.debug = peers.map(p => ({ policy: p.testConfig.iceTransportPolicy ?? 'all', connection: p.connectionState, ice: p.iceConnectionState, gathering: p.iceGatheringState, candidates: p.candidates, remoteCandidates:p.remoteCandidates,samples:p.samples, errors: p.errors }));
+  }
   finally {
-    owner.controller.stopTransport(true); viewer.controller.stopTransport(true);
-    owner.socket.close(); viewer.socket.close(); clearInterval(timer); tracks.forEach(t => t.stop()); await audio?.close();
+    owner.controller.stopTransport(true); viewer?.controller.stopTransport(true);
+    owner.socket.close(); viewer?.socket.close(); clearInterval(timer); tracks.forEach(t => t.stop()); await audio?.close();
     result.textContent = JSON.stringify(report, null, 2);
     await fetch('/screen-relay-check/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report) });
   }

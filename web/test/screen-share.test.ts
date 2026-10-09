@@ -120,6 +120,10 @@ test("unconfigured relay fails before capture and stale route acknowledgement ca
   controller.handleMessage({ type: "screenShareSignal", streamId: remote.streamId, fromPeerId: "viewer", signal: { kind: "offer", sdp: "offer" } });
   await nextTurn();
   assert.deepEqual(Peer.instances.at(-1)?.configuration.iceServers, relay("shenzhen").iceServers);
+  controller.handleMessage({ type: "screenShareViewerLeft", streamId: "old", viewerPeerId: "viewer" });
+  assert.equal(Peer.instances.at(-1)?.closed, false, "Old stream departure must not close the replacement peer");
+  controller.handleMessage({ type: "screenShareViewerLeft", streamId: remote.streamId, viewerPeerId: "viewer" });
+  assert.equal(Peer.instances.at(-1)?.closed, true, "The current stream departure must still close its peer");
 });
 
 test("cancelling a pending offer cannot send signaling or restore diagnostics after exit", async () => {

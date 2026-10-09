@@ -794,7 +794,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
         }
         break;
       case "screenShareViewerLeft":
-        if (typeof msg.viewerPeerId === "string") closeScreenSharePeer(msg.viewerPeerId);
+        if (msg.streamId === screenShareActiveStreamId.value && typeof msg.viewerPeerId === "string") closeScreenSharePeer(msg.viewerPeerId);
         break;
       case "screenShareLeft":
         if (screenShareViewingStreamId.value === String(msg.streamId || "")) leaveScreenShare();
