@@ -16,7 +16,14 @@ let peer, active, joined = false, iceServers = [], pendingIce = [], shuttingDown
 let completed = 0;
 const timeout = setTimeout(() => shutdown(), 240000);
 async function closePeer() { const old = peer; peer = undefined; pendingIce = []; active = undefined; await old?.close(); }
-async function shutdown() { if (shuttingDown) return; shuttingDown = true; clearTimeout(timeout); await closePeer(); socket.close(); }
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true; clearTimeout(timeout);
+  // This disposable test process must also end if a transport close stalls.
+  const finish = () => { socket.terminate(); process.exit(completed >= 2 ? 0 : 1); };
+  setTimeout(finish, 2500);
+  await closePeer(); finish();
+}
 socket.on('close', shutdown); socket.on('error', shutdown);
 socket.on('message', (raw, binary) => { if (!binary) void handle(JSON.parse(raw.toString())).catch(async error => { console.error(JSON.stringify({ failed: error.name })); await shutdown(); }); });
 async function handle(m) {
@@ -45,5 +52,5 @@ async function handle(m) {
     if (m.signal.kind === 'answer') { await current.setRemoteDescription({ type: 'answer', sdp: m.signal.sdp }); for (const c of pendingIce.splice(0)) await current.addIceCandidate(c); }
     if (m.signal.kind === 'iceCandidate') { const c = { candidate: m.signal.candidate, sdpMid: m.signal.sdpMid, sdpMLineIndex: m.signal.sdpMLineIndex }; if (current.remoteDescription) await current.addIceCandidate(c); else pendingIce.push(c); }
   }
-  if (m.type === 'screenShareStopped' && active?.streamId === m.streamId) { await closePeer(); if (++completed >= 2) await shutdown(); }
+  if (m.type === 'screenShareStopped' && active?.streamId === m.streamId) { if (++completed >= 2) await shutdown(); else await closePeer(); }
 }
