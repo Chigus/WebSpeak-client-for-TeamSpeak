@@ -1,18 +1,30 @@
 # WebSpeak · 简体中文
 
-> **Maintained fork:** `Chigus/WebSpeak-client-for-TeamSpeak`, branch `nas/macau`. Default Compose builds this checkout. For current Docker/source deployments and upgrades, follow [the fork deployment guide](./FORK_DEPLOYMENT.zh-CN.md). Release assets are snapshots and are not generated on every push.
+> **维护版 fork：** `Chigus/WebSpeak-client-for-TeamSpeak`，维护分支 `nas/macau`。基于原版 WebSpeak 0.2.6，新增双声道原音、双向三档降噪、网页语音 P2P 和 NAS / 中转发布工具。请先查看 [与原版的差异](./FORK_ADDITIONS.zh-CN.md) 和 [部署与更新指南](./FORK_DEPLOYMENT.zh-CN.md)。默认 Compose 构建当前源码，Release 下载包仅对应发布时的提交。
 
 [返回项目首页](../README.md) · [English](./README.en.md) · [Deutsch](./README.de.md) · [Русский](./README.ru.md) · [日本語](./README.ja.md)
 
 WebSpeak 是一个可自行部署的 TeamSpeak 3 / TeamSpeak 6 网页客户端与语音网关。用户无需安装桌面客户端即可从浏览器加入频道，管理员可以在控制台管理目标服务器、访问方式和运行状态。
 
-## 在线 Demo
+## 实例与中转
 
-地址：<https://webspeak.example.invalid>
+本 fork 的澳门直连与深圳中转配置见 [深圳语音中转](./SHENZHEN_RELAY.zh-CN.md)。文档中的域名和局域网地址属于该实例的部署示例；自行部署需要配置自己的 TeamSpeak 目标、域名、证书和网络。下载本仓库不会自动获得中转基础设施。
 
-公共 Demo 位于香港，网络和负载可能不稳定。延迟、断线或暂时不可用不代表自行部署后的实际表现。
+## 本 fork 新增 / 扩展
 
-## ✨ 特性
+| 能力 | 变化与使用入口 |
+| --- | --- |
+| 双声道原音 | 音频设置 → 输入模式 →「人头麦 / 立体声原音」；左右独立采集与播放，原音输入关闭自动处理，见 [立体声说明](./STEREO.zh-CN.md)。 |
+| 双向三档 RNNoise | 音频设置或音频栏分别设置输入、接收降噪及轻 / 中 / 重档位；接收默认关闭，见 [降噪说明](./PEER_VOICE_AND_DENOISING.zh-CN.md)。 |
+| 网页语音 P2P | 同频道的 2～5 位网页用户分别主动开启；原生客户端、未开启者、私语及失败回退仍通过服务器，见 [P2P 条件与限制](./PEER_VOICE_AND_DENOISING.zh-CN.md)。 |
+| 播放与编码改进 | 固定立体声 Opus 包大小，改善 WSS 抖动下的连续播放，限制积压音频。 |
+| 中转与部署 | 新增深圳 / 澳门 HTTPS/WSS 和 TS UDP 中转脚本、NAS Git 发布与回退、本 fork 的多架构镜像及对应源码归档，见 [部署指南](./FORK_DEPLOYMENT.zh-CN.md)。 |
+
+完整对照、原项目归属和验证边界见 [本 fork 相对原版的新增内容](./FORK_ADDITIONS.zh-CN.md)。
+
+## ✨ 原版已有能力
+
+以下能力继承自原项目，部分音频功能在本 fork 中另有上述扩展。
 
 | 能力 | 说明 |
 | --- | --- |
@@ -22,7 +34,7 @@ WebSpeak 是一个可自行部署的 TeamSpeak 3 / TeamSpeak 6 网页客户端�
 | 频道与成员 | 浏览频道树、查看实时成员状态并切换频道。 |
 | 实时语音 | 使用 Opus，支持兼容传输和可选的内置 WebRTC 低延迟传输。 |
 | 音频控制 | 选择麦克风与扬声器、调节音量、测试麦克风、闭麦、VOX 和成员独立音量。 |
-| 浏览器端降噪 | 提供可开关的麦克风降噪，在浏览器采集端处理，不增加服务器端音频处理压力。 |
+| 浏览器端降噪 | 原版已有麦克风降噪；本 fork 扩展为输入 / 接收独立三档 RNNoise，处理仍在浏览器端完成。 |
 | 消息与互动 | 支持频道消息、服务器消息、私聊、戳一戳和耳语目标。 |
 | 桌面端伴奏 | 在桌面浏览器选择带音频的窗口或标签页，将声音分享给当前频道。 |
 | 身份与访问 | 支持身份保持、访客自定义目标、可撤销/可过期邀请链接，以及 TeamSpeak 3 身份导入、转换、校验与导出。 |
@@ -54,11 +66,13 @@ WebSpeak 是一个可自行部署的 TeamSpeak 3 / TeamSpeak 6 网页客户端�
 
 ## 🧩 高级功能
 
-高级功能均为可选项；关闭时仍可使用兼容语音传输。配置入口在管理员控制台的“服务器”页，保存后对新连接生效。
+本节介绍原版已有的网关 WebRTC、中继和屏幕共享配置。高级功能均为可选项；关闭时仍可使用兼容语音传输。网关配置入口在管理员控制台的“服务器”页，保存后对新连接生效。新增的网页语音 P2P 由用户在音频设置中分别开启，见 [独立说明](./PEER_VOICE_AND_DENOISING.zh-CN.md)。
 
 ### 1. WebRTC 低延迟语音
 
 WebRTC 将浏览器语音切换到实时媒体通道，也支持桌面端伴奏。媒体服务由当前 WebSpeak 网关直接提供，不需要另设媒体服务器。
+
+**立体声注意：** 这个原有网关混音器仍为单声道。人头麦 / 双声道原音部署应保持该功能关闭，使用 WSS 或新增的网页语音 P2P；两个 WebRTC 相关开关不是同一个功能。
 
 1. 登录 `/admin`，打开“服务器”页的“高级参数”。
 2. 关闭 WebRTC 时设置 UDP 起止端口，默认范围为 `40000–40099`。

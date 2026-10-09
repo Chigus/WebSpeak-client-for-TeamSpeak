@@ -28,9 +28,24 @@
   </p>
 </div>
 
+## 相对原版新增的内容
+
+本仓库由 [EchoSixHIYA/WebSpeak-client-for-TeamSpeak](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak) 的 **WebSpeak 0.2.6** 派生，维护分支为 `nas/macau`，当前功能版本为 `0.2.6-stereo.5`。以下是本 fork 在原版基础上新增或扩展的内容；TeamSpeak 3/6 兼容、聊天、身份管理、皮肤、多语言和跨端 P2P 屏幕共享等能力沿用原项目。
+
+| 新增 / 扩展 | 本 fork 提供的变化 |
+| --- | --- |
+| 人头麦 / 立体声原音 | 独立采集、传输和播放左右声道，显示左右电平；TeamSpeak 路径使用双声道 Opus Music、192 kbps 固定码率。 |
+| 双向三档 RNNoise 降噪 | 自己的麦克风与自己听到的成员分别设置开关及轻 / 中 / 重档位；接收处理保留左右声道，模型失败回退原音。 |
+| 网页语音 P2P | 同网关、同服务器、同频道的 2～5 位网页用户主动开启后直连；失败回退服务器，原生 TeamSpeak 与私语仍走服务器。 |
+| 语音稳定性改进 | 固定立体声 Opus 包大小，改善 WSS 抖动下的连续播放，并限制播放与发送缓存。 |
+| 深圳 / 澳门中转工具 | 提供 HTTPS/WSS 与原生 TS UDP 中转配置、证书续期及可撤销路由器转发脚本；需部署自己的网络与域名。 |
+| fork 部署与发布 | 默认 Compose 构建本分支；本仓库 GHCR 提供 amd64/arm64 镜像及提交 SHA 标签，另有 NAS Git 发布、回退和对应源码下载。 |
+
+查看 [完整新增内容、使用入口与限制](./docs/FORK_ADDITIONS.zh-CN.md)。立体声原音绕过输入降噪；原有网关 WebRTC 混音器仍为单声道。网页语音 P2P 默认关闭，有额外上行开销，也不经过 TeamSpeak 的发言权过滤，具体适用条件见详细文档。
+
 ## 本 fork 的部署与更新
 
-维护分支为 `nas/macau`。本 fork 增加双声道原音、双向三档 RNNoise 降噪、网页 P2P 和深圳/澳门部署工具。所有最新改动以该分支的提交为准。
+所有最新改动以 `nas/macau` 分支的提交为准。
 
 [部署与更新指南](./docs/FORK_DEPLOYMENT.zh-CN.md) · [双向降噪与 P2P](./docs/PEER_VOICE_AND_DENOISING.zh-CN.md) · [NAS 发布流程](./docs/NAS_GIT_DEPLOYMENT.zh-CN.md)
 
@@ -52,6 +67,7 @@ docker compose up -d --build
 
 ## 文档 · Documentation
 
+- [本 fork 相对原版的新增内容](./docs/FORK_ADDITIONS.zh-CN.md)
 - [简体中文](./docs/README.zh-CN.md)
 - [English](./docs/README.en.md)
 - [Deutsch](./docs/README.de.md)
@@ -86,7 +102,7 @@ Ein plattformübergreifender Musikbot für TeamSpeak 3/6 mit Netease Cloud Music
 
 ## Contributors · 贡献者
 
-感谢通过 PR 改进 WebSpeak 的贡献者。以下按 GitHub 的合并记录列出；上方 0.2.6 摘要只描述本版本实际纳入的改动。
+感谢原项目作者和通过 PR 改进 WebSpeak 的贡献者。以下按原项目的 GitHub 合并记录列出；本 fork 的新增内容单独列在上方和详细文档中。
 
 - [LainHE](https://github.com/LainHE) — [PR #2](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pull/2) 改进浏览器端报错翻译；[PR #8](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pull/8) 修正缩放、浮动布局和首页脚注。
 - [TimmySheep](https://github.com/TimmySheep) — [已合并 PR #13、#15–#24](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/pulls?q=is%3Apr+is%3Amerged+author%3ATimmySheep)，涉及 TS6 既有屏幕共享发现、屏幕比例、移动端语音/常亮/皮肤菜单、身份频道选项、PWA/主题、聊天历史、成员音频状态和麦克风权限等改进。
