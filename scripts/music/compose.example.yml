@@ -1,0 +1,39 @@
+# Run with --project-directory pointing to a private runtime directory.
+# tsbot.env, data, logs and music-config.json must stay outside the source checkout.
+services:
+  voice-service:
+    image: ghcr.io/yichen11818/neteasetsbot-voice-service@sha256:67e89eea1c6f8eea78095e2ea8c19fb2c1ff7892c5121c36386fa89cb97ed654
+    restart: unless-stopped
+    env_file: tsbot.env
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./tmp:/app/tmp
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+  backend:
+    image: ghcr.io/yichen11818/neteasetsbot-backend@sha256:877b2d7600a3ec9137b61ada89d0c12e6f026ff1698a8c4b14d261773e8f5800
+    restart: unless-stopped
+    env_file: tsbot.env
+    environment:
+      TSBOT_VOICE_GRPC_ADDR: voice-service:50051
+      TSBOT_NETEASE_API_BASE: http://netease-api:3000
+      DATABASE_URL: sqlite:///./data/tsbot.db
+    ports: ["127.0.0.1:18009:8009"]
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./tmp:/app/tmp
+    depends_on: [voice-service, netease-api]
+    logging: *logging
+  web:
+    image: ghcr.io/yichen11818/neteasetsbot-web@sha256:f87b9318cfcfa762bbcc6b39d8fb847108bc27c6cfd304bc32aa21d9e1fd7863
+    restart: unless-stopped
+    ports: ["127.0.0.1:18080:8080"]
+    depends_on: [backend]
+    logging: *logging
+  netease-api:
+    image: webspeak-netease-api:4.32.0
+    restart: unless-stopped
+    logging: *logging
