@@ -37,7 +37,7 @@
       >
         <label class="screen-share-route-field">
           <span>{{ t("screenShareRoute") }}</span>
-          <select v-model="route" :aria-label="t('screenShareRoute')" aria-describedby="screen-share-route-hint">
+          <select v-model="route" :disabled="sharing" :aria-label="t('screenShareRoute')" aria-describedby="screen-share-route-hint">
             <option v-for="option in routeOptions" :key="option.value" :value="option.value" :disabled="!option.available">
               {{ t(option.label) }}{{ option.available ? "" : ` · ${t("screenShareRouteUnconfigured")}` }}
             </option>
@@ -48,6 +48,7 @@
           ><span>{{ t("screenShareResolution") }}</span
           ><select
             v-model="screenShareResolutionPreset"
+            :disabled="sharing"
             :aria-label="t('screenShareResolution')"
             ><option
               v-for="option in screenShareResolutionOptions"
@@ -61,6 +62,7 @@
           ><span>{{ t("screenShareFrameRate") }}</span
           ><select
             v-model.number="screenShareFrameRate"
+            :disabled="sharing"
             :aria-label="t('screenShareFrameRate')"
             ><option
               v-for="fps in screenShareFrameRateOptions"
@@ -70,11 +72,33 @@
             ></select
           ></label
         >
+        <label class="screen-share-route-field">
+          <span>{{ t("screenShareBitrateMode") }}</span>
+          <select v-model="bitrateMode" :disabled="applying" :aria-label="t('screenShareBitrateMode')">
+            <option value="auto">{{ t("screenShareBitrateAuto") }}</option>
+            <option value="manual">{{ t("screenShareBitrateManual") }}</option>
+          </select>
+        </label>
+        <label v-if="bitrateMode === 'manual'" class="screen-share-route-field">
+          <span>{{ t("screenShareBitrateLimit") }}</span>
+          <select v-model.number="bitrateMbps" :disabled="applying" :aria-label="t('screenShareBitrateLimit')" aria-describedby="screen-share-bitrate-hint">
+            <option v-for="rate in bitrateOptions" :key="rate" :value="rate">{{ rate }} Mbps</option>
+          </select>
+          <small id="screen-share-bitrate-hint">{{ t("screenShareBitrateManualHint") }}</small>
+        </label>
+        <label v-else class="screen-share-route-field">
+          <span>{{ t("screenShareBitratePolicy") }}</span>
+          <select v-model="bitratePolicy" :disabled="applying" :aria-label="t('screenShareBitratePolicy')" aria-describedby="screen-share-bitrate-hint">
+            <option v-for="policy in bitratePolicies" :key="policy" :value="policy">{{ t(`screenShareBitratePolicy_${policy}`) }}</option>
+          </select>
+          <small id="screen-share-bitrate-hint">{{ t(`screenShareBitrateHint_${bitratePolicy}`) }}</small>
+        </label>
       </div>
+      <p v-if="bitrateApplyError" class="screen-share-bitrate-error" role="alert">{{ t("screenShareBitrateApplyError") }}</p>
       <p
         class="screen-share-settings-note"
         data-ws-part="voice.screen-share-settings.note"
-        >{{ t("screenShareSettingsNote") }}</p
+        >{{ t(sharing ? "screenShareBitrateLiveHint" : "screenShareSettingsNote") }}</p
       >
       <footer
         class="screen-share-settings-footer"
@@ -87,13 +111,13 @@
         ><button
           type="button"
           class="primary-button screen-share-settings-start"
-          :disabled="!routeAvailable"
-          @click="startScreenShareWithSettings"
+          :disabled="applying || (!sharing && !routeAvailable)"
+          @click="sharing ? applyBitrate() : startScreenShareWithSettings()"
           ><Icon
             name="monitor"
             :size="14"
           />
-          {{ t("startScreenShare") }}</button
+          {{ t(applying ? "screenShareBitrateApplying" : sharing ? "screenShareBitrateApply" : "startScreenShare") }}</button
         ></footer
       >
     </section>
@@ -105,7 +129,8 @@ import { ref } from "vue";
 import Icon from "../Icon.vue";
 import { useDialogFocus } from "../../composables/useDialogFocus.js";
 import type { useWebClientScreenShare } from "../../composables/useWebClientScreenShare.js";
-const props = defineProps<{ model: Pick<ReturnType<typeof useWebClientScreenShare>, "resolutionOptions" | "frameRateOptions" | "resolutionPreset" | "frameRate" | "startWithSettings" | "route" | "routeOptions" | "routeAvailable">; t: (key: string) => string }>();
+const props = defineProps<{ model: Pick<ReturnType<typeof useWebClientScreenShare>, "resolutionOptions" | "frameRateOptions" | "resolutionPreset" | "frameRate" | "startWithSettings" | "route" | "routeOptions" | "routeAvailable" | "sharing" | "bitrateMode" | "bitrateMbps" | "bitratePolicy" | "bitrateOptions" | "bitratePolicies" | "applying" | "bitrateApplyError" | "applyBitrate">; t: (key: string) => string }>();
+const { sharing, bitrateMode, bitrateMbps, bitratePolicy, bitrateOptions, bitratePolicies, applying, bitrateApplyError, applyBitrate } = props.model;
 const { route, routeOptions, routeAvailable } = props.model;
 const { resolutionOptions: screenShareResolutionOptions, frameRateOptions: screenShareFrameRateOptions, resolutionPreset: screenShareResolutionPreset, frameRate: screenShareFrameRate, startWithSettings: startScreenShareWithSettings } = props.model;
 const emit = defineEmits<{ close: [] }>();
@@ -116,4 +141,16 @@ const { onDialogKeydown } = useDialogFocus(dialog, () => emit("close"));
 <style scoped>
 .screen-share-route-field { grid-column: 1 / -1; }
 .screen-share-route-field small { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.screen-share-settings-modal { max-height: calc(100dvh - 40px); overflow-y: auto; }
+.screen-share-settings-modal .screen-share-settings-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.screen-share-settings-modal .screen-share-settings-fields label { font-size: 13px; }
+.screen-share-settings-modal .screen-share-settings-fields select { min-height: 40px; font-size: 14px; }
+.screen-share-settings-modal .screen-share-settings-heading p,
+.screen-share-settings-modal .screen-share-settings-note { font-size: 12px; line-height: 1.6; }
+.screen-share-settings-fields select:disabled { opacity: 0.65; cursor: not-allowed; }
+.screen-share-bitrate-error { color: var(--danger, #a52c2c); font-size: 13px; line-height: 1.6; }
+@media (max-width: 600px) {
+  .screen-share-settings-modal .screen-share-settings-fields select { min-height: 44px; font-size: 16px; }
+  .screen-share-route-field small { font-size: 14px; }
+}
 </style>

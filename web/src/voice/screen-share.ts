@@ -1,11 +1,12 @@
 import { reactive, ref } from "vue";
+import { createScreenShareEncoder, normalizeScreenShareBitrate, type ScreenShareBitrateSettings, type ScreenShareBitrateMode, type ScreenShareBitratePolicy, type ScreenShareBitrateReason } from "./screen-share-bitrate.js";
 import { isScreenShareRelayId, parseScreenShareRelayCredentials, type ScreenShareRelayCredentials, type ScreenShareRelayId, type ScreenShareRoute } from "../../../src/shared/screen-share.js";
 import { parseScreenShareStream, parseScreenShareViewers, type ServerMessage } from "../../../src/shared/server-messages.js";
 import { normalizeScreenShareIceServers, type ScreenShareIceServer, type ScreenShareClientMessage, type ScreenShareStreamDescription as ScreenShareStream, type ScreenSharePeerSignal as ScreenShareSignal } from "../../../src/shared/screen-share.js";
 
 const SCREEN_SHARE_NEGOTIATION_TIMEOUT_MS = 15_000;
 
-export interface ScreenShareOutputSettings {
+export interface ScreenShareOutputSettings extends ScreenShareBitrateSettings {
   route?: ScreenShareRoute;
   maxWidth?: number;
   maxHeight?: number;
@@ -38,6 +39,13 @@ export interface ScreenSharePeerStats {
   roundTripTimeMs: number | null;
   availableOutgoingBitrateKbps: number | null;
   qualityLimitationReason: string | null;
+  intervalLossPercent?: number | null;
+  targetBitrateKbps?: number | null;
+  bitrateMode?: ScreenShareBitrateMode;
+  bitratePolicy?: ScreenShareBitratePolicy;
+  bitrateReason?: ScreenShareBitrateReason;
+  bitrateControlSupported?: boolean | null;
+  bitrateStrategySupported?: boolean;
 }
 
 export interface ScreenShareWebRtcStats {
@@ -73,8 +81,9 @@ export function createScreenShareController(transport: ScreenShareTransport) {
   let screenShareOutputSettings: ScreenShareOutputSettings | null = null;
   const screenSharePeers = new Map<string, RTCPeerConnection>();
   const screenSharePeerRoles = new Map<string, "owner" | "viewer">();
+  const screenShareEncoders = new Map<string, ReturnType<typeof createScreenShareEncoder>>();
   const screenShareWebRtcStats = reactive<ScreenShareWebRtcStats>({ updatedAt: null, capture: null, peers: [] });
-  const screenShareStatsPrevious = new Map<string, { sampledAt: number; bytes: number | null; frames: number | null }>();
+  const screenShareStatsPrevious = new Map<string, { sampledAt: number; mediaId: string | null; bytes: number | null; frames: number | null; lost: number | null; packets: number | null }>();
   let screenShareStatsTimer: ReturnType<typeof setInterval> | null = null;
   let screenShareStatsCollecting = false;
   let screenShareStatsGeneration = 0;
@@ -143,6 +152,13 @@ export function createScreenShareController(transport: ScreenShareTransport) {
         if (type === "candidate-pair" && (stats.selected === true || stats.nominated === true || screenShareStatsString(stats, "state") === "succeeded")) candidatePairStats = stats;
       });
 
+      const mediaCandidates = [...records.values()].filter(stats => stats.type === (role === "owner" ? "outbound-rtp" : "inbound-rtp") && screenShareVideoStatsKind(stats) === "video"
+        && screenShareStatsString(records.get(String(stats.codecId)), "mimeType")?.toLowerCase() !== "video/rtx");
+      mediaStats = mediaCandidates.sort((a, b) => (screenShareStatsNumber(b, role === "owner" ? "bytesSent" : "bytesReceived") ?? 0) - (screenShareStatsNumber(a, role === "owner" ? "bytesSent" : "bytesReceived") ?? 0))[0] ?? mediaStats;
+      if (role === "owner") remoteInboundStats = records.get(String(mediaStats?.remoteId))
+        ?? [...records.values()].find(stats => stats.type === "remote-inbound-rtp" && stats.localId === mediaStats?.id);
+      const transportStats = records.get(String(mediaStats?.transportId)) ?? [...records.values()].find(stats => stats.type === "transport" && stats.selectedCandidatePairId);
+      candidatePairStats = records.get(String(transportStats?.selectedCandidatePairId)) ?? candidatePairStats;
       const codecId = screenShareStatsString(mediaStats, "codecId");
       const codecStats = codecId ? records.get(codecId) : undefined;
       const localCandidateId = screenShareStatsString(candidatePairStats, "localCandidateId");
@@ -154,7 +170,9 @@ export function createScreenShareController(transport: ScreenShareTransport) {
         ?? screenShareStatsNumber(mediaStats, role === "owner" ? "framesSent" : "framesReceived");
       const bytes = screenShareStatsNumber(mediaStats, role === "owner" ? "bytesSent" : "bytesReceived");
       const now = performance.now();
-      const previous = screenShareStatsPrevious.get(peerId);
+      const prior = screenShareStatsPrevious.get(peerId);
+      const mediaId = screenShareStatsString(mediaStats, "id");
+      const previous = prior?.mediaId === mediaId ? prior : undefined;
       const elapsedMs = previous ? now - previous.sampledAt : 0;
       const derivedFrameRate = previous && elapsedMs >= 250 && frames !== null && previous.frames !== null
         ? Math.max(0, ((frames - previous.frames) * 1_000) / elapsedMs)
@@ -162,17 +180,21 @@ export function createScreenShareController(transport: ScreenShareTransport) {
       const derivedBitrateKbps = previous && elapsedMs >= 250 && bytes !== null && previous.bytes !== null
         ? Math.max(0, ((bytes - previous.bytes) * 8) / elapsedMs)
         : null;
-      screenShareStatsPrevious.set(peerId, { sampledAt: now, bytes, frames });
-
       const packetsLost = screenShareStatsNumber(remoteStats ?? mediaStats, "packetsLost");
       const packetsTransferred = screenShareStatsNumber(mediaStats, role === "owner" ? "packetsSent" : "packetsReceived");
-      const packetsTotal = packetsTransferred === null || packetsLost === null ? null : packetsTransferred + packetsLost;
-      const lossPercent = packetsTotal && packetsTotal > 0 && packetsLost !== null ? (packetsLost / packetsTotal) * 100 : null;
+      const packetsTotal = packetsTransferred === null || packetsLost === null ? null : packetsTransferred + (role === "viewer" ? Math.max(0, packetsLost) : 0);
+      const lossPercent = packetsTotal && packetsTotal > 0 && packetsLost !== null ? Math.min(100, Math.max(0, packetsLost / packetsTotal * 100)) : null;
+      const lostDelta = previous?.lost != null && packetsLost !== null ? packetsLost - previous.lost : null;
+      const packetDelta = previous?.packets != null && packetsTransferred !== null ? packetsTransferred - previous.packets : null;
+      const intervalTotal = packetDelta === null ? null : packetDelta + (role === "viewer" ? Math.max(0, lostDelta ?? 0) : 0);
+      const intervalLossPercent = elapsedMs >= 750 && intervalTotal !== null && intervalTotal > 0 && lostDelta !== null && lostDelta >= 0
+        ? Math.min(100, lostDelta / intervalTotal * 100) : null;
+      screenShareStatsPrevious.set(peerId, { sampledAt: now, mediaId, bytes, frames, lost: packetsLost, packets: packetsTransferred });
       const currentRoundTripTime = screenShareStatsNumber(remoteStats, "roundTripTime") ?? screenShareStatsNumber(candidatePairStats, "currentRoundTripTime");
       const jitter = screenShareStatsNumber(remoteStats ?? mediaStats, "jitter");
       const directFrameRate = screenShareStatsNumber(mediaStats, "framesPerSecond") ?? screenShareStatsNumber(trackStats, "framesPerSecond");
       const directBitrateKbps = screenShareStatsNumber(mediaStats, "bitrate") !== null ? (screenShareStatsNumber(mediaStats, "bitrate") as number) / 1_000 : null;
-      return {
+      const sample: ScreenSharePeerStats = {
         peerId,
         role,
         direction: role === "owner" ? "outbound" : "inbound",
@@ -187,6 +209,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
         packetsLost,
         packetsTotal,
         lossPercent,
+        intervalLossPercent,
         framesDropped: screenShareStatsNumber(mediaStats, "framesDropped") ?? screenShareStatsNumber(trackStats, "framesDropped"),
         jitterMs: jitter === null ? null : jitter * 1_000,
         roundTripTimeMs: currentRoundTripTime === null ? null : currentRoundTripTime * 1_000,
@@ -195,6 +218,12 @@ export function createScreenShareController(transport: ScreenShareTransport) {
           : (screenShareStatsNumber(candidatePairStats, "availableOutgoingBitrate") as number) / 1_000,
         qualityLimitationReason: screenShareStatsString(mediaStats, "qualityLimitationReason"),
       };
+      const encoder = screenShareEncoders.get(peerId);
+      if (role === "owner" && encoder) {
+        if (peer.connectionState === "connected") encoder.sample({ ...sample, intervalLossPercent, sampledAt: now });
+        Object.assign(sample, encoder.snapshot());
+      }
+      return sample;
     } catch {
       return null;
     }
@@ -259,6 +288,8 @@ export function createScreenShareController(transport: ScreenShareTransport) {
     const peer = screenSharePeers.get(peerId);
     screenSharePeers.delete(peerId);
     screenSharePeerRoles.delete(peerId);
+    screenShareEncoders.get(peerId)?.dispose();
+    screenShareEncoders.delete(peerId);
     screenShareStatsPrevious.delete(peerId);
     screenSharePendingIce.delete(peerId);
     screenSharePeerStreams.get(peerId)?.getTracks().forEach(track => track.stop());
@@ -329,7 +360,11 @@ export function createScreenShareController(transport: ScreenShareTransport) {
     if (role === "owner") {
       for (const track of screenShareLocalStream?.getTracks() ?? []) {
         const sender = peer.addTrack(track, screenShareLocalStream!);
-        if (track.kind === "video") void configureScreenShareVideoSender(sender, track);
+        if (track.kind === "video") {
+          const encoder = createScreenShareEncoder(sender, track, () => isCurrentPeer(peerId, peer));
+          screenShareEncoders.set(peerId, encoder);
+          void encoder.configure(screenShareOutputSettings ?? {});
+        }
       }
     } else {
       peer.addTransceiver("video", { direction: "recvonly" });
@@ -377,37 +412,21 @@ export function createScreenShareController(transport: ScreenShareTransport) {
     return peer;
   }
 
-  async function configureScreenShareVideoSender(sender: RTCRtpSender, track: MediaStreamTrack): Promise<void> {
-    if (!sender.setParameters || track.kind !== "video") return;
-    try {
-      const settings = track.getSettings();
-      const requested = screenShareOutputSettings;
-      const sourceWidth = typeof settings.width === "number" && settings.width > 0 ? settings.width : null;
-      const sourceHeight = typeof settings.height === "number" && settings.height > 0 ? settings.height : null;
-      const targetWidth = requested?.maxWidth ?? sourceWidth;
-      const targetHeight = requested?.maxHeight ?? sourceHeight;
-      const scaleResolutionDownBy = sourceWidth && sourceHeight && targetWidth && targetHeight
-        ? Math.max(1, sourceWidth / targetWidth, sourceHeight / targetHeight)
-        : 1;
-      const sourceFrameRate = typeof settings.frameRate === "number" && settings.frameRate > 0 ? settings.frameRate : null;
-      const targetFrameRate = requested?.maxFrameRate
-        ? Math.max(1, Math.min(requested.maxFrameRate, sourceFrameRate ?? requested.maxFrameRate))
-        : sourceFrameRate;
-      const parameters = sender.getParameters();
-      const encodings = parameters.encodings?.length ? parameters.encodings : [{}];
-      const firstEncoding = { ...encodings[0] };
-      if (scaleResolutionDownBy > 1.01) firstEncoding.scaleResolutionDownBy = scaleResolutionDownBy;
-      if (targetFrameRate) firstEncoding.maxFramerate = targetFrameRate;
-      parameters.encodings = [firstEncoding, ...encodings.slice(1)];
-      // Prefer keeping motion smooth and let the encoder reduce detail/resolution
-      // before it throws away large numbers of frames under pressure.
-      parameters.degradationPreference = "maintain-framerate";
-      await sender.setParameters(parameters);
-    } catch {
-      // Older browsers may reject one of the optional sender parameters. The
-      // track remains usable and the diagnostics panel still exposes the real
-      // negotiated frame rate and dimensions.
-    }
+  function applyScreenShareContentHint(): void {
+    const track = screenShareLocalStream?.getVideoTracks()[0];
+    if (!track || !("contentHint" in track)) return;
+    const settings = normalizeScreenShareBitrate(screenShareOutputSettings ?? {});
+    try { track.contentHint = settings.bitrateMode === "auto" && settings.bitratePolicy === "smooth" ? "motion" : "detail"; }
+    catch { /* Content hints are optional; bitrate control remains independent. */ }
+  }
+
+  async function updateScreenShareBitrateSettings(settings: ScreenShareBitrateSettings): Promise<boolean> {
+    if (!screenShareActive.value) return false;
+    const generation = screenShareStartGeneration;
+    screenShareOutputSettings = { ...screenShareOutputSettings, ...normalizeScreenShareBitrate(settings) };
+    applyScreenShareContentHint();
+    const results = await Promise.all([...screenShareEncoders.values()].map(encoder => encoder.configure(screenShareOutputSettings!)));
+    return generation === screenShareStartGeneration && screenShareActive.value && results.every(Boolean);
   }
 
   function preferScreenShareCodecs(peer: RTCPeerConnection): void {
@@ -470,6 +489,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
       if (!isCurrentPeer(peerId, peer)) return;
       await peer.setLocalDescription(offer);
       if (!isCurrentPeer(peerId, peer)) return;
+      void screenShareEncoders.get(peerId)?.retry();
       armScreenSharePeerTimer(peerId);
       sendScreenShareMessage({
         type: "screenShareSignal",
@@ -524,6 +544,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
         if (!isCurrentPeer(fromPeerId, peer)) return;
         await peer.setLocalDescription(answer);
         if (!isCurrentPeer(fromPeerId, peer)) return;
+        void screenShareEncoders.get(fromPeerId)?.retry();
         sendScreenShareMessage({ type: "screenShareSignal", streamId, targetPeerId: fromPeerId, signal: { kind: "answer", sdp: answer.sdp ?? "" } });
       } catch {
         if (isCurrentPeer(fromPeerId, peer)) failScreenSharePeer(fromPeerId, "无法回复 TeamSpeak 屏幕共享的直连请求");
@@ -573,6 +594,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
         if (!isCurrentPeer(fromPeerId, peer)) return;
         await peer.setLocalDescription(answer);
         if (!isCurrentPeer(fromPeerId, peer)) return;
+        void screenShareEncoders.get(fromPeerId)?.retry();
         sendScreenShareMessage({ type: "screenShareSignal", streamId, targetPeerId: fromPeerId, signal: { kind: "answer", sdp: answer.sdp ?? "" } });
       } catch {
         if (isCurrentPeer(fromPeerId, peer)) failScreenSharePeer(fromPeerId, "共享端无法完成观看者的直连协商");
@@ -604,7 +626,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
     const startGeneration = ++screenShareStartGeneration;
     screenShareStarting.value = true;
     screenShareStartCancelled = false;
-    screenShareOutputSettings = settings ?? null;
+    screenShareOutputSettings = { ...settings, ...normalizeScreenShareBitrate(settings) };
     let acquiredStream: MediaStream | null = null;
     try {
       const stream = acquiredStream = await navigator.mediaDevices.getDisplayMedia({
@@ -627,9 +649,8 @@ export function createScreenShareController(transport: ScreenShareTransport) {
       }
       const videoTrack = stream.getVideoTracks()[0];
       if (!videoTrack) throw new Error("NO_VIDEO_TRACK");
-      const displaySurface = videoTrack.getSettings().displaySurface;
-      if ("contentHint" in videoTrack) videoTrack.contentHint = displaySurface === "browser" ? "detail" : "motion";
       screenShareLocalStream = stream;
+      applyScreenShareContentHint();
       screenShareRequestSequence = (screenShareRequestSequence + 1) % 1_000_000;
       screenSharePendingStartId = `screen-start-${screenShareRequestSequence}`;
       for (const track of stream.getTracks()) track.addEventListener("ended", () => {
@@ -838,6 +859,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
       screenShareRemoteVolume,
       screenShareWebRtcStats,
       startScreenShare,
+      updateScreenShareBitrateSettings,
       stopScreenShare,
       joinScreenShare,
       leaveScreenShare,

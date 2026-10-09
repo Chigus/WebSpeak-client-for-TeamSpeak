@@ -10,8 +10,8 @@ before(async () => {
   ({ useWebClientScreenShare } = await vite.ssrLoadModule("/src/composables/useWebClientScreenShare.ts"));
 });
 after(async () => { await vite?.close(); });
-function mount(t, initialStream = null) {
-  const listeners = new Set(), starts = [], storage = new Map(); let exits = 0, ui;
+function mount(t, initialStream = null, update = async () => true) {
+  const listeners = new Set(), starts = [], updates = [], storage = new Map(); let exits = 0, ui;
   class Element {}
   class Video extends Element { srcObject = null; volume = 1; plays = 0; async play() { this.plays++; } }
   const doc = { fullscreenElement: null, addEventListener: (_event, fn) => listeners.add(fn), removeEventListener: (_event, fn) => listeners.delete(fn), async exitFullscreen() { exits++; doc.fullscreenElement = null; for (const fn of listeners) fn(); } };
@@ -20,10 +20,10 @@ function mount(t, initialStream = null) {
     Object.defineProperty(globalThis, key, { configurable: true, value });
     t.after(() => { if (original) Object.defineProperty(globalThis, key, original); else delete globalThis[key]; });
   }
-  const viewing = shallowRef(true), stream = shallowRef(initialStream), volume = shallowRef(.4), streams = [], relays = shallowRef([]);
-  const app = renderer.createApp({ setup() { ui = useWebClientScreenShare({ relays, streams, viewing, viewingStreamId: shallowRef("s"), remoteStream: stream, remoteVolume: volume, error: shallowRef(""), errorCode: shallowRef(""), startScreenShare: async (...args) => starts.push(args), joinScreenShare() {}, leaveScreenShare() {}, nickname: shallowRef("Self"), avatarStyle: () => ({}), t: key => key }); return () => null; } });
+  const sharing = shallowRef(false), viewing = shallowRef(true), stream = shallowRef(initialStream), volume = shallowRef(.4), streams = [], relays = shallowRef([]);
+  const app = renderer.createApp({ setup() { ui = useWebClientScreenShare({ sharing, updateBitrate: async value => { updates.push(value); return update(value); }, relays, streams, viewing, viewingStreamId: shallowRef("s"), remoteStream: stream, remoteVolume: volume, error: shallowRef(""), errorCode: shallowRef(""), startScreenShare: async (...args) => starts.push(args), joinScreenShare() {}, leaveScreenShare() {}, nickname: shallowRef("Self"), avatarStyle: () => ({}), t: key => key }); return () => null; } });
   app.mount({});
-  return { ui, app, doc, relays, viewing, stream, volume, streams, starts, storage, listeners, exits: () => exits, video: () => markRaw(new Video()), player: () => markRaw(new Element()) };
+  return { ui, app, doc, relays, sharing, updates, viewing, stream, volume, streams, starts, storage, listeners, exits: () => exits, video: () => markRaw(new Video()), player: () => markRaw(new Element()) };
 }
 
 test("a newly mounted or replaced video receives the existing stream and volume", async t => {
@@ -76,7 +76,7 @@ test("known screen owner IDs cannot fall back to another member with the same ni
 test("share settings submit the selected resolution and frame rate", async t => {
   const f = mount(t);
   try { f.ui.settingsOpen.value = true; f.ui.resolutionPreset.value = "720p"; f.ui.frameRate.value = 30; await f.ui.startWithSettings();
-    assert.deepEqual(f.starts, [[true, { maxWidth: 1280, maxHeight: 720, maxFrameRate: 30 }]]);
+    assert.deepEqual(f.starts, [[true, { maxWidth: 1280, maxHeight: 720, maxFrameRate: 30, bitrateMode: "auto", bitrateMbps: 12, bitratePolicy: "balanced" }]]);
     assert.equal(f.ui.settingsOpen.value, false); assert.equal(f.storage.get("webspeak:screen-share-framerate"), "30");
   } finally { f.app.unmount(); }
 });
@@ -94,5 +94,31 @@ test("server routes are enabled only when configured and selection persists", as
     f.relays.value = []; await f.ui.startWithSettings();
     assert.equal(f.starts.length, 1);
     assert.equal(f.ui.route.value, "macau");
+  } finally { f.app.unmount(); }
+});
+
+test("live bitrate changes apply without another capture and persist the accepted settings", async t => {
+  const f = mount(t);
+  try {
+    f.sharing.value = true; f.ui.settingsOpen.value = true; await nextTick();
+    f.ui.bitrateMode.value = "manual"; f.ui.bitrateMbps.value = 16;
+    await f.ui.applyBitrate();
+    assert.deepEqual(f.updates, [{ bitrateMode: "manual", bitrateMbps: 16, bitratePolicy: "balanced" }]);
+    assert.equal(f.starts.length, 0); assert.equal(f.ui.settingsOpen.value, false);
+    assert.equal(f.storage.get("webspeak:screen-share-bitrate-mbps"), "16");
+  } finally { f.app.unmount(); }
+});
+
+test("closing a pending settings dialog discards stale completion and duplicate submissions", async t => {
+  let resolve; const f = mount(t, null, () => new Promise(done => { resolve = done; }));
+  try {
+    f.sharing.value = true; f.ui.settingsOpen.value = true; await nextTick();
+    const pending = f.ui.applyBitrate(); await f.ui.applyBitrate();
+    assert.equal(f.updates.length, 1);
+    f.ui.settingsOpen.value = false; await nextTick();
+    f.ui.settingsOpen.value = true; await nextTick();
+    resolve(false); await pending;
+    assert.equal(f.ui.settingsOpen.value, true); assert.equal(f.ui.bitrateApplyError.value, false);
+    assert.equal(f.ui.applying.value, false); assert.equal(f.storage.size, 0);
   } finally { f.app.unmount(); }
 });

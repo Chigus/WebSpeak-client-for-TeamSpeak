@@ -65,6 +65,12 @@ It binds only `127.0.0.1:8848` and uses the gateway's actual advertised ICE sett
 The normal `/screen-relay-check` page tests P2P and Shenzhen UDP/TCP from Macau.
 It verifies selected candidates and decoded video/audio, then releases both peers.
 
+Load `/screen-relay-check#bitrate` to verify live manual 2/16 Mbps caps and all
+three adaptive preferences on the same capture and peer. Synthetic bandwidth
+feedback exercises congestion and recovery while real sender parameters and
+decoded frames are checked. This is simulated feedback, not a throttled-network
+benchmark, a measured visual-quality improvement, or proof of sustained 60 FPS.
+
 To verify Macau without a same-LAN loopback, run the committed
 `remote-reflector.mjs` on a Shenzhen Node 22 host with `werift@0.24.4` and
 `ws@8.20.0`. Pass `{ "gateway": "https://gateway.example", "room": { ... } }`

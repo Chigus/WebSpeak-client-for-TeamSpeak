@@ -854,6 +854,7 @@ const {
   screenShareErrorCode,
   screenShareRemoteVolume,
   screenShareWebRtcStats,
+  updateScreenShareBitrateSettings,
   startAccompaniment,
   stopAccompaniment,
   startScreenShare,
@@ -1071,6 +1072,8 @@ function persistLanguage() {
 }
 
 const screenShareControls = useWebClientScreenShare({
+  sharing: screenShareActive,
+  updateBitrate: updateScreenShareBitrateSettings,
   relays: screenShareRelays,
   streams: screenShareStreams,
   viewing: screenShareViewing,

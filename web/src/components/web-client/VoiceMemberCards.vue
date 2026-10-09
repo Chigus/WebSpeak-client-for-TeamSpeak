@@ -101,6 +101,13 @@
           </div>
         </template>
         <button
+          v-else-if="member.isSelf && screenShareActive"
+          type="button"
+          class="screen-share-card-button"
+          :aria-expanded="screenShareSettingsOpen"
+          @click.stop="screenShareSettingsOpen = !screenShareSettingsOpen"
+        ><Icon name="settings" :size="13" /> {{ t("screenShareSettings") }}</button>
+        <button
           v-else-if="!member.isSelf"
           type="button"
           :class="[

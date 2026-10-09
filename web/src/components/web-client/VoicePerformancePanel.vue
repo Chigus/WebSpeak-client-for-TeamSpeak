@@ -181,6 +181,7 @@
             ><small>{{ peer.connectionState }} · {{ peer.candidateType ?? "—" }}</small></div
           >
           <div class="webrtc-stats-values"
+            ><span>{{ peer.width == null || peer.height == null ? "—" : `${peer.width} × ${peer.height}` }}</span
             ><span>{{ peer.frameRate == null ? "—" : `${peer.frameRate.toFixed(1)} FPS` }}</span
             ><span>{{
               peer.bitrateKbps == null ? "—" : `${Math.round(peer.bitrateKbps)} kbps`
@@ -199,6 +200,13 @@
               {{ t("screenShareRtt") }}</span
             ></div
           >
+          <small v-if="peer.direction === 'outbound' && peer.bitrateMode" class="webrtc-stats-detail">
+            {{ t("screenShareBitrateTarget") }}:
+            {{ peer.targetBitrateKbps == null ? "—" : `${(peer.targetBitrateKbps / 1000).toFixed(1)} Mbps` }}
+            · {{ t(peer.bitrateMode === "manual" ? "screenShareBitrateManual" : `screenShareBitratePolicy_${peer.bitratePolicy ?? 'balanced'}`) }}
+            <template v-if="peer.bitrateReason"> · {{ t(`screenShareBitrateReason_${peer.bitrateReason}`) }}</template>
+          </small>
+          <small v-if="peer.bitrateControlSupported === false || peer.bitrateStrategySupported === false" class="webrtc-stats-detail">{{ t("screenShareBitrateApplyError") }}</small>
           <small
             v-if="peer.codec || peer.qualityLimitationReason"
             class="webrtc-stats-detail"

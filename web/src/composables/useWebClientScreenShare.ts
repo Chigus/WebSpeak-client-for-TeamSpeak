@@ -1,6 +1,7 @@
 import { computed, onMounted, onBeforeUnmount, ref, watch, type Ref } from "vue";
 import { isScreenShareRoute, type ScreenShareRelayId, type ScreenShareRoute } from "../../../src/shared/screen-share.js";
 import type { ChannelMember, ScreenShareOutputSettings, ScreenShareStream } from "./useVoiceWebSocket.js";
+import { normalizeScreenShareBitrate, SCREEN_SHARE_BITRATE_OPTIONS, type ScreenShareBitrateSettings } from "../voice/screen-share-bitrate.js";
 
 export type ScreenShareResolutionPreset = "source" | "720p" | "1080p";
 
@@ -13,6 +14,8 @@ interface ScreenShareResolutionOption {
 
 interface UseWebClientScreenShareOptions {
   relays?: Ref<ScreenShareRelayId[]>;
+  sharing?: Ref<boolean>;
+  updateBitrate?: (settings: ScreenShareBitrateSettings) => Promise<boolean>;
   streams: ScreenShareStream[];
   viewing: Ref<boolean>;
   viewingStreamId: Ref<string>;
@@ -30,6 +33,8 @@ interface UseWebClientScreenShareOptions {
 
 export function useWebClientScreenShare({
   relays = ref<ScreenShareRelayId[]>([]),
+  sharing = ref(false),
+  updateBitrate,
   streams,
   viewing,
   viewingStreamId,
@@ -58,6 +63,37 @@ export function useWebClientScreenShare({
   const storedFrameRate = Number(localStorage.getItem("webspeak:screen-share-framerate"));
   const frameRate = ref(frameRateOptions.includes(storedFrameRate) ? storedFrameRate : 15);
   const settingsOpen = ref(false);
+  const storedBitrate = normalizeScreenShareBitrate({
+    bitrateMode: localStorage.getItem("webspeak:screen-share-bitrate-mode") as ScreenShareBitrateSettings["bitrateMode"],
+    bitrateMbps: Number(localStorage.getItem("webspeak:screen-share-bitrate-mbps")) || 12,
+    bitratePolicy: localStorage.getItem("webspeak:screen-share-bitrate-policy") as ScreenShareBitrateSettings["bitratePolicy"],
+  });
+  const bitrateMode = ref(storedBitrate.bitrateMode), bitrateMbps = ref(storedBitrate.bitrateMbps), bitratePolicy = ref(storedBitrate.bitratePolicy);
+  const bitrateOptions = SCREEN_SHARE_BITRATE_OPTIONS;
+  const bitratePolicies = ["quality", "smooth", "balanced"] as const;
+  const applying = ref(false), bitrateApplyError = ref(false);
+  let applyGeneration = 0;
+  const bitrateSettings = () => normalizeScreenShareBitrate({ bitrateMode: bitrateMode.value, bitrateMbps: bitrateMbps.value, bitratePolicy: bitratePolicy.value });
+  function saveBitrate() {
+    localStorage.setItem("webspeak:screen-share-bitrate-mode", bitrateMode.value);
+    localStorage.setItem("webspeak:screen-share-bitrate-mbps", String(bitrateMbps.value));
+    localStorage.setItem("webspeak:screen-share-bitrate-policy", bitratePolicy.value);
+  }
+  async function applyBitrate(): Promise<void> {
+    if (applying.value || !sharing.value || !updateBitrate) return;
+    const generation = ++applyGeneration;
+    applying.value = true; bitrateApplyError.value = false;
+    const submitted = bitrateSettings();
+    try {
+      const applied = await updateBitrate(submitted);
+      if (generation !== applyGeneration) return;
+      bitrateApplyError.value = !applied;
+      if (applied) { saveBitrate(); settingsOpen.value = false; }
+    } catch { if (generation === applyGeneration) bitrateApplyError.value = true; }
+    finally { if (generation === applyGeneration) applying.value = false; }
+  }
+  watch(settingsOpen, () => { applyGeneration++; applying.value = false; bitrateApplyError.value = false; });
+  watch(sharing, () => { applyGeneration++; applying.value = false; bitrateApplyError.value = false; });
   const storedRoute = localStorage.getItem("webspeak:screen-share-route");
   const route = ref<ScreenShareRoute>(isScreenShareRoute(storedRoute) ? storedRoute : "p2p");
   const routeOptions = computed(() => (["p2p", "macau", "shenzhen"] as const).map(id => ({
@@ -132,10 +168,12 @@ export function useWebClientScreenShare({
       ...(preset?.width && preset.height ? { maxWidth: preset.width, maxHeight: preset.height } : {}),
       maxFrameRate: frameRate.value,
       ...(route.value !== "p2p" ? { route: route.value } : {}),
+      ...bitrateSettings(),
     };
     localStorage.setItem("webspeak:screen-share-resolution", resolutionPreset.value);
     localStorage.setItem("webspeak:screen-share-framerate", String(frameRate.value));
     localStorage.setItem("webspeak:screen-share-route", route.value);
+    saveBitrate();
     settingsOpen.value = false;
     await startScreenShare(true, settings);
   }
@@ -152,6 +190,7 @@ export function useWebClientScreenShare({
 
   onMounted(() => document.addEventListener("fullscreenchange", syncFullscreen));
   onBeforeUnmount(() => {
+    applyGeneration++;
     document.removeEventListener("fullscreenchange", syncFullscreen);
     setVideoElement(null);
     setPlayerElement(null);
@@ -170,6 +209,15 @@ export function useWebClientScreenShare({
     routeLabel,
     frameRate,
     settingsOpen,
+    sharing,
+    bitrateMode,
+    bitrateMbps,
+    bitratePolicy,
+    bitrateOptions,
+    bitratePolicies,
+    applying,
+    bitrateApplyError,
+    applyBitrate,
     activeStream,
     viewers,
     viewerCount,

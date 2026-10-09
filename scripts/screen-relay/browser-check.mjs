@@ -1,8 +1,10 @@
 import { createScreenShareController } from '/src/voice/screen-share.ts';
 const state = document.querySelector('#state'), result = document.querySelector('#result');
 const crossNetwork = location.hash === '#remote';
-const cases = crossNetwork ? [['macau', 'udp'], ['macau', 'tcp']] : [['p2p', null], ['shenzhen', 'udp'], ['shenzhen', 'tcp']];
-document.querySelector('#start').textContent = crossNetwork ? '开始澳门跨网往返测试' : '开始 P2P 与深圳线路测试';
+const bitrateCheck = location.hash === '#bitrate';
+let networkScenario = null;
+const cases = crossNetwork ? [['macau', 'udp'], ['macau', 'tcp']] : bitrateCheck ? [['p2p', null]] : [['p2p', null], ['shenzhen', 'udp'], ['shenzhen', 'tcp']];
+document.querySelector('#start').textContent = crossNetwork ? '开始澳门跨网往返测试' : bitrateCheck ? '开始实时码率验收' : '开始 P2P 与深圳线路测试';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function wait(check, label, timeout = 25000) {
   const until = Date.now() + timeout;
@@ -26,6 +28,14 @@ window.RTCPeerConnection = class extends realPeer { constructor(config) {
   });
 }
 async addIceCandidate(c) { this.remoteCandidates.push(c?.candidate?.replace(/ ufrag .*/,'')); return super.addIceCandidate(c); }
+async getStats(...args) {
+  const report = await super.getStats(...args);
+  if (!networkScenario || !this.getSenders().some(s => s.track?.kind === 'video')) return report;
+  // Explicitly simulated congestion feedback; media still uses real WebRTC.
+  return new Map([...report].map(([id, stats]) => [id, stats.type === 'candidate-pair'
+    ? { ...stats, availableOutgoingBitrate: networkScenario === 'congested' ? 1_000_000 : 32_000_000 }
+    : stats.type === 'outbound-rtp' ? { ...stats, qualityLimitationReason: 'none' } : stats]));
+}
 close() { clearInterval(this.sampleTimer); return super.close(); }
 };
 let protocol;
@@ -49,11 +59,13 @@ document.querySelector('#start').onclick = async event => {
   event.target.disabled = true;
   const report = { status: 'running', checkedAt: new Date().toISOString(), scope: crossNetwork ? 'Production WSS; Macau browser and Shenzhen RTP reflector; synthetic media crosses Macau TURN and returns for browser decoding.' : 'Production WSS and ICE configuration; two browser peers on one Macau Windows host; synthetic canvas and oscillator only.', cases: [] };
   const owner = participant(), viewer = crossNetwork ? null : participant();
-  const canvas = document.createElement('canvas'); canvas.width = 960; canvas.height = 540;
+  const canvas = document.createElement('canvas'); canvas.width = bitrateCheck ? 1920 : 960; canvas.height = bitrateCheck ? 1080 : 540;
   const ctx = canvas.getContext('2d'); let frame = 0, tracks = [], audio;
-  const timer = setInterval(() => { ctx.fillStyle = '#123c40'; ctx.fillRect(0, 0, 960, 540); ctx.fillStyle = '#92e3c4'; ctx.font = '42px sans-serif'; ctx.fillText('WebSpeak · '+state.textContent, 45, 100); ctx.fillRect(40 + frame++ % 800, 200, 80, 180); ctx.fillText('Frame '+frame, 45, 480); }, 66);
+  const timer = setInterval(() => { ctx.fillStyle = '#123c40'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.fillStyle = '#92e3c4'; ctx.font = '42px sans-serif'; ctx.fillText('WebSpeak · '+state.textContent, 45, 100); ctx.fillRect(40 + frame++ % 800, 200, 80, 180); ctx.fillText('Frame '+frame, 45, 480);
+    if (bitrateCheck) for (let i = 0; i < 400; i++) { ctx.fillStyle = `hsl(${(i * 37 + frame * 3) % 360} 70% 55%)`; ctx.fillRect((i * 73 + frame * 5) % 1920, 540 + i % 16 * 32, 24, 24); }
+  }, bitrateCheck ? 16 : 66);
   Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { configurable: true, value: async () => {
-    const stream = canvas.captureStream(15); const dest = audio.createMediaStreamDestination(), osc = audio.createOscillator(), gain = audio.createGain();
+    const stream = canvas.captureStream(bitrateCheck ? 60 : 15); const dest = audio.createMediaStreamDestination(), osc = audio.createOscillator(), gain = audio.createGain();
     gain.gain.value = 0.03; osc.frequency.value = 440; osc.connect(gain).connect(dest); osc.start();
     stream.addTrack(dest.stream.getAudioTracks()[0]); tracks.push(...stream.getTracks());
     stream.getVideoTracks()[0].addEventListener('ended', () => osc.stop(), { once: true });
@@ -66,7 +78,7 @@ document.querySelector('#start').onclick = async event => {
     for (const [route, transport] of cases) {
       protocol = transport; state.textContent = `${route} ${transport ?? 'direct'}`;
       const start = peers.length;
-      await owner.controller.api.startScreenShare(true, { route, maxWidth: 960, maxHeight: 540, maxFrameRate: 15 });
+      await owner.controller.api.startScreenShare(true, { route, maxWidth: canvas.width, maxHeight: canvas.height, maxFrameRate: bitrateCheck ? 60 : 15 });
       await wait(() => owner.controller.api.screenShareActive.value, 'Publisher start: '+owner.controller.api.screenShareError.value);
       const streamId = owner.controller.api.screenShareActiveStreamId.value;
       if (viewer) {
@@ -91,12 +103,41 @@ document.querySelector('#start').onclick = async event => {
       if (route !== 'p2p' && (!publisher || publisher.local.type !== 'relay' || publisher.local.relayProtocol !== transport)) throw new Error('Selected TURN route was not used');
       if (route === 'p2p' && snapshots.some(s => s.local.type === 'relay')) throw new Error('P2P unexpectedly relayed');
       report.cases.push({ route, transport, passed: true, snapshots });
+      if (bitrateCheck) {
+        const publisherPeer = peers.slice(start).find(p => p.getSenders().some(s => s.track?.kind === 'video'));
+        const sender = publisherPeer.getSenders().find(s => s.track?.kind === 'video');
+        report.bitrate = { feedback: 'Congestion and recovery estimates are simulated; setter, peer lifetime and decoded media are real.', steps: [] };
+        for (const mbps of [2, 16]) {
+          state.textContent = '手动 '+mbps+' Mbps';
+          if (!await owner.controller.api.updateScreenShareBitrateSettings({ bitrateMode: 'manual', bitrateMbps: mbps })) throw new Error('Manual control rejected');
+          const p = sender.getParameters();
+          if (p.encodings[0].maxBitrate !== mbps * 1_000_000 || p.degradationPreference !== 'maintain-resolution') throw new Error('Manual encoder settings not applied');
+          report.bitrate.steps.push({ mode: 'manual', mbps, applied: true });
+        }
+        for (const [policy, degradation] of [['quality', 'maintain-resolution'], ['smooth', 'maintain-framerate'], ['balanced', 'balanced']]) {
+          if (!await owner.controller.api.updateScreenShareBitrateSettings({ bitrateMode: 'auto', bitratePolicy: policy })) throw new Error('Adaptive policy rejected');
+          if (sender.getParameters().degradationPreference !== degradation) throw new Error('Wrong degradation strategy');
+          report.bitrate.steps.push({ mode: 'auto', policy, applied: true });
+        }
+        const initial = sender.getParameters().encodings[0].maxBitrate;
+        networkScenario = 'congested'; state.textContent = '模拟拥塞：检查自动降码率';
+        await wait(() => sender.getParameters().encodings[0].maxBitrate < initial * .7, 'Adaptive decrease', 16000);
+        const reduced = sender.getParameters().encodings[0].maxBitrate;
+        networkScenario = 'recovered'; state.textContent = '模拟恢复：检查自动升码率';
+        await wait(() => sender.getParameters().encodings[0].maxBitrate > reduced * 1.1, 'Adaptive recovery', 20000);
+        const recovered = sender.getParameters().encodings[0].maxBitrate;
+        networkScenario = null;
+        if (peers.length !== start + 2 || owner.controller.api.screenShareActiveStreamId.value !== streamId || publisherPeer.connectionState !== 'connected') throw new Error('Live update replaced the share');
+        const finalStats = [...(await peers.slice(start).find(p => p !== publisherPeer).getStats()).values()].find(s => s.type === 'inbound-rtp' && s.kind === 'video');
+        if (!finalStats?.framesDecoded || finalStats.frameWidth !== 1920 || finalStats.frameHeight !== 1080) throw new Error('1080p video did not decode');
+        report.bitrate.adaptation = { initial, reduced, recovered, samePeerAndCapture: true, decodedWidth: finalStats.frameWidth, decodedHeight: finalStats.frameHeight, decodedFrames: finalStats.framesDecoded, framesPerSecond: finalStats.framesPerSecond };
+      }
       result.textContent = JSON.stringify(report, null, 2);
       viewer?.controller.api.leaveScreenShare(); owner.controller.api.stopScreenShare();
       document.querySelector('#remote').srcObject = null;
       await wait(() => !owner.controller.api.screenShareStreams.some(s => s.streamId === streamId), 'Share cleanup');
     }
-    report.status = 'passed'; state.textContent = `${cases.length} 条路径：视频及音频全部通过`;
+    report.status = 'passed'; state.textContent = bitrateCheck ? '手动、三种自动策略及实时升降码率全部通过' : `${cases.length} 条路径：视频及音频全部通过`;
   } catch (error) {
     report.status = 'failed'; report.error = error.message; state.textContent = '验证失败：'+error.message;
     report.debug = peers.map(p => ({ policy: p.testConfig.iceTransportPolicy ?? 'all', connection: p.connectionState, ice: p.iceConnectionState, gathering: p.iceGatheringState, candidates: p.candidates, remoteCandidates:p.remoteCandidates,samples:p.samples, errors: p.errors }));
