@@ -29,3 +29,5 @@ claude.pem
 /.claude/
 /LOCAL-RELEASE-RUNBOOK.md
 /DEPLOYMENT-*.md
+/web/public/source/
+/REVISION

@@ -8,16 +8,16 @@
   <p><strong>让 TeamSpeak 自然地进入浏览器。</strong></p>
   <p>A self-hosted browser voice client for TeamSpeak 3 and TeamSpeak 6.</p>
 
-  [![Latest Release](https://img.shields.io/github/v/release/EchoSixHIYA/WebSpeak-client-for-TeamSpeak?sort=semver&display_name=tag&style=flat-square&color=0f766e)](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/latest)
-  [![Docker Image](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/actions/workflows/docker-publish.yml/badge.svg?branch=master)](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/actions/workflows/docker-publish.yml)
+  [![Maintained branch](https://img.shields.io/badge/branch-nas%2Fmacau-0f766e?style=flat-square)](https://github.com/Chigus/WebSpeak-client-for-TeamSpeak/tree/nas/macau)
+  [![Docker Image](https://github.com/Chigus/WebSpeak-client-for-TeamSpeak/actions/workflows/docker-publish.yml/badge.svg?branch=nas%2Fmacau)](https://github.com/Chigus/WebSpeak-client-for-TeamSpeak/actions/workflows/docker-publish.yml)
   [![License](https://img.shields.io/badge/license-AGPL--3.0--only-0f766e?style=flat-square)](./LICENSE)
-  [![GitHub Stars](https://img.shields.io/github/stars/EchoSixHIYA/WebSpeak-client-for-TeamSpeak?style=flat-square&logo=github&color=0f766e)](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/stargazers)
+  [![GitHub Stars](https://img.shields.io/github/stars/Chigus/WebSpeak-client-for-TeamSpeak?style=flat-square&logo=github&color=0f766e)](https://github.com/Chigus/WebSpeak-client-for-TeamSpeak/stargazers)
   <br />
   [![TeamSpeak](https://img.shields.io/badge/TeamSpeak-3%20%7C%206-2580C3?style=flat-square)](https://www.teamspeak.com/)
   [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.5-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
   [![Vue](https://img.shields.io/badge/Vue-3-42B883?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
   [![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-  [![Docker](https://img.shields.io/badge/Docker-GHCR-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/EchoSixHIYA/packages/container/package/webspeak)
+  [![Docker](https://img.shields.io/badge/Docker-GHCR-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/Chigus/packages/container/package/webspeak)
 
   <p>
     <a href="./docs/README.zh-CN.md">简体中文文档</a> ·
@@ -27,6 +27,20 @@
     <a href="./docs/README.ja.md">日本語ドキュメント</a>
   </p>
 </div>
+
+## 本 fork 的部署与更新
+
+维护分支为 `nas/macau`。本 fork 增加双声道原音、双向三档 RNNoise 降噪、网页 P2P 和深圳/澳门部署工具。所有最新改动以该分支的提交为准。
+
+[部署与更新指南](./docs/FORK_DEPLOYMENT.zh-CN.md) · [双向降噪与 P2P](./docs/PEER_VOICE_AND_DENOISING.zh-CN.md) · [NAS 发布流程](./docs/NAS_GIT_DEPLOYMENT.zh-CN.md)
+
+默认 Docker Compose 从当前源码构建。每次推送维护分支后，GitHub Actions 验证成功才更新 `ghcr.io/chigus/webspeak:latest`；已有部署需要重新构建/拉取并重建容器。Release 下载包只对应发布时的提交。
+
+```sh
+git clone --branch nas/macau --single-branch https://github.com/Chigus/WebSpeak-client-for-TeamSpeak.git
+cd WebSpeak-client-for-TeamSpeak
+docker compose up -d --build
+```
 
 ## 项目简介 · Overview
 

@@ -1,5 +1,7 @@
 # WebSpeak · Русский
 
+> **Maintained fork:** `Chigus/WebSpeak-client-for-TeamSpeak`, branch `nas/macau`. Default Compose builds this checkout. For current Docker/source deployments and upgrades, follow [the fork deployment guide](./FORK_DEPLOYMENT.zh-CN.md). Release assets are snapshots and are not generated on every push.
+
 [Главная проекта](../README.md) · [简体中文](./README.zh-CN.md) · [English](./README.en.md) · [Deutsch](./README.de.md) · [日本語](./README.ja.md)
 
 ## О проекте
@@ -93,17 +95,16 @@
 ### Docker Compose
 
 ```bash
-git clone --depth 1 https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak.git
+git clone --branch nas/macau --single-branch --depth 1 https://github.com/Chigus/WebSpeak-client-for-TeamSpeak.git
 cd WebSpeak-client-for-TeamSpeak
-docker compose pull
-docker compose up -d
+docker compose up -d --build
 ```
 
 После запуска откройте `http://<ваш-хост>:3040/admin`, войдите с `admin` / `admin`, сразу смените пароль и настройте TeamSpeak. Данные хранятся в volume `webspeak-data`. Не используйте `docker compose down -v`, если не хотите удалить базу и настройки.
 
 ### Пакет Release
 
-Скачайте подходящий пакет `windows-x64.zip`, `linux-x64.tar.gz` или `linux-arm64.tar.gz` из [Releases](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/latest) и запустите приложенный скрипт. Docker поддерживает amd64/arm64. Также доступны Android APK для `arm64-v8a`, `armeabi-v7a` и `x86_64`; они подписаны отладочным ключом для ручной установки и тестирования, а не для Google Play. Голос TeamSpeak на реальных устройствах пока не проверен.
+Скачайте подходящий пакет `windows-x64.zip`, `linux-x64.tar.gz` или `linux-arm64.tar.gz` из [Releases](https://github.com/Chigus/WebSpeak-client-for-TeamSpeak/releases) и запустите приложенный скрипт. Docker поддерживает amd64/arm64. Также доступны Android APK для `arm64-v8a`, `armeabi-v7a` и `x86_64`; они подписаны отладочным ключом для ручной установки и тестирования, а не для Google Play. Голос TeamSpeak на реальных устройствах пока не проверен.
 
 ### Из исходников
 

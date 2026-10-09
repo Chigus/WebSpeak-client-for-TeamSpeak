@@ -1,5 +1,7 @@
 # WebSpeak · 日本語
 
+> **Maintained fork:** `Chigus/WebSpeak-client-for-TeamSpeak`, branch `nas/macau`. Default Compose builds this checkout. For current Docker/source deployments and upgrades, follow [the fork deployment guide](./FORK_DEPLOYMENT.zh-CN.md). Release assets are snapshots and are not generated on every push.
+
 [プロジェクトトップ](../README.md) · [简体中文](./README.zh-CN.md) · [English](./README.en.md) · [Deutsch](./README.de.md) · [Русский](./README.ru.md)
 
 ## プロジェクト概要
@@ -93,17 +95,16 @@ TURN を設定した場合、メディアは外部 TURN サービスを経由す
 ### Docker Compose
 
 ```bash
-git clone --depth 1 https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak.git
+git clone --branch nas/macau --single-branch --depth 1 https://github.com/Chigus/WebSpeak-client-for-TeamSpeak.git
 cd WebSpeak-client-for-TeamSpeak
-docker compose pull
-docker compose up -d
+docker compose up -d --build
 ```
 
 起動後に `http://<your-host>:3040/admin` を開き、`admin` / `admin` でログインして直ちにパスワードを変更し、TeamSpeak を設定します。データは `webspeak-data` volume に保存されます。データベースを消さない場合は `docker compose down -v` を実行しないでください。
 
 ### Release パッケージ
 
-[Releases](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/latest) から `windows-x64.zip`、`linux-x64.tar.gz`、`linux-arm64.tar.gz` のいずれかを取得し、同梱ランチャーを実行します。Docker は amd64/arm64 に対応します。`arm64-v8a`、`armeabi-v7a`、`x86_64` の Android APK もあります。APK は手動インストールとテスト向けのデバッグ署名で、Google Play 用ではありません。実機 TeamSpeak 音声は未検証です。
+[Releases](https://github.com/Chigus/WebSpeak-client-for-TeamSpeak/releases) から `windows-x64.zip`、`linux-x64.tar.gz`、`linux-arm64.tar.gz` のいずれかを取得し、同梱ランチャーを実行します。Docker は amd64/arm64 に対応します。`arm64-v8a`、`armeabi-v7a`、`x86_64` の Android APK もあります。APK は手動インストールとテスト向けのデバッグ署名で、Google Play 用ではありません。実機 TeamSpeak 音声は未検証です。
 
 ### ソースから
 

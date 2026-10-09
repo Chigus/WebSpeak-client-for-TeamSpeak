@@ -1,5 +1,7 @@
 # WebSpeak · Deutsch
 
+> **Maintained fork:** `Chigus/WebSpeak-client-for-TeamSpeak`, branch `nas/macau`. Default Compose builds this checkout. For current Docker/source deployments and upgrades, follow [the fork deployment guide](./FORK_DEPLOYMENT.zh-CN.md). Release assets are snapshots and are not generated on every push.
+
 [Projektstartseite](../README.md) · [简体中文](./README.zh-CN.md) · [English](./README.en.md) · [Русский](./README.ru.md) · [日本語](./README.ja.md)
 
 WebSpeak ist ein selbst gehosteter Webclient und ein Sprach-Gateway für TeamSpeak 3 und TeamSpeak 6. Nutzer können ohne Desktop-Client im Browser Kanälen beitreten; Administratoren verwalten Zielserver, Zugriff und Laufzeitstatus über die Webkonsole.
@@ -88,7 +90,7 @@ Eine Relay-Instanz ist ein dedizierter Weiterleitungsdienst ohne Besucher- oder 
 #### Aus dem Quellcode starten
 
 ```bash
-git clone --depth 1 https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak.git
+git clone --branch nas/macau --single-branch --depth 1 https://github.com/Chigus/WebSpeak-client-for-TeamSpeak.git
 cd WebSpeak-client-for-TeamSpeak
 npm ci --ignore-scripts
 npm run prepare:sdk
@@ -112,7 +114,7 @@ node .\dist\index.js
 
 #### Aus einem Release-Paket starten
 
-Das passende Paket aus den [Releases](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/latest) herunterladen und entpacken:
+Das passende Paket aus den [Releases](https://github.com/Chigus/WebSpeak-client-for-TeamSpeak/releases) herunterladen und entpacken:
 
 ```bash
 # Linux
@@ -132,7 +134,7 @@ docker run -d --name webspeak-relay --restart unless-stopped --network host \
   -e WEBSPEAK_MODE=relay \
   -e WEBSPEAK_RELAY_TOKEN='replace-with-a-long-random-token' \
   -e WEBSPEAK_RELAY_PORT='39087' \
-  ghcr.io/echosixhiya/webspeak:latest
+  ghcr.io/chigus/webspeak:latest
 ```
 
 Den UDP-Listening-Port des Relay-Hosts freigeben, standardmäßig `39087`.
@@ -182,10 +184,9 @@ Vollständige Historie: [CHANGELOG.md](../CHANGELOG.md).
 ### Docker Compose (empfohlen)
 
 ```bash
-git clone --depth 1 https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak.git
+git clone --branch nas/macau --single-branch --depth 1 https://github.com/Chigus/WebSpeak-client-for-TeamSpeak.git
 cd WebSpeak-client-for-TeamSpeak
-docker compose pull
-docker compose up -d
+docker compose up -d --build
 ```
 
 Nach dem Start ist WebSpeak unter `http://<dein-host>:3040` erreichbar. Bei einem Reverse Proxy auf diese Adresse zeigen; für WebRTC den im Adminbereich angezeigten UDP-Bereich freigeben. Die Daten liegen im Volume `webspeak-data`.
@@ -199,22 +200,21 @@ Upgrade:
 
 ```bash
 git pull --ff-only
-docker compose pull
-docker compose up -d
+docker compose up -d --build
 ```
 
 `docker compose down -v` nicht ausführen, da dadurch Datenbank und Administratoreinstellungen gelöscht werden.
 
 ### Release-Paket
 
-Das passende `windows-x64.zip`, `linux-x64.tar.gz` oder `linux-arm64.tar.gz` aus den [GitHub Releases](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/latest) herunterladen und den enthaltenen Starter ausführen. Die Pakete enthalten Node.js und Produktionsabhängigkeiten. Docker unterstützt amd64/arm64.
+Das passende `windows-x64.zip`, `linux-x64.tar.gz` oder `linux-arm64.tar.gz` aus den [GitHub Releases](https://github.com/Chigus/WebSpeak-client-for-TeamSpeak/releases) herunterladen und den enthaltenen Starter ausführen. Die Pakete enthalten Node.js und Produktionsabhängigkeiten. Docker unterstützt amd64/arm64.
 
 Android-APKs für `arm64-v8a`, `armeabi-v7a` und `x86_64` sind ebenfalls verfügbar. Sie sind für Tests per Sideload debug-signiert, keine Google-Play-Pakete; echte TeamSpeak-Sprachtests auf Geräten stehen noch aus.
 
 ### Aus dem Quellcode
 
 ```bash
-git clone https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak.git
+git clone --branch nas/macau --single-branch https://github.com/Chigus/WebSpeak-client-for-TeamSpeak.git
 cd WebSpeak-client-for-TeamSpeak
 npm ci --ignore-scripts
 npm run prepare:sdk

@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release version without the v prefix
+        description: Exact package.json version of the selected commit (without v)
         required: true
-        default: 0.2.6
+        default: 0.2.6-stereo.5
         type: string
 
 permissions:
@@ -55,9 +55,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $currentVersion = node -p "require('./package.json').version"
           if ($currentVersion -ne $releaseVersion) {
-            npm version --no-git-tag-version $releaseVersion
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            throw "Release version must match the selected commit's package.json"
           }
+          New-Item -ItemType Directory -Force web/public/source | Out-Null
+          git archive --format=tar.gz --prefix="webspeak-$env:GITHUB_SHA/" --output=web/public/source/webspeak-stereo-source.tar.gz $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Set-Content -LiteralPath REVISION -Value $env:GITHUB_SHA -Encoding utf8
           npm run web:build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run build
@@ -80,7 +83,7 @@ jobs:
           New-Item -ItemType Directory -Path (Join-Path $packageRoot "web") | Out-Null
           Copy-Item -Recurse -LiteralPath web/dist -Destination (Join-Path $packageRoot "web")
           Copy-Item -Recurse -LiteralPath node_modules -Destination $packageRoot
-          Copy-Item -LiteralPath config.example.json,README.md,LICENSE,package.json,package-lock.json -Destination $packageRoot
+          Copy-Item -LiteralPath config.example.json,README.md,LICENSE,package.json,package-lock.json,REVISION -Destination $packageRoot
           New-Item -ItemType Directory -Path (Join-Path $packageRoot "runtime") | Out-Null
           Copy-Item -LiteralPath (Join-Path $runtimeRoot "node.exe") -Destination (Join-Path $packageRoot "runtime")
           Copy-Item -LiteralPath (Join-Path $runtimeRoot "LICENSE") -Destination (Join-Path $packageRoot "runtime/NODE-LICENSE")
@@ -162,8 +165,12 @@ jobs:
           npm --prefix web ci --no-audit --no-fund
           current_version="$(node -p "require('./package.json').version")"
           if [ "$current_version" != "$release_version" ]; then
-            npm version --no-git-tag-version "$release_version"
+            echo "Release version must match the selected commit's package.json" >&2
+            exit 1
           fi
+          mkdir -p web/public/source
+          git archive --format=tar --prefix="webspeak-${GITHUB_SHA}/" "$GITHUB_SHA" | gzip -n > web/public/source/webspeak-stereo-source.tar.gz
+          printf '%s\n' "$GITHUB_SHA" > REVISION
           npm run web:build
           npm run build
           npm prune --omit=dev --no-audit --no-fund
@@ -181,7 +188,7 @@ jobs:
           cp -a dist "$package_root/dist"
           cp -a web/dist "$package_root/web/dist"
           cp -a node_modules "$package_root/node_modules"
-          cp config.example.json README.md LICENSE package.json package-lock.json "$package_root/"
+          cp config.example.json README.md LICENSE package.json package-lock.json REVISION "$package_root/"
           cp "$runtime_root/bin/node" "$package_root/runtime/node"
           cp "$runtime_root/LICENSE" "$package_root/runtime/NODE-LICENSE"
           chmod 0755 "$package_root/runtime/node"
@@ -254,12 +261,13 @@ jobs:
         run: |
           set -euo pipefail
           release_version="${RELEASE_REF#v}"
-          version_code="$(node -e 'const [major, minor, patch] = process.argv[1].split(".").map(Number); process.stdout.write(String(major * 10000 + minor * 100 + patch))' "$release_version")"
+          version_code="$(node -e 'const [major, minor, patch] = process.argv[1].split("-")[0].split(".").map(Number); process.stdout.write(String(major * 10000 + minor * 100 + patch))' "$release_version")"
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
           npm ci --ignore-scripts --no-audit --no-fund
           current_version="$(node -p "require('./package.json').version")"
           if [ "$current_version" != "$release_version" ]; then
-            npm version --no-git-tag-version "$release_version"
+            echo "Release version must match the selected commit's package.json" >&2
+            exit 1
           fi
           npm run prepare:sdk
           npm --prefix web ci --no-audit --no-fund

@@ -9,6 +9,11 @@ requirements. The following requirements apply to this user's maintained fork.
 - `origin` is the user's fork; `upstream` is the original project. Read the actual
   remotes instead of hard-coding a GitHub account. Future changes belong in the
   fork's maintained branch (currently `nas/macau`).
+- Keep public deployment instructions, default branch and image publication on
+  `nas/macau`. Every shipped change must be pushed to that branch and pass CI;
+  only that branch advances the fork image's `latest` tag. Do not replace fork
+  clone/image URLs with upstream URLs. Existing installs update only after an
+  explicit pull/build and container restart; a GitHub push does not update them.
 - Preserve the NAS binaural/stereo feature introduced in
   `24304f2d8ec4ecaa2962042dcd7b39a4bbab6851`: independent left/right PCM, Opus Music
   codec 5 at 192 kbps with two forced channels and constant bitrate (480-byte

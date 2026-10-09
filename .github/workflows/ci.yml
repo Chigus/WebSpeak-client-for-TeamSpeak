@@ -38,7 +38,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - name: Build image
-        run: docker build --tag webspeak:ci .
+        run: |
+          mkdir -p web/public/source
+          git archive --format=tar --prefix="webspeak-${GITHUB_SHA}/" "$GITHUB_SHA" | gzip -n > web/public/source/webspeak-stereo-source.tar.gz
+          docker build --build-arg WEBSPEAK_REVISION="$GITHUB_SHA" --tag webspeak:ci .
+          test "$(docker image inspect webspeak:ci --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
+          docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:size=16m --workdir /app --entrypoint node webspeak:ci --input-type=module < scripts/nas/stereo-smoke.mjs
       - name: Run health smoke test
         run: |
           set -euo pipefail
@@ -46,6 +51,8 @@ jobs:
           trap 'docker logs webspeak-ci; docker rm --force webspeak-ci' EXIT
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:3040/health | grep -q '"status":"ok"'; then
+              curl --fail --silent http://127.0.0.1:3040/source/webspeak-stereo-source.tar.gz -o /tmp/webspeak-source.tar.gz
+              cmp /tmp/webspeak-source.tar.gz web/public/source/webspeak-stereo-source.tar.gz
               exit 0
             fi
             sleep 2

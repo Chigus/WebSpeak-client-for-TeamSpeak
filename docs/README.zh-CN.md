@@ -1,5 +1,7 @@
 # WebSpeak · 简体中文
 
+> **Maintained fork:** `Chigus/WebSpeak-client-for-TeamSpeak`, branch `nas/macau`. Default Compose builds this checkout. For current Docker/source deployments and upgrades, follow [the fork deployment guide](./FORK_DEPLOYMENT.zh-CN.md). Release assets are snapshots and are not generated on every push.
+
 [返回项目首页](../README.md) · [English](./README.en.md) · [Deutsch](./README.de.md) · [Русский](./README.ru.md) · [日本語](./README.ja.md)
 
 WebSpeak 是一个可自行部署的 TeamSpeak 3 / TeamSpeak 6 网页客户端与语音网关。用户无需安装桌面客户端即可从浏览器加入频道，管理员可以在控制台管理目标服务器、访问方式和运行状态。
@@ -98,7 +100,7 @@ WebRTC 启用后端口范围会锁定。要修改端口，先关闭 WebRTC 并�
 #### 源码启动
 
 ```bash
-git clone --depth 1 https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak.git
+git clone --branch nas/macau --single-branch --depth 1 https://github.com/Chigus/WebSpeak-client-for-TeamSpeak.git
 cd WebSpeak-client-for-TeamSpeak
 npm ci --ignore-scripts
 npm run prepare:sdk
@@ -122,7 +124,7 @@ node .\dist\index.js
 
 #### 发布包启动
 
-从 [Releases](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/latest) 下载并解压对应平台的包：
+从 [Releases](https://github.com/Chigus/WebSpeak-client-for-TeamSpeak/releases) 下载并解压对应平台的包：
 
 ```bash
 # Linux
@@ -142,7 +144,7 @@ docker run -d --name webspeak-relay --restart unless-stopped --network host \
   -e WEBSPEAK_MODE=relay \
   -e WEBSPEAK_RELAY_TOKEN='replace-with-a-long-random-token' \
   -e WEBSPEAK_RELAY_PORT='39087' \
-  ghcr.io/echosixhiya/webspeak:latest
+  ghcr.io/chigus/webspeak:latest
 ```
 
 放行中继主机的 UDP 监听端口，默认是 `39087`。
@@ -192,10 +194,9 @@ docker run -d --name webspeak-relay --restart unless-stopped --network host \
 ### Docker Compose（推荐）
 
 ```bash
-git clone --depth 1 https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak.git
+git clone --branch nas/macau --single-branch --depth 1 https://github.com/Chigus/WebSpeak-client-for-TeamSpeak.git
 cd WebSpeak-client-for-TeamSpeak
-docker compose pull
-docker compose up -d
+docker compose up -d --build
 ```
 
 启动后访问 `http://<你的主机>:3040`。使用反向代理时将上游指向该地址；启用 WebRTC 时放行控制台显示的 UDP 端口范围。数据保存在 `webspeak-data` volume 中。
@@ -209,22 +210,21 @@ docker compose logs -f webspeak
 
 ```bash
 git pull --ff-only
-docker compose pull
-docker compose up -d
+docker compose up -d --build
 ```
 
 不要执行 `docker compose down -v`，否则会删除数据库和管理员设置。
 
 ### 发布包
 
-从 [GitHub Releases](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak/releases/latest) 下载与系统和架构匹配的 `windows-x64.zip`、`linux-x64.tar.gz` 或 `linux-arm64.tar.gz`，解压后运行对应启动脚本。发布包自带 Node.js 运行时和生产依赖。Docker 镜像支持 amd64/arm64。
+从 [GitHub Releases](https://github.com/Chigus/WebSpeak-client-for-TeamSpeak/releases) 下载与系统和架构匹配的 `windows-x64.zip`、`linux-x64.tar.gz` 或 `linux-arm64.tar.gz`，解压后运行对应启动脚本。发布包自带 Node.js 运行时和生产依赖。Docker 镜像支持 amd64/arm64。
 
 Release 同时提供 Android `arm64-v8a`、`armeabi-v7a` 和 `x86_64` APK。它们使用 debug 签名，可手动侧载测试；不是 Google Play 发布包，Android 真机语音仍需验收。
 
 ### 源码运行
 
 ```bash
-git clone https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak.git
+git clone --branch nas/macau --single-branch https://github.com/Chigus/WebSpeak-client-for-TeamSpeak.git
 cd WebSpeak-client-for-TeamSpeak
 npm ci --ignore-scripts
 npm run prepare:sdk

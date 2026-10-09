@@ -1,7 +1,12 @@
 services:
   webspeak:
-    image: ${WEBSPEAK_IMAGE:-ghcr.io/echosixhiya/webspeak:latest}
-    pull_policy: missing
+    # Build this checkout by default; no upstream image can replace fork changes.
+    image: webspeak-local:${WEBSPEAK_REVISION:-latest}
+    build:
+      context: .
+      args:
+        WEBSPEAK_REVISION: ${WEBSPEAK_REVISION:-unknown}
+    pull_policy: build
     restart: unless-stopped
     # WebSpeak needs to reach a TeamSpeak server running on the same host.
     # Host networking also exposes the configured WebRTC UDP range directly.

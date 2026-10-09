@@ -1,0 +1,12 @@
+# Prebuilt alternative: use the same data volume and service name as source builds.
+services:
+  webspeak:
+    image: ${WEBSPEAK_IMAGE:-ghcr.io/chigus/webspeak:latest}
+    pull_policy: always
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - webspeak-data:/data
+
+volumes:
+  webspeak-data:

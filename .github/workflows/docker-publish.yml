@@ -2,7 +2,7 @@ name: Publish Docker image
 
 on:
   push:
-    branches: [master]
+    branches: [nas/macau]
     tags: ["v*.*.*"]
   workflow_dispatch:
 
@@ -10,8 +10,11 @@ permissions:
   contents: read
   packages: write
 
-env:
-  IMAGE_NAME: ghcr.io/echosixhiya/webspeak
+# Serialize mutable tags, so an older build cannot finish after a newer one and
+# overwrite latest. Queued pushes coalesce; SHA tags remain available.
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   verify:
@@ -22,6 +25,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Resolve fork image and corresponding source
+        shell: bash
+        run: |
+          echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/webspeak" >> "$GITHUB_ENV"
+          mkdir -p web/public/source
+          git archive --format=tar --prefix="webspeak-${GITHUB_SHA}/" "$GITHUB_SHA" | gzip -n > web/public/source/webspeak-stereo-source.tar.gz
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
@@ -36,9 +45,10 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/nas/macau' }}
+            type=raw,value=nas-macau,enable=${{ github.ref == 'refs/heads/nas/macau' }}
             type=ref,event=tag
-            type=sha
+            type=sha,format=long
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -47,5 +57,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            WEBSPEAK_REVISION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

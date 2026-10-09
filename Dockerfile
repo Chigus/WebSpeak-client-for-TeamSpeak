@@ -14,11 +14,24 @@ RUN npm rebuild @discordjs/opus --foreground-scripts --no-audit --no-fund
 RUN npm --prefix web ci
 
 COPY . .
+# Preserve the exact build context before compilation/pruning. CI supplies a
+# Git archive instead; local builds still offer their corresponding source.
+RUN mkdir -p /tmp/webspeak-source \
+  && tar --exclude='./node_modules' --exclude='./web/node_modules' \
+    --exclude='./web/public/source' -czf /tmp/webspeak-source/webspeak-stereo-source.tar.gz .
 RUN npm run verify \
+  && mkdir -p web/dist/source \
+  && if [ ! -f web/dist/source/webspeak-stereo-source.tar.gz ]; then \
+    cp /tmp/webspeak-source/webspeak-stereo-source.tar.gz web/dist/source/; fi \
   && npm prune --omit=dev \
   && rm -rf web/node_modules
 
 FROM node:22-bookworm-slim AS runtime
+
+ARG WEBSPEAK_REVISION=unknown
+LABEL org.opencontainers.image.revision=$WEBSPEAK_REVISION \
+      org.opencontainers.image.source="https://github.com/Chigus/WebSpeak-client-for-TeamSpeak" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
 
 WORKDIR /app
 RUN apt-get update \
