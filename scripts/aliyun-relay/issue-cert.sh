@@ -13,6 +13,10 @@ case "$digest" in *[!0-9a-f]*|'') exit 1 ;; esac
 case "$ACME_ACCOUNT" in *[!0-9a-f]*|'') exit 1 ;; esac
 [ -d "$ROOT/acme/accounts/acme-v02.api.letsencrypt.org/directory/$ACME_ACCOUNT" ] || exit 1
 docker image inspect "$CERTBOT_IMAGE" >/dev/null
+set -- -d "$RELAY_HOST"
+if [ "${CERT_WILDCARD:-false}" = true ]; then
+    set -- "$@" -d "*.$RELAY_HOST" --expand
+fi
 docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true \
     --memory 192m --pids-limit 64 --tmpfs /tmp:size=32m,mode=1777 \
     --network bridge --dns 223.5.5.5 --dns 119.29.29.29 \
@@ -21,4 +25,4 @@ docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges:true
     "$CERTBOT_IMAGE" certonly --non-interactive --account "$ACME_ACCOUNT" \
     --dns-cloudflare --dns-cloudflare-credentials /credentials/cloudflare.ini \
     --dns-cloudflare-propagation-seconds 30 --cert-name "$RELAY_HOST" \
-    -d "$RELAY_HOST" --keep-until-expiring
+    "$@" --keep-until-expiring

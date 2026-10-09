@@ -75,3 +75,32 @@ An HTTPS health check is only installation validation. Run the real serial voice
 stereo, native TS, screen UDP/TCP/TLS and fallback acceptance in README.md. The
 shared 3-Mbps ECS egress limit and screen ICE selection limitations still apply.
 Ports 80/443 and `behregaming.top`/ICP work are separate follow-up deployment work.
+
+## Optional public administration and shared HTTPS service ingress
+
+After the owner authorizes public administration, add DNS-only
+`*.aliyun.narcissu1.top` pointing to the ECS IPv4 address, alongside the existing
+apex entry. Enable `CERT_WILDCARD=true` in the private runtime environment and
+run this release's `issue-cert.sh`, then `lucky-config.py renew`. This expands the
+same managed certificate to cover the base hostname and its wildcard. Update the
+certificate systemd unit to use this release so later renewal retains the names.
+
+Run `lucky-public.py` to review the two additional rules and pass `--apply` to
+add them. The script preserves existing Web/media rules and credentials, saves a
+root-only configuration backup, and refuses occupied ingress ports. Allow public
+TCP 16601 and 20195 in the ECS security group:
+
+- `https://aliyun.narcissu1.top:16601/SAFE_URL/` exposes the existing authenticated
+  Lucky interface over HTTPS, through Lucky's own loopback reverse proxy.
+- `https://lucky.aliyun.narcissu1.top:20195/SAFE_URL/` is an equivalent management
+  entry on the shared HTTPS listener. Add subrules to **Aliyun public HTTPS
+  services** for future `SERVICE.aliyun.narcissu1.top:20195` applications. The
+  wildcard DNS and certificate cover one label; deeper names need their own cert.
+
+Keep the backend on `127.0.0.1:16602`, retain the safe URL and password, and leave
+OpenToken disabled. The public-access setting permits forwarded public clients;
+the loopback HTTP administration socket remains inaccessible from the Internet.
+Unmatched hostnames have no upstream. HTTP services sharing port 20195 do not
+need additional security-group ports; independent TCP/UDP forwarding still needs
+its specific port opened. DNS-only does not provide Cloudflare orange-cloud WAF.
+The DNS token stays outside Lucky; its existing system timer renews the path cert.
