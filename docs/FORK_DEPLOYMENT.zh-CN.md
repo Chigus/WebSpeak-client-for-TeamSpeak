@@ -45,7 +45,7 @@ Compose 使用 `webspeak-data` 保存数据库和密钥。不要用 `down -v` �
 `ghcr.io/chigus/webspeak:latest`、`nas-macau` 和 `sha-<完整提交SHA>`。
 `latest` 指向最新成功构建，构建失败或还在排队时仍是上一成功版本。
 按完整 SHA 拉取可以确认某一次修改已经发布，不会悄悄使用旧镜像。
-镜像提供 Linux amd64/arm64。
+镜像提供 Linux amd64/arm64，分别在原生执行器构建和验证；两边都成功才更新完整的多架构标签。
 
 ```sh
 export WEBSPEAK_IMAGE=ghcr.io/chigus/webspeak:sha-$(git rev-parse HEAD)
