@@ -10,11 +10,7 @@ SCRIPT="$ROOT/releases/$SHA/scripts/aliyun-relay"
 [ "$(cat "$ROOT/releases/$SHA/COMMIT")" = "$SHA" ]
 systemctl is-active --quiet webspeak-lucky.service
 python3 - <<'PY'
-import socket
 from pathlib import Path
-for port in [16601, 20195]:
-    with socket.socket() as sock:
-        sock.bind(('0.0.0.0', port))
 root=Path('/opt/webspeak-aliyun-relay')
 runtime=root/'runtime.env'
 text=runtime.read_text()
