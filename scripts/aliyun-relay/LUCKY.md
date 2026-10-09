@@ -31,6 +31,7 @@ the root-only DNS token or root-only deployment credentials.
 | Lucky rule | Listener | Fixed destination |
 | --- | --- | --- |
 | Web service | HTTPS/WSS 5555 | `https://2.narcissu1.top:5555` |
+| Web redirect | HTTP 5555 | Fixed hostname HTTPS entry on 5555 |
 | Port forward | UDP and TCP 33478 | `2.narcissu1.top:33478` |
 | TLS port forward | TCP 5349, TLS on | `2.narcissu1.top:33478`, plain TCP |
 | Native TeamSpeak | UDP 9987 | `2.narcissu1.top:9988` |

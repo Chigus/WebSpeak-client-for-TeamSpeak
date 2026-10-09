@@ -181,11 +181,17 @@ def configure(api):
                    'keyPath': str(STATE / 'certs/current/privkey.pem')}))
     print('Lucky certificate configured.', flush=True)
     api.call('api/webservice/rules', 'POST', web_rule())
+    redirect = web_rule()
+    redirect.update(RuleName='WebSpeak HTTP to HTTPS', EnableTLS=False)
+    redirect['ProxyList'][0].update(WebServiceType='redirect',
+                                   Remark='Redirect to encrypted WebSpeak entry',
+                                   Locations=[f'https://{HOST}:5555' + '{path}{args}'])
+    api.call('api/webservice/rules', 'POST', redirect)
     for rule in [port_rule('WebSpeak TURN UDP / TCP via Shenzhen', 33478, 33478, ['tcp4', 'udp4']),
                  port_rule('WebSpeak TURN TLS via Shenzhen', 5349, 33478, ['tcp4'], True),
                  port_rule('Native TeamSpeak UDP via Shenzhen', 9987, 9988, ['udp4'])]:
         api.call('api/portforward', 'POST', rule)
-    print('Lucky HTTPS/WSS and three port-forward rules configured.', flush=True)
+    print('Lucky HTTPS/WSS, HTTP redirect and three port-forward rules configured.', flush=True)
 
 
 def main():
