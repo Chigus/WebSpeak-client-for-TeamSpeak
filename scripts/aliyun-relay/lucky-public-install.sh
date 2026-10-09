@@ -24,6 +24,7 @@ if 'CERT_WILDCARD=true' not in text.splitlines():
     runtime.write_text(text.rstrip()+'\nCERT_WILDCARD=true\n')
     runtime.chmod(0o600)
 PY
+python3 "$SCRIPT/dns-wildcard.py"
 sh "$SCRIPT/issue-cert.sh"
 python3 "$SCRIPT/lucky-config.py" renew
 openssl x509 -in /var/lib/webspeak-lucky/certs/current/fullchain.pem \
