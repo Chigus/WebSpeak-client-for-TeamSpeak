@@ -119,6 +119,10 @@ def certificate_snapshot():
         os.chown(path, 0, gid)
     os.chown(folder, 0, gid)
     os.chown(target, 0, gid)
+    # Deployment uses umask 077; mkdir(mode=0750) alone would produce 0700.
+    # The daemon needs group traversal, while only root can replace certificates.
+    os.chmod(folder, 0o750)
+    os.chmod(target, 0o750)
     link = folder / 'current.new'
     link.unlink(missing_ok=True)
     link.symlink_to(generation, target_is_directory=True)
