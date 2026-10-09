@@ -30,7 +30,7 @@ if [ "$hash" != "$previous" ] || [ "$running" != true ]; then
     docker_cmd restart webspeak-screen-relay >/dev/null
   else
     docker_cmd run -d --name webspeak-screen-relay --restart unless-stopped --network host \
-      --read-only --cap-drop ALL --security-opt no-new-privileges --memory 192m --pids-limit 64 \
+      --read-only --cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges --memory 192m --pids-limit 64 \
       --tmpfs /tmp:size=16m --log-opt max-size=5m --log-opt max-file=2 \
       --mount "type=bind,source=$ROOT/coturn,target=/etc/webspeak-turn,readonly" \
       --entrypoint /usr/bin/turnserver \

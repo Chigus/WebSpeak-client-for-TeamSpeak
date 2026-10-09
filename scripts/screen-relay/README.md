@@ -7,7 +7,9 @@ one stream per viewer. P2P retains the existing ICE configuration.
 Deploy only reviewed, committed copies of `network-config.mjs` and `reconcile.sh`.
 Runtime directories are `/share/CACHEDEV1_DATA/DockerData/webspeak-screen-relay`
 (Macau) and `/opt/webspeak-screen-relay` (Shenzhen). Keep each directory mode 700;
-coturn reads its root-owned config through a read-only bind mount.
+coturn reads only its `coturn/` subdirectory through a read-only bind mount. The
+official binary requires NET_BIND_SERVICE in its capability bounding set; every
+other capability is dropped and privilege escalation is disabled.
 
 Create a private `node.json` (mode 600) with `lanIp`, `gateway`, `realm` and a
 separately generated 32-byte random hexadecimal `secret` for that node.
