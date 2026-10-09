@@ -1,3 +1,5 @@
+import { MusicService, MusicFailure, readMusicConfig } from "./music-service.js";
+import { parseMusicRequest } from "../shared/music.js";
 import { PeerVoiceCoordinator } from "./peer-voice-coordinator.js";
 import { parsePeerVoiceClientMessage } from "../shared/peer-voice.js";
 import { SessionAudioTransport } from "./session-audio.js";
@@ -47,6 +49,7 @@ export interface VoiceBridgeOptions {
 }
 
 interface VoiceBridgeDependencies {
+  musicService?: MusicService;
   createTeamSpeakClient?(options: TSClientOptions, logger: LoggerType): TSClient;
   createEncoder?(): Pick<OpusEncoder, "encode" | "dispose">;
   createStereoEncoder?(): Pick<OpusEncoder, "encode" | "dispose">;
@@ -95,6 +98,7 @@ interface WebClientEntry extends SessionDirectoryState {
 }
 
 export class VoiceBridge {
+  private readonly music: MusicService;
   private readonly sessionManager = new SessionManager();
   private readonly entries = new Map<string, WebClientEntry>();
   private readonly peerVoice: PeerVoiceCoordinator;
@@ -110,6 +114,7 @@ export class VoiceBridge {
     private readonly createWebRtcSession: (options: WebRtcAudioSessionOptions) => WebRtcAudioSession = options => new WebRtcAudioSession(options),
     private readonly dependencies: VoiceBridgeDependencies = {},
   ) {
+    this.music = dependencies.musicService ?? new MusicService(readMusicConfig());
     this.logger = logger.child({ component: "voice-bridge" });
     this.peerVoice = new PeerVoiceCoordinator(this.entries, (entryId, message) => {
       const entry = this.entries.get(entryId);
@@ -458,6 +463,9 @@ export class VoiceBridge {
       });
       entry.events = events;
 
+      const musicLifetime = new AbortController();
+      let musicActive = 0, musicCredits = 10, musicCreditTime = Date.now();
+      ws.once("close", () => musicLifetime.abort());
       ws.on("pong", () => { if (entry) entry.isAlive = true; });
       ws.on("message", (data: Buffer | string, isBinary: boolean) => {
         if (this.entries.get(entryId) !== entry) return;
@@ -467,6 +475,27 @@ export class VoiceBridge {
         }
 
         const rawMessage = typeof data === "string" ? data : data.toString("utf-8");
+        let musicEnvelope: unknown;
+        try { musicEnvelope = JSON.parse(rawMessage); } catch {}
+        if (musicEnvelope && typeof musicEnvelope === "object" && (musicEnvelope as { type?: unknown }).type === "musicRequest") {
+          const request = parseMusicRequest(musicEnvelope);
+          if (!request) { sendProtocolError(sendJson, "INVALID_MUSIC_REQUEST", "音乐请求无效"); return; }
+          const respond = (code: string) => sendJson({ type: "musicResult", requestId: request.requestId, channelId: request.channelId, code });
+          const current = () => this.entries.get(entryId) === entry && session.state === "connected" && tsReady
+            && String(entry!.tsClient.getChannelId()) === request.channelId
+            && entry!.channelTree.some(c => c.id === request.channelId && c.members?.some(m => m.uid === this.music.config?.botUid));
+          if (!tsReady || session.state !== "connected" || String(entry!.tsClient.getChannelId()) !== request.channelId) { respond("MUSIC_SESSION_CHANGED"); return; }
+          const now = Date.now(); musicCredits = Math.min(10, musicCredits + (now - musicCreditTime) / 500); musicCreditTime = now;
+          if (musicActive >= 2 || musicCredits < 1) { respond("MUSIC_BUSY"); return; }
+          musicCredits--; musicActive++;
+          const botChannelId = entry!.channelTree.find(c => c.members?.some(m => m.uid === this.music.config?.botUid))?.id;
+          void this.music.handle(request, { target: formatTeamSpeakTarget(entry!.target), channelId: request.channelId, botChannelId, current, signal: musicLifetime.signal })
+            .then(result => { if (this.entries.get(entryId) === entry && session.state === "connected" && String(entry!.tsClient.getChannelId()) === request.channelId)
+              sendJson({ type: "musicResult", requestId: request.requestId, channelId: request.channelId, result }); })
+            .catch(error => respond(error instanceof MusicFailure ? error.code : "MUSIC_UNAVAILABLE"))
+            .finally(() => { musicActive--; });
+          return;
+        }
         const peerVoiceMessage = parsePeerVoiceClientMessage(rawMessage);
         if (peerVoiceMessage) {
           if (tsReady && session.state === "connected" && !entry!.webrtc) this.peerVoice.handle(entry!, peerVoiceMessage);

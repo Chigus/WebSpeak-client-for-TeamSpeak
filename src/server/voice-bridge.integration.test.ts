@@ -8,6 +8,7 @@ import pino from "pino";
 import { VoiceBridge } from "./voice-bridge.js";
 import { JoinTicketStore } from "./join-ticket.js";
 import { OpusEncoder } from "./opus-codec.js";
+import { MusicService } from "./music-service.js";
 import { normalizeTeamSpeakKickedReason } from "../errors.js";
 import type { TSClient, TSClientAvatar, TSDirectorySnapshot } from "./ts-client.js";
 import type { AudioFlowStats } from "./audio-stats.js";
@@ -34,6 +35,7 @@ class TeamSpeakStub extends EventEmitter {
 }
 
 async function fixture(t: TestContext, overrides: {
+  musicService?: MusicService;
   createTeamSpeakClient?: () => TSClient;
   createEncoder?: () => Pick<OpusEncoder, "encode" | "dispose">;
   createStereoEncoder?: () => Pick<OpusEncoder, "encode" | "dispose">;
@@ -44,6 +46,7 @@ async function fixture(t: TestContext, overrides: {
   const tickets = new JoinTicketStore();
   const bridge = new VoiceBridge({ joinTickets: tickets }, pino({ enabled: false }), undefined, {
     createTeamSpeakClient: overrides.createTeamSpeakClient ?? (() => sdk as unknown as TSClient),
+    ...(overrides.musicService ? { musicService: overrides.musicService } : {}),
     ...(overrides.createEncoder ? { createEncoder: overrides.createEncoder } : {}),
     ...(overrides.createStereoEncoder ? { createStereoEncoder: overrides.createStereoEncoder } : {}),
   });
@@ -76,6 +79,35 @@ async function fixture(t: TestContext, overrides: {
   }> }).entries;
   return { bridge, sdk, socket, messages, entries, wss };
 }
+
+test("music RPC uses actual TeamSpeak membership and refuses a forged channel", { timeout: 5_000 }, async t => {
+  let upstreamCalls = 0;
+  const service = new MusicService({ url:"http://bot.invalid", token:"private", target:"voice.example.invalid:9987", botUid:"music-bot" },
+    async () => { upstreamCalls++; return new Response(JSON.stringify({items:[]})); });
+  const f = await fixture(t, { musicService:service });
+  f.sdk.emit("directorySnapshot", { channels:[{id:1n,parentID:0n,name:"Room",codec:5,codecQuality:10}],
+    clients:[{id:1,uid:"web-user",nickname:"Test",channelID:1n,type:0,serverGroups:[]},{id:9,uid:"music-bot",nickname:"Bot",channelID:1n,type:0,serverGroups:[]}] });
+  await nextTurn();
+  async function ask(channelId:string,id:string) {
+    const answer = new Promise<any>(resolve => {
+      function receive(data:Buffer,binary:boolean) {
+        if(binary)return;const message=JSON.parse(data.toString());
+        if(message.type==="musicResult"&&message.requestId===id){f.socket.off("message",receive);resolve(message);}
+      }
+      f.socket.on("message",receive);
+    });
+    f.socket.send(JSON.stringify({type:"musicRequest",requestId:id,channelId,action:"search",payload:{source:"netease",keywords:"song"}}));
+    return answer;
+  }
+  assert.equal((await ask("2","forged")).code,"MUSIC_SESSION_CHANGED");
+  assert.equal(upstreamCalls,0);
+  assert.equal((await ask("1","allowed")).result.inChannel,true);
+  assert.equal(upstreamCalls,1);
+  f.sdk.emit("clientLeave",{id:9});
+  await nextTurn();
+  assert.equal((await ask("1","departed")).code,"MUSIC_OTHER_CHANNEL");
+  assert.equal(upstreamCalls,1);
+});
 
 test("a TeamSpeak constructor failure releases the admitted gateway slot", { timeout: 5_000 }, async t => {
   const f = await fixture(t, { createTeamSpeakClient() { throw new Error("Identity initialization failed"); } });

@@ -1,0 +1,296 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-09T07:45:24.676Z",
+  "title": "Design System: WebSpeak 频道播放器（局部）",
+  "extensions": {
+    "colorMeta": {
+      "light-accent": {
+        "role": "primary",
+        "displayName": "light-accent",
+        "tonalRamp": [
+          "oklch(15.00% 0.08216 188.00)",
+          "oklch(26.43% 0.08216 188.00)",
+          "oklch(37.86% 0.08216 188.00)",
+          "oklch(49.29% 0.08216 188.00)",
+          "oklch(60.71% 0.08216 188.00)",
+          "oklch(72.14% 0.08216 188.00)",
+          "oklch(83.57% 0.08216 188.00)",
+          "oklch(95.00% 0.08216 188.00)"
+        ]
+      },
+      "light-surface-1": {
+        "role": "neutral",
+        "displayName": "light-surface-1",
+        "tonalRamp": [
+          "oklch(15.00% 0.00000 89.88)",
+          "oklch(26.43% 0.00000 89.88)",
+          "oklch(37.86% 0.00000 89.88)",
+          "oklch(49.29% 0.00000 89.88)",
+          "oklch(60.71% 0.00000 89.88)",
+          "oklch(72.14% 0.00000 89.88)",
+          "oklch(83.57% 0.00000 89.88)",
+          "oklch(95.00% 0.00000 89.88)"
+        ]
+      },
+      "light-surface-2": {
+        "role": "neutral",
+        "displayName": "light-surface-2",
+        "tonalRamp": [
+          "oklch(15.00% 0.00591 170.45)",
+          "oklch(26.43% 0.00591 170.45)",
+          "oklch(37.86% 0.00591 170.45)",
+          "oklch(49.29% 0.00591 170.45)",
+          "oklch(60.71% 0.00591 170.45)",
+          "oklch(72.14% 0.00591 170.45)",
+          "oklch(83.57% 0.00591 170.45)",
+          "oklch(95.00% 0.00591 170.45)"
+        ]
+      },
+      "light-text": {
+        "role": "neutral",
+        "displayName": "light-text",
+        "tonalRamp": [
+          "oklch(15.00% 0.01170 187.11)",
+          "oklch(26.43% 0.01170 187.11)",
+          "oklch(37.86% 0.01170 187.11)",
+          "oklch(49.29% 0.01170 187.11)",
+          "oklch(60.71% 0.01170 187.11)",
+          "oklch(72.14% 0.01170 187.11)",
+          "oklch(83.57% 0.01170 187.11)",
+          "oklch(95.00% 0.01170 187.11)"
+        ]
+      },
+      "light-border": {
+        "role": "neutral",
+        "displayName": "light-border",
+        "tonalRamp": [
+          "oklch(15.00% 0.00941 171.79)",
+          "oklch(26.43% 0.00941 171.79)",
+          "oklch(37.86% 0.00941 171.79)",
+          "oklch(49.29% 0.00941 171.79)",
+          "oklch(60.71% 0.00941 171.79)",
+          "oklch(72.14% 0.00941 171.79)",
+          "oklch(83.57% 0.00941 171.79)",
+          "oklch(95.00% 0.00941 171.79)"
+        ]
+      },
+      "light-danger": {
+        "role": "error",
+        "displayName": "light-danger",
+        "tonalRamp": [
+          "oklch(15.00% 0.14295 25.35)",
+          "oklch(26.43% 0.14295 25.35)",
+          "oklch(37.86% 0.14295 25.35)",
+          "oklch(49.29% 0.14295 25.35)",
+          "oklch(60.71% 0.14295 25.35)",
+          "oklch(72.14% 0.14295 25.35)",
+          "oklch(83.57% 0.14295 25.35)",
+          "oklch(95.00% 0.14295 25.35)"
+        ]
+      },
+      "dark-accent": {
+        "role": "primary",
+        "displayName": "dark-accent",
+        "tonalRamp": [
+          "oklch(15.00% 0.09918 186.39)",
+          "oklch(26.43% 0.09918 186.39)",
+          "oklch(37.86% 0.09918 186.39)",
+          "oklch(49.29% 0.09918 186.39)",
+          "oklch(60.71% 0.09918 186.39)",
+          "oklch(72.14% 0.09918 186.39)",
+          "oklch(83.57% 0.09918 186.39)",
+          "oklch(95.00% 0.09918 186.39)"
+        ]
+      },
+      "dark-surface-1": {
+        "role": "neutral",
+        "displayName": "dark-surface-1",
+        "tonalRamp": [
+          "oklch(15.00% 0.01722 183.47)",
+          "oklch(26.43% 0.01722 183.47)",
+          "oklch(37.86% 0.01722 183.47)",
+          "oklch(49.29% 0.01722 183.47)",
+          "oklch(60.71% 0.01722 183.47)",
+          "oklch(72.14% 0.01722 183.47)",
+          "oklch(83.57% 0.01722 183.47)",
+          "oklch(95.00% 0.01722 183.47)"
+        ]
+      },
+      "dark-surface-2": {
+        "role": "neutral",
+        "displayName": "dark-surface-2",
+        "tonalRamp": [
+          "oklch(15.00% 0.02083 181.06)",
+          "oklch(26.43% 0.02083 181.06)",
+          "oklch(37.86% 0.02083 181.06)",
+          "oklch(49.29% 0.02083 181.06)",
+          "oklch(60.71% 0.02083 181.06)",
+          "oklch(72.14% 0.02083 181.06)",
+          "oklch(83.57% 0.02083 181.06)",
+          "oklch(95.00% 0.02083 181.06)"
+        ]
+      },
+      "dark-text": {
+        "role": "neutral",
+        "displayName": "dark-text",
+        "tonalRamp": [
+          "oklch(15.00% 0.01230 178.02)",
+          "oklch(26.43% 0.01230 178.02)",
+          "oklch(37.86% 0.01230 178.02)",
+          "oklch(49.29% 0.01230 178.02)",
+          "oklch(60.71% 0.01230 178.02)",
+          "oklch(72.14% 0.01230 178.02)",
+          "oklch(83.57% 0.01230 178.02)",
+          "oklch(95.00% 0.01230 178.02)"
+        ]
+      },
+      "dark-border": {
+        "role": "neutral",
+        "displayName": "dark-border",
+        "tonalRamp": [
+          "oklch(15.00% 0.02292 178.89)",
+          "oklch(26.43% 0.02292 178.89)",
+          "oklch(37.86% 0.02292 178.89)",
+          "oklch(49.29% 0.02292 178.89)",
+          "oklch(60.71% 0.02292 178.89)",
+          "oklch(72.14% 0.02292 178.89)",
+          "oklch(83.57% 0.02292 178.89)",
+          "oklch(95.00% 0.02292 178.89)"
+        ]
+      },
+      "dark-danger": {
+        "role": "error",
+        "displayName": "dark-danger",
+        "tonalRamp": [
+          "oklch(15.00% 0.12330 25.33)",
+          "oklch(26.43% 0.12330 25.33)",
+          "oklch(37.86% 0.12330 25.33)",
+          "oklch(49.29% 0.12330 25.33)",
+          "oklch(60.71% 0.12330 25.33)",
+          "oklch(72.14% 0.12330 25.33)",
+          "oklch(83.57% 0.12330 25.33)",
+          "oklch(95.00% 0.12330 25.33)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "title": {
+        "displayName": "当前曲目与歌单标题",
+        "purpose": "继承客户端字体，以曲名建立层级。"
+      },
+      "track": {
+        "displayName": "列表曲名",
+        "purpose": "保持紧凑曲目列表可读。"
+      },
+      "label": {
+        "displayName": "标签与作者",
+        "purpose": "控制说明与辅助文字。"
+      },
+      "metadata": {
+        "displayName": "元数据",
+        "purpose": "序号、时长、统计，数字等宽。"
+      }
+    },
+    "shadows": [
+      {
+        "name": "selected-tab-line",
+        "value": "0 2px 0 var(--accent,#006a64)",
+        "purpose": "选中页签底线，不表示表面提升。"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "music-mobile",
+        "value": "600px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "普通操作按钮",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "搜索、歌单与状态操作；原生按钮继承主题。",
+      "html": "<button class=\"ds-btn\">加入队列</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:7px 9px;border:1px solid var(--border,#e4ece9);border-radius:7px;background:transparent;color:var(--text-primary,#192120);font:inherit;cursor:pointer}.ds-btn:hover:not(:disabled){background:var(--surface-2,#f1f6f4)}.ds-btn:focus-visible{outline:2px solid var(--accent,#006a64);outline-offset:3px}.ds-btn:disabled{opacity:.45;cursor:default}@media(max-width:600px){.ds-btn{min-height:44px}}"
+    },
+    {
+      "name": "共享播放按钮",
+      "kind": "button",
+      "refersTo": "play",
+      "description": "当前曲目的播放入口；图标与主题强调色。",
+      "html": "<button class=\"ds-btn ds-play\" aria-label=\"播放\"><svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"m8 5 11 7-11 7z\"/></svg></button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:7px 9px;border:1px solid var(--border,#e4ece9);border-radius:7px;background:transparent;color:var(--text-primary,#192120);font:inherit;cursor:pointer}.ds-btn:hover:not(:disabled){background:var(--surface-2,#f1f6f4)}.ds-btn:focus-visible{outline:2px solid var(--accent,#006a64);outline-offset:3px}.ds-btn:disabled{opacity:.45;cursor:default}@media(max-width:600px){.ds-btn{min-height:44px}}.ds-play{color:var(--accent,#006a64);background:var(--surface-2,#f1f6f4);width:40px;height:40px;border:0}@media(max-width:600px){.ds-play{width:36px;height:36px}}"
+    },
+    {
+      "name": "搜索输入",
+      "kind": "input",
+      "refersTo": "search-input",
+      "description": "输入关键词；歌单 URL 输入沿用相同表面与轮廓。",
+      "html": "<input class=\"ds-input\" type=\"search\" aria-label=\"歌曲或歌手\" placeholder=\"歌曲或歌手\"/>",
+      "css": ".ds-input{border:1px solid var(--border,#e4ece9);border-radius:7px;background:var(--surface-1,#fff);padding:9px;min-width:0;font:inherit;font-size:13px;color:var(--text-primary,#192120);caret-color:var(--accent,#006a64)}.ds-input::placeholder{color:color-mix(in srgb,var(--text-primary,#192120) 82%,var(--surface-1,#fff))}.ds-input:focus-visible{outline:2px solid var(--accent,#006a64);outline-offset:3px}@media(max-width:600px){.ds-input{font-size:16px}}"
+    },
+    {
+      "name": "浏览页签",
+      "kind": "nav",
+      "description": "搜索、队列、歌单的选中状态预览；实际键盘行为由 Vue 组件提供。",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\" aria-label=\"频道音乐\"><button role=\"tab\" aria-selected=\"true\">搜索</button><button role=\"tab\" tabindex=\"-1\" aria-selected=\"false\">队列</button><button role=\"tab\" tabindex=\"-1\" aria-selected=\"false\">歌单</button></div>",
+      "css": ".ds-tabs{display:flex;gap:18px;border-bottom:1px solid var(--border,#e4ece9)}.ds-tabs button{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:8px 0 10px;border:0;border-radius:0;background:transparent;color:var(--text-primary,#192120);font:inherit;font-size:13px;cursor:pointer}.ds-tabs button:hover{background:var(--surface-2,#f1f6f4)}.ds-tabs button[aria-selected=true]{color:var(--accent,#006a64);box-shadow:0 2px 0 var(--accent,#006a64)}.ds-tabs button:focus-visible{outline:2px solid var(--accent,#006a64);outline-offset:3px}@media(max-width:600px){.ds-tabs{gap:20px}.ds-tabs button{min-height:44px}}"
+    },
+    {
+      "name": "已保存歌单入口",
+      "kind": "chip",
+      "refersTo": "button",
+      "description": "保存歌单的可操作入口，以小字标注来源。",
+      "html": "<button class=\"ds-btn ds-saved\">我的歌单 <small>网易云</small></button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:7px 9px;border:1px solid var(--border,#e4ece9);border-radius:7px;background:transparent;color:var(--text-primary,#192120);font:inherit;cursor:pointer}.ds-btn:hover:not(:disabled){background:var(--surface-2,#f1f6f4)}.ds-btn:focus-visible{outline:2px solid var(--accent,#006a64);outline-offset:3px}.ds-btn:disabled{opacity:.45;cursor:default}@media(max-width:600px){.ds-btn{min-height:44px}}.ds-saved{max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.ds-saved small{font-size:10px;color:color-mix(in srgb,var(--text-primary,#192120) 82%,var(--surface-1,#fff))}"
+    },
+    {
+      "name": "播放器表面",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "宿主内部的细边界容器，不新增浮层阴影。",
+      "html": "<section class=\"ds-panel\" aria-label=\"频道音乐\"><div class=\"ds-summary\"><strong>频道音乐</strong><span>同频道共享播放</span></div></section>",
+      "css": ".ds-panel{border:1px solid var(--border,#e4ece9);border-radius:12px;background:var(--surface-1,#fff);color:var(--text-primary,#192120);overflow:hidden;min-width:0;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}.ds-summary{display:grid;gap:3px;padding:15px 16px}.ds-summary strong{font-size:14px}.ds-summary span{font-size:12px;color:color-mix(in srgb,var(--text-primary,#192120) 82%,var(--surface-1,#fff))}@media(max-width:600px){.ds-summary{padding:12px}}"
+    },
+    {
+      "name": "曲目行",
+      "kind": "custom",
+      "description": "曲名、作者、来源与操作保持同一行；窄屏隐藏时长。",
+      "html": "<div class=\"ds-row\"><span class=\"ds-index\">1</span><div class=\"ds-track\"><strong title=\"示例曲目\">示例曲目</strong><span>示例作者 <small>QQ</small></span></div><span class=\"ds-duration\">3:42</span><button class=\"ds-btn ds-row-action\" aria-label=\"立即播放：示例曲目\"><svg viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"m8 5 11 7-11 7z\"/></svg></button></div>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:7px 9px;border:1px solid var(--border,#e4ece9);border-radius:7px;background:transparent;color:var(--text-primary,#192120);font:inherit;cursor:pointer}.ds-btn:hover:not(:disabled){background:var(--surface-2,#f1f6f4)}.ds-btn:focus-visible{outline:2px solid var(--accent,#006a64);outline-offset:3px}.ds-btn:disabled{opacity:.45;cursor:default}@media(max-width:600px){.ds-btn{min-height:44px}}.ds-row{display:flex;gap:9px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border,#e4ece9);color:var(--text-primary,#192120);font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}.ds-index{width:20px;flex:0 0 auto;text-align:right;font-size:11px;font-variant-numeric:tabular-nums}.ds-track{display:grid;gap:4px;flex:1;min-width:0}.ds-track strong{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ds-track>span{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:color-mix(in srgb,var(--text-primary,#192120) 82%,var(--surface-1,#fff))}.ds-track small{font-size:10px;margin-left:8px}.ds-duration{font-size:11px;font-variant-numeric:tabular-nums}.ds-row-action{border:0;min-width:34px}@media(max-width:600px){.ds-duration{display:none}.ds-row-action{min-width:38px}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "沿用语音工作台",
+    "overview": "这是已实现局部扩展的记录，不设立新的产品世界或全局设计契约。面板在既有语音工作台中连续呈现当前曲目、共享播放操作与歌曲浏览，使用现有字体、主题变量和 Icon 组件。上方摘要可独立阅读，下方浏览区按需展开。",
+    "keyCharacteristics": [
+      "继承当前皮肤的语义变量，强调色用于播放、选中与焦点。",
+      "紧凑文字层级与可滚动曲目列表，曲名优先于次要元数据。",
+      "同频道控制条件、加载、错误、空状态与批量进度可见。",
+      "手机控件换行，保留原生输入与键盘焦点。"
+    ],
+    "rules": [
+      {
+        "name": "皮肤继承",
+        "body": "局部面板以当前皮肤变量为颜色源，不将内置皮肤快照替代为运行时硬编码。",
+        "section": "colors"
+      },
+      {
+        "name": "曲名优先",
+        "body": "狭窄布局先省略曲目文字、隐藏时长并换行表单，保留曲目与播放操作的对应关系。",
+        "section": "layout"
+      }
+    ],
+    "dos": [
+      "**Do** 使用已有语义颜色变量与客户端字体，局部变化限于此面板。",
+      "**Do** 保持曲名、所属动作与同频道共享提示的可读关系。",
+      "**Do** 保留原生控件、焦点轮廓、页签键盘操作和异步状态反馈。"
+    ],
+    "donts": [
+      "**Don't** 将这个局部布局推广为全局产品或品牌规则。",
+      "**Don't** 将来源标记的小字号用于主要曲名或操作标签。",
+      "**Don't** 将 UI fixture 的语音或播放状态写成真实音频验证，也不声称未提供的 Illusia 截图已经验收。"
+    ]
+  }
+}

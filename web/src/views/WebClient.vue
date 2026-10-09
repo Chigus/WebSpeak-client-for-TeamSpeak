@@ -288,6 +288,7 @@
             class="workspace-actions"
             data-ws-part="voice.header-actions"
           >
+            <button type="button" class="header-action" :aria-label="musicText(language,'title')" :title="musicText(language,'title')" @click="openMusic"><Icon name="music" :size="18" /></button>
             <VoicePerformancePanel
               :model="performance"
               :screen-share-web-rtc-stats="screenShareWebRtcStats"
@@ -475,6 +476,7 @@
                 @member-actions="openMemberActions"
                 @stop-share="stopScreenShare"
               />
+              <ChannelMusicPanel v-model:open="musicOpen" :model="music" :language="language" @join-channel="selectChannelById" />
               <WhisperControls
                 v-if="whisperTargetIds.size"
                 :targets="whisperTargets"
@@ -722,7 +724,7 @@
 
 <script setup lang="ts">
 import { observeMobileViewport } from "../services/mobile-viewport.js";
-import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from "vue";
 import Icon from "../components/Icon.vue";
 import VoiceMemberCards from "../components/web-client/VoiceMemberCards.vue";
 import VoicePerformancePanel from "../components/web-client/VoicePerformancePanel.vue";
@@ -736,6 +738,9 @@ import ServerPasswordDialog from "../components/web-client/ServerPasswordDialog.
 import ChannelMemberPanel from "../components/web-client/ChannelMemberPanel.vue";
 import MemberActionsMenu from "../components/web-client/MemberActionsMenu.vue";
 import JoinForm from "../components/web-client/JoinForm.vue";
+import ChannelMusicPanel from "../components/web-client/ChannelMusicPanel.vue";
+import { useWebClientMusic } from "../composables/useWebClientMusic.js";
+import { musicText } from "../i18n/music.js";
 import ChatPanel from "../components/web-client/ChatPanel.vue";
 import WebClientHeader from "../components/web-client/WebClientHeader.vue";
 import IdentityImportDialog from "../components/web-client/IdentityImportDialog.vue";
@@ -857,6 +862,7 @@ const {
   checkSupport,
   clearError,
   measureVoiceAudioStatus,
+  requestMusic,
 } = useVoiceWebSocket();
 const performance = useWebClientPerformance(computed(() => voiceState.connected), measureVoiceAudioStatus);
 const { panelOpen: performancePanelOpen } = performance;
@@ -1099,6 +1105,18 @@ const {
   whisperTargetIds,
   t,
 });
+const musicOpen = ref(false);
+const music = useWebClientMusic({
+  connected: computed(() => voiceState.connected),
+  channelId: computed(() => currentChannel.value?.id ?? ""),
+  request: requestMusic,
+  storage: (() => { try { return window.localStorage; } catch { return undefined; } })(),
+});
+function openMusic(): void {
+  musicOpen.value = true;
+  if (isMobileViewport.value) selectMobileSection("voice");
+  void nextTick(() => document.querySelector('[data-ws-part="voice.music"]')?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+}
 const memberControls = useWebClientMembers({
   channels: memberChannels,
   currentChannel,

@@ -1,3 +1,4 @@
+import { isMusicResponse, type MusicResponse } from "./music.js";
 import { isPeerVoiceServerMessage, type PeerVoiceServerMessage } from "./peer-voice.js";
 import type { ChannelMember, ChannelInfo, ServerEvent, VoiceAudioBridgeStats } from "./voice-models.js";
 import { normalizeScreenShareIceServers, parseScreenShareSignal, type ScreenShareIceServer, type ScreenSharePeerSignal, type ScreenShareStreamDescription, type ScreenShareViewerDescription } from "./screen-share.js";
@@ -12,7 +13,7 @@ type Failure = { code?: string; detail?: string };
 type ChatFields = { invokerId?: number; invokerName?: string; message: string; timestamp?: number };
 
 /** Public JSON messages. Internal sockets, SDK clients and media objects stay out. */
-export type ServerMessage = PeerVoiceServerMessage
+export type ServerMessage = MusicResponse | PeerVoiceServerMessage
   | Message<"connected", { tsClientId: number; members?: ChannelMember[]; serverEventLog?: ServerEvent[]; identity?: string; peerVoiceAvailable?: boolean; webrtcAvailable?: boolean; webRtcStunServer?: string; whisperTargetIds?: number[]; whisperActive?: boolean; screenShareIceServers?: ScreenShareIceServer[]; accelerated?: boolean }>
   | Message<"memberEnter", ChannelMember>
   | Message<"memberLeave", { id: number }>
@@ -110,6 +111,7 @@ export function parseScreenShareStream(value: unknown): ScreenShareStreamDescrip
 }
 
 const valid: Record<ServerMessage["type"], (message: RecordValue) => boolean> = {
+  musicResult: isMusicResponse,
   connected: m => optional(m.peerVoiceAvailable, boolean) && clientId(m.tsClientId) && optional(m.members, v => arrayOf(v, member)) && optional(m.serverEventLog, v => arrayOf(v, event))
     && optional(m.identity, v => text(v) && v.length <= 8192) && optional(m.webrtcAvailable, boolean) && optional(m.webRtcStunServer, v => normalizeVoiceStunServer(v) !== null)
     && optional(m.whisperTargetIds, v => arrayOf(v, clientId)) && optional(m.whisperActive, boolean) && optional(m.accelerated, boolean),

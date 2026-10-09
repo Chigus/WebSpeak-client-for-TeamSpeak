@@ -31,6 +31,10 @@
     </template>
     <path v-else-if="name === 'mic'" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Zm-7-3a7 7 0 0 0 14 0m-7 7v3m-3 0h6" />
     <path v-else-if="name === 'mic-off'" d="m4 4 16 16M10 6v5a2 2 0 0 0 3.2 1.6M14 6V5a2 2 0 0 0-3.7-1M5 11a7 7 0 0 0 10.6 6m3.4-6a7 7 0 0 0-.5-2.5M12 18v3m-3 0h6" />
+    <path v-else-if="name === 'play'" d="m8 5 11 7-11 7z" />
+    <path v-else-if="name === 'pause'" d="M8 5v14M16 5v14" stroke-width="3" />
+    <path v-else-if="name === 'next'" d="m5 5 11 7-11 7zM19 5v14" />
+    <path v-else-if="name === 'previous'" d="m19 5-11 7 11 7zM5 5v14" />
     <template v-else-if="name === 'music'">
       <path d="M9 18V5l10-2v13" />
       <circle cx="6" cy="18" r="3" />

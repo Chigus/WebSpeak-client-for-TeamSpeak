@@ -1,3 +1,4 @@
+import { createMusicRequests } from "../voice/music-requests.js";
 import { createRemotePlayback } from "../voice/remote-playback.js";
 import { createMicrophoneTest } from "../voice/microphone-test.js";
 import { createMicrophoneCaptureFactory, type MicrophoneCapture, type MicrophoneProcessingSettings } from "../voice/microphone-capture.js";
@@ -193,6 +194,7 @@ class CancelledMediaOperation extends Error {
 
 export function useVoiceWebSocket() {
   const ws = shallowRef<WebSocket | null>(null);
+  const musicRequests = createMusicRequests(() => ws.value);
   const state = reactive<VoiceState>({ connected: false, connecting: false, reconnecting: false, reconnectAttempt: 0, reconnectFailed: false, tsClientId: 0, error: "", errorCode: "", microphoneError: "", microphoneErrorCode: "", audioNotice: "", audioNoticeCode: "", channelSwitchedChannelId: "" });
   const sessionState = createVoiceSessionState({
     selfId: () => state.tsClientId,
@@ -1124,6 +1126,7 @@ export function useVoiceWebSocket() {
     stereoInputEnabled.value = committedStereoInputEnabled;
     microphoneTest.dispose();
     audioDiagnostics.reset();
+    musicRequests.clear();
     commands.clear(new Error("语音连接已关闭"));
     peerVoice.disconnect();
     screenShare.stopTransport(sendScreenStop);
@@ -1179,7 +1182,9 @@ export function useVoiceWebSocket() {
         }
         screenShare.refreshStreams();
         break;
+      case "musicResult": musicRequests.receive(msg); break;
       case "channelSwitched":
+        musicRequests.clear();
         state.channelSwitchedChannelId = typeof msg.channelId === "string" || typeof msg.channelId === "number" ? String(msg.channelId) : "";
         state.error = "";
         state.errorCode = "";
@@ -1646,5 +1651,6 @@ export function useVoiceWebSocket() {
     checkSupport,
     clearError,
     measureVoiceAudioStatus,
+    requestMusic: musicRequests.request,
   };
 }

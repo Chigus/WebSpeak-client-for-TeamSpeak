@@ -36,4 +36,5 @@ services:
   netease-api:
     image: webspeak-netease-api:4.32.0
     restart: unless-stopped
+    ports: ["127.0.0.1:18030:3000"]
     logging: *logging

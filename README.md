@@ -30,7 +30,7 @@
 
 ## 相对原版新增的内容
 
-本仓库由 [EchoSixHIYA/WebSpeak-client-for-TeamSpeak](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak) 的 **WebSpeak 0.2.6** 派生，维护分支为 `nas/macau`，当前功能版本为 `0.2.6-stereo.5`。以下是本 fork 在原版基础上新增或扩展的内容；TeamSpeak 3/6 兼容、聊天、身份管理、皮肤、多语言和跨端 P2P 屏幕共享等能力沿用原项目。
+本仓库由 [EchoSixHIYA/WebSpeak-client-for-TeamSpeak](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak) 的 **WebSpeak 0.2.6** 派生，维护分支为 `nas/macau`，当前功能版本为 `0.2.6-stereo.6`。以下是本 fork 在原版基础上新增或扩展的内容；TeamSpeak 3/6 兼容、聊天、身份管理、皮肤、多语言和跨端 P2P 屏幕共享等能力沿用原项目。
 
 | 新增 / 扩展 | 本 fork 提供的变化 |
 | --- | --- |
@@ -38,6 +38,7 @@
 | 双向三档 RNNoise 降噪 | 自己的麦克风与自己听到的成员分别设置开关及轻 / 中 / 重档位；接收处理保留左右声道，模型失败回退原音。 |
 | 网页语音 P2P | 同网关、同服务器、同频道的 2～5 位网页用户主动开启后直连；失败回退服务器，原生 TeamSpeak 与私语仍走服务器。 |
 | 语音稳定性改进 | 固定立体声 Opus 包大小，改善 WSS 抖动下的连续播放，并限制播放与发送缓存。 |
+| 网页频道音乐播放器 | 接入独立 TSBot，支持网易云 / QQ 搜索、按钮点歌、分享歌单导入、分页和共同播放控制，无需输入传统指令。 |
 | 深圳 / 澳门中转工具 | 提供 HTTPS/WSS 与原生 TS UDP 中转配置、证书续期及可撤销路由器转发脚本；需部署自己的网络与域名。 |
 | fork 部署与发布 | 默认 Compose 构建本分支；本仓库 GHCR 提供 amd64/arm64 镜像及提交 SHA 标签，另有 NAS Git 发布、回退和对应源码下载。 |
 
@@ -48,6 +49,8 @@
 所有最新改动以 `nas/macau` 分支的提交为准。
 
 [部署与更新指南](./docs/FORK_DEPLOYMENT.zh-CN.md) · [双向降噪与 P2P](./docs/PEER_VOICE_AND_DENOISING.zh-CN.md) · [NAS 发布流程](./docs/NAS_GIT_DEPLOYMENT.zh-CN.md)
+
+音乐播放器需另行部署 TSBot 并配置平台授权、机器人 UID 和私有服务连接，见 [频道音乐使用与部署](./docs/CHANNEL_MUSIC.zh-CN.md)。
 
 默认 Docker Compose 从当前源码构建。每次推送维护分支后，GitHub Actions 验证成功才更新 `ghcr.io/chigus/webspeak:latest`；已有部署需要重新构建/拉取并重建容器。Release 下载包只对应发布时的提交。
 
