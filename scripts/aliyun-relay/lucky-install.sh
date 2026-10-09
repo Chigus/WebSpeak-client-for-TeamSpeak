@@ -21,7 +21,7 @@ python3 - <<'PY'
 import socket
 opened=[]
 try:
-    for kind,ports in [(socket.SOCK_STREAM,[5555,33478,5349,16601]),(socket.SOCK_DGRAM,[33478,9987])]:
+    for kind,ports in [(socket.SOCK_STREAM,[5555,33478,5349,16602]),(socket.SOCK_DGRAM,[33478,9987])]:
         for port in ports:
             sock=socket.socket(socket.AF_INET,kind)
             opened.append(sock)

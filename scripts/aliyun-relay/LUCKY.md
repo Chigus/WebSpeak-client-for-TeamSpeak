@@ -46,8 +46,8 @@ for longer than 30 seconds and size concurrency separately from bandwidth.
 TURN credentials are still issued by Macau using the existing Shenzhen secret.
 Gateway-side TURN URLs must continue to point to Shenzhen, as README.md explains.
 
-Lucky's backend listens on **127.0.0.1:16601** only. Access it using an ordinary
-administrator SSH tunnel (`ssh -L 16601:127.0.0.1:16601 root@ECS_IP`) and the safe
+Lucky's backend listens on **127.0.0.1:16602** only. Access it using an ordinary
+administrator SSH tunnel (`ssh -L 16602:127.0.0.1:16602 root@ECS_IP`) and the safe
 entry path/account/password in the root-only
 `/opt/webspeak-aliyun-relay/lucky-admin.json`. The task's temporary restricted SSH
 key deliberately cannot forward ports. Use the owner's normal administration

@@ -19,7 +19,7 @@ BIN = '/usr/local/lib/webspeak-lucky/2.27.2/lucky'
 
 
 class API:
-    def __init__(self, base='http://127.0.0.1:16601/', credentials=None):
+    def __init__(self, base='http://127.0.0.1:16602/', credentials=None):
         self.base = base
         self.token = None
         if credentials:
@@ -58,7 +58,7 @@ def bootstrap():
     process = subprocess.Popen([BIN, '-cd', str(STATE / 'conf'), '-ds'],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        api = API()
+        api = API(base='http://127.0.0.1:16601/')
         for attempt in range(30):
             try:
                 api.login({'Account': '666', 'Password': '666'})
@@ -70,7 +70,9 @@ def bootstrap():
         conf = api.call('api/baseconfigure')['baseconfigure']
         credentials = {'Account': 'lucky-admin', 'Password': secrets.token_urlsafe(30),
                        'SafeURL': secrets.token_urlsafe(24)}
-        conf.update(AdminWebListenIP='127.0.0.1', AdminWebListenPort=16601,
+        # Lucky opens the new socket before closing the old wildcard listener.
+        # Change the port as well as the address to avoid Linux EADDRINUSE.
+        conf.update(AdminWebListenIP='127.0.0.1', AdminWebListenPort=16602,
                     AdminWebListenTLS=False, AdminAccount=credentials['Account'],
                     AdminPassword=credentials['Password'], SafeURL=credentials['SafeURL'],
                     AllowInternetaccess=False, EnableOpenToken=False,
