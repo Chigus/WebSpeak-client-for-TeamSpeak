@@ -91,7 +91,8 @@ document.querySelector('#start').onclick = async event => {
       } else await wait(() => document.querySelector('#remote').srcObject, 'Cross-network return stream');
       await document.querySelector('#remote').play();
       await wait(() => peers.slice(start).length === (crossNetwork ? 1 : 2) && peers.slice(start).every(p => p.connectionState === 'connected'), 'ICE/DTLS connection');
-      await delay(aliyunCheck ? 20000 : 2200);
+      // Exceed Lucky's 30-second UDP idle timeout to exercise active consent traffic.
+      await delay(aliyunCheck ? 45000 : 2200);
       const snapshots = await Promise.all(peers.slice(start).map(async p => {
         const stats = [...(await p.getStats()).values()];
         const selected = stats.find(s => s.type === 'transport' && s.selectedCandidatePairId);

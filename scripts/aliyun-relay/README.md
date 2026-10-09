@@ -1,5 +1,9 @@
 # Aliyun entry through Shenzhen
 
+**Current deployment: [Lucky 2.27.2](LUCKY.md).** Use its installation procedure
+to manage the Web proxy and TCP/UDP/TLS rules through Lucky. The Nginx runtime
+procedure below is retained as an alternative implementation.
+
 This entry preserves the Macau WebSpeak gateway and native TeamSpeak server.
 Aliyun forwards only to the existing Shenzhen entry; it does not run another
 gateway, mixer, coturn server, database or TeamSpeak instance.
