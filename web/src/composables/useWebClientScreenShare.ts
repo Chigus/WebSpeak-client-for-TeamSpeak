@@ -1,4 +1,5 @@
 import { computed, onMounted, onBeforeUnmount, ref, watch, type Ref } from "vue";
+import { isScreenShareRoute, type ScreenShareRelayId, type ScreenShareRoute } from "../../../src/shared/screen-share.js";
 import type { ChannelMember, ScreenShareOutputSettings, ScreenShareStream } from "./useVoiceWebSocket.js";
 
 export type ScreenShareResolutionPreset = "source" | "720p" | "1080p";
@@ -11,6 +12,7 @@ interface ScreenShareResolutionOption {
 }
 
 interface UseWebClientScreenShareOptions {
+  relays?: Ref<ScreenShareRelayId[]>;
   streams: ScreenShareStream[];
   viewing: Ref<boolean>;
   viewingStreamId: Ref<string>;
@@ -27,6 +29,7 @@ interface UseWebClientScreenShareOptions {
 }
 
 export function useWebClientScreenShare({
+  relays = ref<ScreenShareRelayId[]>([]),
   streams,
   viewing,
   viewingStreamId,
@@ -55,11 +58,20 @@ export function useWebClientScreenShare({
   const storedFrameRate = Number(localStorage.getItem("webspeak:screen-share-framerate"));
   const frameRate = ref(frameRateOptions.includes(storedFrameRate) ? storedFrameRate : 15);
   const settingsOpen = ref(false);
+  const storedRoute = localStorage.getItem("webspeak:screen-share-route");
+  const route = ref<ScreenShareRoute>(isScreenShareRoute(storedRoute) ? storedRoute : "p2p");
+  const routeOptions = computed(() => (["p2p", "macau", "shenzhen"] as const).map(id => ({
+    value: id, label: `screenShareRoute_${id}`, available: id === "p2p" || relays.value.includes(id),
+  })));
+  const routeAvailable = computed(() => route.value === "p2p" || relays.value.includes(route.value));
   const activeStream = computed<ScreenShareStream | null>(() => streams.find((stream) => stream.streamId === viewingStreamId.value) ?? null);
   const viewers = computed(() => activeStream.value?.viewers.slice(-5) ?? []);
   const viewerCount = computed(() => activeStream.value?.viewerCount ?? activeStream.value?.viewers.length ?? 0);
   const ownerName = computed(() => activeStream.value?.ownerNickname ?? t("screenShare"));
-  const errorText = computed(() => errorCode.value === "SCREEN_SHARE_NATIVE_BRIDGE_REQUIRED" ? t("screenShareNativeUnavailable") : error.value);
+  const routeLabel = computed(() => t(`screenShareRoute_${activeStream.value?.route ?? "p2p"}`));
+  const errorText = computed(() => errorCode.value === "SCREEN_SHARE_NATIVE_BRIDGE_REQUIRED" ? t("screenShareNativeUnavailable")
+    : errorCode.value === "SCREEN_SHARE_RELAY_UNAVAILABLE" ? t("screenShareRelayUnavailable")
+    : errorCode.value === "SCREEN_SHARE_RELAY_FAILED" ? t("screenShareRelayFailed") : error.value);
 
   function setVideoElement(element: unknown): void {
     if (videoElement.value && videoElement.value !== element) videoElement.value.srcObject = null;
@@ -114,13 +126,16 @@ export function useWebClientScreenShare({
   }
 
   async function startWithSettings(): Promise<void> {
+    if (!routeAvailable.value) return;
     const preset = resolutionOptions.find((option) => option.value === resolutionPreset.value);
     const settings: ScreenShareOutputSettings = {
       ...(preset?.width && preset.height ? { maxWidth: preset.width, maxHeight: preset.height } : {}),
       maxFrameRate: frameRate.value,
+      ...(route.value !== "p2p" ? { route: route.value } : {}),
     };
     localStorage.setItem("webspeak:screen-share-resolution", resolutionPreset.value);
     localStorage.setItem("webspeak:screen-share-framerate", String(frameRate.value));
+    localStorage.setItem("webspeak:screen-share-route", route.value);
     settingsOpen.value = false;
     await startScreenShare(true, settings);
   }
@@ -149,6 +164,10 @@ export function useWebClientScreenShare({
     resolutionOptions,
     frameRateOptions,
     resolutionPreset,
+    route,
+    routeOptions,
+    routeAvailable,
+    routeLabel,
     frameRate,
     settingsOpen,
     activeStream,

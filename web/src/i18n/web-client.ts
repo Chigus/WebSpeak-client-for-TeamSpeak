@@ -1785,6 +1785,47 @@ for (const language of Object.keys(peerVoiceTranslations) as Language[]) {
   Object.assign(webClientTranslations[language]!, peerVoiceTranslations[language]);
 }
 
+const screenShareRouteTranslations: Record<Language, Record<string, string>> = {
+  zh: {
+    screenShareRoute: "共享线路", screenShareRoute_p2p: "P2P 直连", screenShareRoute_macau: "澳门服务器", screenShareRoute_shenzhen: "深圳服务器",
+    screenShareRouteUnconfigured: "未配置", screenShareRouteP2PHint: "与观看者直接连接。网络不通时，可结束共享后改选服务器线路。",
+    screenShareRouteRelayHint: "画面经所选服务器转发，观看者跟随此线路。切换线路需停止并重新共享。",
+    screenShareRelayUnavailable: "所选共享服务器未配置或授权已失效，请重新选择线路并开始共享。",
+    screenShareRelayFailed: "共享服务器连接失败。请结束共享后选择其他线路；本次不会自动改用 P2P。",
+  },
+  en: {
+    screenShareRoute: "Sharing route", screenShareRoute_p2p: "Direct P2P", screenShareRoute_macau: "Macau server", screenShareRoute_shenzhen: "Shenzhen server",
+    screenShareRouteUnconfigured: "Not configured", screenShareRouteP2PHint: "Connect directly to viewers. If the connection fails, stop sharing and choose a server route.",
+    screenShareRouteRelayHint: "Video travels through the selected server for every viewer. Stop and restart sharing to change the route.",
+    screenShareRelayUnavailable: "The selected sharing server is unavailable or its authorization expired. Select a route and start sharing again.",
+    screenShareRelayFailed: "The sharing server could not connect. Stop sharing and select another route; this session will not fall back to P2P.",
+  },
+  de: {
+    screenShareRoute: "Übertragungsweg", screenShareRoute_p2p: "P2P-Direktverbindung", screenShareRoute_macau: "Server Macau", screenShareRoute_shenzhen: "Server Shenzhen",
+    screenShareRouteUnconfigured: "Nicht konfiguriert", screenShareRouteP2PHint: "Direkte Verbindung zu Zuschauern. Bei Problemen die Freigabe beenden und einen Server wählen.",
+    screenShareRouteRelayHint: "Das Bild läuft für alle Zuschauer über den gewählten Server. Zum Wechseln die Freigabe beenden und neu starten.",
+    screenShareRelayUnavailable: "Der Server ist nicht verfügbar oder die Berechtigung ist abgelaufen. Übertragungsweg wählen und erneut teilen.",
+    screenShareRelayFailed: "Serververbindung fehlgeschlagen. Freigabe beenden und einen anderen Weg wählen; kein automatischer Wechsel zu P2P.",
+  },
+  ru: {
+    screenShareRoute: "Маршрут трансляции", screenShareRoute_p2p: "Напрямую P2P", screenShareRoute_macau: "Сервер Макао", screenShareRoute_shenzhen: "Сервер Шэньчжэнь",
+    screenShareRouteUnconfigured: "Не настроен", screenShareRouteP2PHint: "Прямое соединение со зрителями. При сбое остановите трансляцию и выберите сервер.",
+    screenShareRouteRelayHint: "Видео для всех зрителей проходит через выбранный сервер. Для смены маршрута перезапустите трансляцию.",
+    screenShareRelayUnavailable: "Сервер недоступен или срок доступа истёк. Выберите маршрут и начните трансляцию снова.",
+    screenShareRelayFailed: "Не удалось подключиться к серверу. Остановите трансляцию и выберите другой маршрут; автоматического перехода на P2P нет.",
+  },
+  ja: {
+    screenShareRoute: "共有経路", screenShareRoute_p2p: "P2P 直接接続", screenShareRoute_macau: "マカオサーバー", screenShareRoute_shenzhen: "深圳サーバー",
+    screenShareRouteUnconfigured: "未設定", screenShareRouteP2PHint: "視聴者に直接接続します。接続できない場合は共有を停止してサーバーを選択してください。",
+    screenShareRouteRelayHint: "全視聴者への映像を選択したサーバーで中継します。経路を変更するには共有を停止して再開してください。",
+    screenShareRelayUnavailable: "共有サーバーが利用できないか認証の期限が切れました。経路を選び直して共有してください。",
+    screenShareRelayFailed: "共有サーバーに接続できません。共有を停止して別の経路を選んでください。P2P には自動で切り替わりません。",
+  },
+};
+for (const language of Object.keys(screenShareRouteTranslations) as Language[]) {
+  Object.assign(webClientTranslations[language]!, screenShareRouteTranslations[language]);
+}
+
 export function getInitialLanguage(): Language {
   const stored = localStorage.getItem("webspeak:language");
   if (stored === "zh" || stored === "en" || stored === "de" || stored === "ru" || stored === "ja") return stored;

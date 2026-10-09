@@ -1161,6 +1161,7 @@ export function useVoiceWebSocket() {
         sendCmd("setMicrophoneMuted", { muted: microphoneMuted.value });
         peerVoice.connect(msg.peerVoiceAvailable === true, msg.screenShareIceServers);
         screenShare.setIceServers(msg.screenShareIceServers);
+        screenShare.setRelays(msg.screenShareRelays);
         webRtcStunServer = msg.webRtcStunServer ?? "";
         sessionState.connected(msg);
         applyWhisperState(msg.whisperTargetIds, msg.whisperActive);

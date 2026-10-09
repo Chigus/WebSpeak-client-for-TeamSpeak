@@ -30,12 +30,13 @@
 
 ## 相对原版新增的内容
 
-本仓库由 [EchoSixHIYA/WebSpeak-client-for-TeamSpeak](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak) 的 **WebSpeak 0.2.6** 派生，维护分支为 `nas/macau`，当前功能版本为 `0.2.6-stereo.6`。以下是本 fork 在原版基础上新增或扩展的内容；TeamSpeak 3/6 兼容、聊天、身份管理、皮肤、多语言和跨端 P2P 屏幕共享等能力沿用原项目。
+本仓库由 [EchoSixHIYA/WebSpeak-client-for-TeamSpeak](https://github.com/EchoSixHIYA/WebSpeak-client-for-TeamSpeak) 的 **WebSpeak 0.2.6** 派生，维护分支为 `nas/macau`，当前功能版本为 `0.2.6-stereo.7`。以下是本 fork 在原版基础上新增或扩展的内容；TeamSpeak 3/6 兼容、聊天、身份管理、皮肤、多语言和跨端 P2P 屏幕共享等能力沿用原项目。
 
 | 新增 / 扩展 | 本 fork 提供的变化 |
 | --- | --- |
 | 人头麦 / 立体声原音 | 独立采集、传输和播放左右声道，显示左右电平；TeamSpeak 路径使用双声道 Opus Music、192 kbps 固定码率。 |
 | 双向三档 RNNoise 降噪 | 自己的麦克风与自己听到的成员分别设置开关及轻 / 中 / 重档位；接收处理保留左右声道，模型失败回退原音。 |
+| 屏幕共享线路 | 共享前选择 P2P、澳门或深圳服务器；观看者跟随共享者，服务器失败不自动回退直连。 [部署与限制](./scripts/screen-relay/README.md) |
 | 网页语音 P2P | 同网关、同服务器、同频道的 2～5 位网页用户主动开启后直连；失败回退服务器，原生 TeamSpeak 与私语仍走服务器。 |
 | 语音稳定性改进 | 固定立体声 Opus 包大小，改善 WSS 抖动下的连续播放，并限制播放与发送缓存。 |
 | 网页频道音乐播放器 | 接入独立 TSBot，支持网易云 / QQ 搜索、按钮点歌、分享歌单导入、分页和共同播放控制，无需输入传统指令。 |

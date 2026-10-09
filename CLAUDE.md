@@ -157,7 +157,8 @@ Settings responses merge against the submitted snapshot instead of replacing new
 | `/admin` | Normal configuration and operational controls |
 | Legacy `config.json` | One-time import of `tsHost`, `tsPort` and `tsServerPassword`; later changes do not replace database settings |
 | `WEBSPEAK_DATA_DIR` | Persistent data directory; defaults to project `data/`, while Docker uses `/data` |
-| `WEBSPEAK_SCREEN_SHARE_ICE_SERVERS` | Screen-sharing ICE configuration read at startup |
+| `WEBSPEAK_SCREEN_SHARE_ICE_SERVERS` | Default/P2P screen-sharing ICE configuration read at startup |
+| `WEBSPEAK_SCREEN_SHARE_RELAYS_FILE` | Private Macau/Shenzhen TURN REST configuration; publisher-only temporary credentials |
 | Relay environment variables | Standalone relay mode; public gateway relay choices come from saved admin settings |
 | Browser IndexedDB and localStorage | Local identities, preferences, server history and skin state |
 

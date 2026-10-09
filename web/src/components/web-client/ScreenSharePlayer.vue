@@ -28,7 +28,7 @@
             name="monitor"
             :size="28" /></span
         ><strong>{{ t("screenShareConnecting") }}</strong
-        ><span>{{ screenShareError ? screenShareErrorText : t("directP2POnly") }}</span></div
+        ><span>{{ screenShareError ? screenShareErrorText : routeLabel }}</span></div
       >
       <button
         type="button"
@@ -73,7 +73,7 @@
       <span
         class="screen-share-player-source"
         data-ws-part="voice.screen-player.source"
-        >{{ screenSharePlayerOwnerName }}</span
+        >{{ screenSharePlayerOwnerName }} · {{ routeLabel }}</span
       >
       <div
         class="screen-share-player-controls"
@@ -115,9 +115,10 @@
 import Icon from "../Icon.vue";
 import type { useWebClientScreenShare } from "../../composables/useWebClientScreenShare.js";
 const props = defineProps<{
-  model: Pick<ReturnType<typeof useWebClientScreenShare>, "fullscreen" | "viewers" | "viewerCount" | "ownerName" | "errorText" | "setPlayerElement" | "setVideoElement" | "viewerStyle" | "setVolume" | "toggleFullscreen">;
+  model: Pick<ReturnType<typeof useWebClientScreenShare>, "fullscreen" | "viewers" | "viewerCount" | "ownerName" | "errorText" | "setPlayerElement" | "setVideoElement" | "viewerStyle" | "setVolume" | "toggleFullscreen" | "routeLabel">;
   screenShareRemoteStream: MediaStream | null; screenShareRemoteVolume: number; screenShareError: string;
   leaveScreenShare: () => void; avatarInitial: (name: string) => string; t: (key: string) => string;
 }>();
+const { routeLabel } = props.model;
 const { fullscreen: screenShareFullscreen, viewers: screenSharePlayerViewers, viewerCount: screenSharePlayerViewerCount, ownerName: screenSharePlayerOwnerName, errorText: screenShareErrorText, setPlayerElement, setVideoElement: setScreenVideoElement, viewerStyle: screenShareViewerStyle, setVolume: onScreenShareVolume, toggleFullscreen: toggleScreenShareFullscreen } = props.model;
 </script>

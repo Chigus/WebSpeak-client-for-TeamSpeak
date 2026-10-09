@@ -846,6 +846,7 @@ const {
   screenShareStreams,
   screenShareActive,
   screenShareStarting,
+  screenShareRelays,
   screenShareViewing,
   screenShareViewingStreamId,
   screenShareRemoteStream,
@@ -1070,6 +1071,7 @@ function persistLanguage() {
 }
 
 const screenShareControls = useWebClientScreenShare({
+  relays: screenShareRelays,
   streams: screenShareStreams,
   viewing: screenShareViewing,
   viewingStreamId: screenShareViewingStreamId,

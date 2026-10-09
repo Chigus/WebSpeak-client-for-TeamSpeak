@@ -4,8 +4,9 @@ import { setImmediate as nextTurn } from "node:timers/promises";
 import { ScreenShareCoordinator, type ScreenShareParticipant } from "./screen-share-coordinator.js";
 import { parseServerMessage, type ServerMessage } from "../shared/server-messages.js";
 import type { ScreenShareClientMessage } from "../shared/screen-share.js";
+import { ScreenShareRelays } from "./screen-share-relays.js";
 
-function fixture() {
+function fixture(relays = new ScreenShareRelays()) {
   const entries = new Map<string, ScreenShareParticipant>();
   const messages: Array<{ to: string; message: ServerMessage }> = [];
   const commands: Array<{ from: string; command: string }> = [];
@@ -13,7 +14,7 @@ function fixture() {
     assert.ok(parseServerMessage(JSON.parse(JSON.stringify(message))), `invalid message: ${message.type}`);
     messages.push({ to, message });
   };
-  const coordinator = new ScreenShareCoordinator(entries, send, { debug() {}, warn() {} });
+  const coordinator = new ScreenShareCoordinator(entries, send, { debug() {}, warn() {} }, relays);
   function participant(id: string, clientId: number, channel = 1n, host = "first.example") {
     const entry: ScreenShareParticipant = {
       id, nickname: id, screenPeerId: `peer-${id}`, target: { host, port: 9987 }, members: new Map([[clientId, {}]]),
@@ -43,6 +44,24 @@ function fixture() {
   }
   return { entries, messages, commands, coordinator, participant, handle, list, start };
 }
+
+test("relay authorization goes only to the publisher; route is public to viewers", () => {
+  const secret = "s".repeat(48);
+  const f = fixture(new ScreenShareRelays([{ id: "macau", urls: ["turn:relay.example:3478"], secret }]));
+  const owner = f.participant("owner", 1), viewer = f.participant("viewer", 2);
+  f.handle(owner, { type: "screenShareStart", route: "shenzhen" });
+  assert.equal(f.messages.at(-1)?.message.type, "screenShareError");
+  assert.equal(f.list(owner).length, 0);
+  f.messages.length = 0;
+  f.handle(owner, { type: "screenShareStart", route: "macau", requestId: "start" });
+  const reply = f.messages[0]!.message;
+  assert.ok(reply.type === "screenShareStarted" && reply.owner && reply.relay);
+  const credential = reply.relay.iceServers[0]!.credential!;
+  f.handle(viewer, { type: "screenShareJoin", streamId: reply.stream.streamId });
+  assert.equal(f.list(viewer)[0]?.route, "macau");
+  assert.equal(JSON.stringify(f.messages).includes(secret), false);
+  assert.equal(JSON.stringify(f.messages.slice(1)).includes(credential), false);
+});
 
 test("sharing is isolated by server and channel, and only its owner can stop it", () => {
   const f = fixture();

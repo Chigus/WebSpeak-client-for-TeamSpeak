@@ -5,6 +5,7 @@ import { parsePeerVoiceClientMessage } from "../shared/peer-voice.js";
 import { SessionAudioTransport } from "./session-audio.js";
 import { SessionEventCoordinator, type SessionDirectoryState } from "./session-events.js";
 import { ScreenShareCoordinator } from "./screen-share-coordinator.js";
+import { ScreenShareRelays, type ScreenShareRelayConfig } from "./screen-share-relays.js";
 import { handleCommand } from "./voice-commands.js";
 import { createAudioFlowStats, snapshotAudioStats, type AudioFlowStats } from "./audio-stats.js";
 export type { AudioFlowStats } from "./audio-stats.js";
@@ -44,6 +45,7 @@ export interface VoiceBridgeOptions {
   joinTickets: JoinTicketStore;
   webRtc?: WebRtcAudioOptions | (() => WebRtcAudioOptions);
   screenShareIceServers?: ScreenShareIceServer[] | (() => ScreenShareIceServer[]);
+  screenShareRelays?: ScreenShareRelayConfig[];
   acceleration?: ConfiguredAccelerationRelay[] | (() => ConfiguredAccelerationRelay[]);
   accelerationName?: string | (() => string | undefined);
 }
@@ -123,7 +125,7 @@ export class VoiceBridge {
     this.screenShares = new ScreenShareCoordinator(this.entries, (entryId, message) => {
       const entry = this.entries.get(entryId);
       if (entry?.ws.readyState === WebSocket.OPEN) entry.ws.send(JSON.stringify(message));
-    }, this.logger);
+    }, this.logger, new ScreenShareRelays(this.options.screenShareRelays));
   }
 
   attach(server: Server): void {
@@ -303,6 +305,7 @@ export class VoiceBridge {
           webrtcAvailable: this.getWebRtcOptions()?.enabled === true,
           webRtcStunServer: this.getWebRtcOptions()?.stunServer ?? "",
           screenShareIceServers: this.getScreenShareIceServers(),
+          screenShareRelays: (this.options.screenShareRelays ?? []).map(relay => relay.id),
           accelerated: Boolean(entry!.acceleration),
           ...(entry!.rememberIdentity ? { identity: tsClient.getIdentityString() } : {}),
         });

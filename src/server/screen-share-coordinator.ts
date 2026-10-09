@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { ScreenShareRelays } from "./screen-share-relays.js";
 import type { Logger } from "../logger.js";
 import type { TSClient, TSRawNotification } from "./ts-client.js";
 import { formatTeamSpeakTarget, teamSpeakTargetKey, type TeamSpeakTarget } from "../domain/teamspeak-target.js";
@@ -48,6 +49,7 @@ export class ScreenShareCoordinator {
     private readonly entries: ReadonlyMap<string, ScreenShareParticipant>,
     private readonly sendToEntry: (entryId: string, message: ServerMessage) => void,
     private readonly logger: Pick<Logger, "debug" | "warn">,
+    private readonly relays = new ScreenShareRelays(),
   ) {}
 
   handleMessage(
@@ -65,8 +67,14 @@ export class ScreenShareCoordinator {
         sendJson({ type: "screenShareError", requestId: message.requestId, code: "SCREEN_SHARE_ALREADY_ACTIVE", message: "你已经在共享屏幕" });
         return;
       }
+      const relay = message.route && message.route !== "p2p" ? this.relays.issue(message.route) : null;
+      if (message.route && message.route !== "p2p" && !relay) {
+        sendJson({ type: "screenShareError", requestId: message.requestId, code: "SCREEN_SHARE_RELAY_UNAVAILABLE", message: "所选屏幕共享服务器未配置，请选择其他线路" });
+        return;
+      }
       const stream: ScreenStreamRecord = {
         streamId: `screen-${randomUUID()}`,
+        ...(message.route ? { route: message.route } : {}),
         source: "browser",
         ownerPeerId: entry.screenPeerId,
         ownerClientId: entry.tsClient.getClientId() || undefined,
@@ -84,7 +92,7 @@ export class ScreenShareCoordinator {
         nativeViewerClids: new Set(),
       };
       this.screenStreams.set(screenStreamKey(stream.targetKey, stream.streamId), stream);
-      sendJson({ type: "screenShareStarted", requestId: message.requestId, stream: this.describeScreenStream(stream), owner: true });
+      sendJson({ type: "screenShareStarted", requestId: message.requestId, stream: this.describeScreenStream(stream), owner: true, ...(relay ? { relay } : {}) });
       this.broadcastScreenMessage(stream, {
         type: "screenShareStarted",
         stream: this.describeScreenStream(stream),
@@ -215,6 +223,7 @@ export class ScreenShareCoordinator {
   private describeScreenStream(stream: ScreenStreamRecord): ScreenShareStreamDescription {
     return {
       streamId: stream.streamId,
+      ...(stream.route ? { route: stream.route } : {}),
       source: stream.source,
       ownerPeerId: stream.ownerPeerId,
       ...(typeof stream.ownerClientId === "number" ? { ownerClientId: stream.ownerClientId } : {}),

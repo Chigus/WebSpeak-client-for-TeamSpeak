@@ -20,10 +20,10 @@ function mount(t, initialStream = null) {
     Object.defineProperty(globalThis, key, { configurable: true, value });
     t.after(() => { if (original) Object.defineProperty(globalThis, key, original); else delete globalThis[key]; });
   }
-  const viewing = shallowRef(true), stream = shallowRef(initialStream), volume = shallowRef(.4), streams = [];
-  const app = renderer.createApp({ setup() { ui = useWebClientScreenShare({ streams, viewing, viewingStreamId: shallowRef("s"), remoteStream: stream, remoteVolume: volume, error: shallowRef(""), errorCode: shallowRef(""), startScreenShare: async (...args) => starts.push(args), joinScreenShare() {}, leaveScreenShare() {}, nickname: shallowRef("Self"), avatarStyle: () => ({}), t: key => key }); return () => null; } });
+  const viewing = shallowRef(true), stream = shallowRef(initialStream), volume = shallowRef(.4), streams = [], relays = shallowRef([]);
+  const app = renderer.createApp({ setup() { ui = useWebClientScreenShare({ relays, streams, viewing, viewingStreamId: shallowRef("s"), remoteStream: stream, remoteVolume: volume, error: shallowRef(""), errorCode: shallowRef(""), startScreenShare: async (...args) => starts.push(args), joinScreenShare() {}, leaveScreenShare() {}, nickname: shallowRef("Self"), avatarStyle: () => ({}), t: key => key }); return () => null; } });
   app.mount({});
-  return { ui, app, doc, viewing, stream, volume, streams, starts, storage, listeners, exits: () => exits, video: () => markRaw(new Video()), player: () => markRaw(new Element()) };
+  return { ui, app, doc, relays, viewing, stream, volume, streams, starts, storage, listeners, exits: () => exits, video: () => markRaw(new Video()), player: () => markRaw(new Element()) };
 }
 
 test("a newly mounted or replaced video receives the existing stream and volume", async t => {
@@ -78,5 +78,21 @@ test("share settings submit the selected resolution and frame rate", async t => 
   try { f.ui.settingsOpen.value = true; f.ui.resolutionPreset.value = "720p"; f.ui.frameRate.value = 30; await f.ui.startWithSettings();
     assert.deepEqual(f.starts, [[true, { maxWidth: 1280, maxHeight: 720, maxFrameRate: 30 }]]);
     assert.equal(f.ui.settingsOpen.value, false); assert.equal(f.storage.get("webspeak:screen-share-framerate"), "30");
+  } finally { f.app.unmount(); }
+});
+
+test("server routes are enabled only when configured and selection persists", async t => {
+  const f = mount(t);
+  try {
+    assert.deepEqual(f.ui.routeOptions.value.map(x => x.available), [true, false, false]);
+    f.ui.route.value = "macau"; await f.ui.startWithSettings();
+    assert.equal(f.starts.length, 0);
+    f.relays.value = ["macau", "shenzhen"];
+    await f.ui.startWithSettings();
+    assert.equal(f.starts[0][1].route, "macau");
+    assert.equal(f.storage.get("webspeak:screen-share-route"), "macau");
+    f.relays.value = []; await f.ui.startWithSettings();
+    assert.equal(f.starts.length, 1);
+    assert.equal(f.ui.route.value, "macau");
   } finally { f.app.unmount(); }
 });

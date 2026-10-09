@@ -13,6 +13,34 @@ export interface ScreenShareIceServer {
   credential?: string;
 }
 
+export type ScreenShareRelayId = "macau" | "shenzhen";
+export type ScreenShareRoute = "p2p" | ScreenShareRelayId;
+export interface ScreenShareRelayCredentials {
+  route: ScreenShareRelayId;
+  expiresAt: number;
+  iceServers: ScreenShareIceServer[];
+}
+export function isScreenShareRelayId(value: unknown): value is ScreenShareRelayId {
+  return value === "macau" || value === "shenzhen";
+}
+export function isScreenShareRoute(value: unknown): value is ScreenShareRoute {
+  return value === "p2p" || isScreenShareRelayId(value);
+}
+export function parseScreenShareRelayCredentials(value: unknown): ScreenShareRelayCredentials | null {
+  if (!isRecord(value) || !isScreenShareRelayId(value.route) || typeof value.expiresAt !== "number" || !Number.isSafeInteger(value.expiresAt)
+    || !Array.isArray(value.iceServers) || value.iceServers.length < 1 || value.iceServers.length > 4) return null;
+  // Do not use the STUN fallback normalizer here: a forced relay must fail closed.
+  const servers: ScreenShareIceServer[] = [];
+  for (const raw of value.iceServers) {
+    if (!isRecord(raw) || typeof raw.username !== "string" || !raw.username || raw.username.length > 512
+      || typeof raw.credential !== "string" || !raw.credential || raw.credential.length > 512) return null;
+    const urls = Array.isArray(raw.urls) ? raw.urls : [raw.urls];
+    if (!urls.length || urls.length > 4 || !urls.every(url => typeof url === "string" && url.length <= 512 && /^turns?:/i.test(url))) return null;
+    servers.push({ urls: [...urls] as string[], username: raw.username, credential: raw.credential });
+  }
+  return { route: value.route, expiresAt: value.expiresAt, iceServers: servers };
+}
+
 /** TeamSpeak's public ICE services are STUN-only, so media remains peer-to-peer. */
 export const DEFAULT_SCREEN_SHARE_ICE_SERVERS: readonly ScreenShareIceServer[] = [
   { urls: "stun:turn.teamspeak.com:3478" },
@@ -86,6 +114,8 @@ export interface ScreenShareViewerDescription {
 
 export interface ScreenShareStreamDescription {
   streamId: string;
+  /** Absent on older servers/native owners; both retain the original P2P route. */
+  route?: ScreenShareRoute;
   source: "browser" | "teamspeak";
   ownerPeerId: string;
   /** TeamSpeak client id used to match a stream to the member card. */
@@ -104,6 +134,7 @@ export type ScreenShareClientMessage =
     }
   | {
       type: "screenShareStart";
+      route?: ScreenShareRoute;
       requestId?: string;
       name?: string;
       audio?: boolean;
@@ -158,8 +189,10 @@ export function parseScreenShareMessage(raw: string): ScreenShareMessageParseRes
       const name = value.name === undefined ? undefined : parseName(value.name);
       if (name === false) return invalid("INVALID_SCREEN_SHARE_NAME", "屏幕共享名称无效");
       if (value.audio !== undefined && typeof value.audio !== "boolean") return invalid("INVALID_SCREEN_SHARE_AUDIO", "共享音频选项无效");
+      if (value.route !== undefined && !isScreenShareRoute(value.route)) return invalid("INVALID_SCREEN_SHARE_ROUTE", "共享线路无效");
       return {
         type: "screenShareStart",
+        ...(value.route !== undefined ? { route: value.route } : {}),
         ...(requestId ? { requestId } : {}),
         ...(name ? { name } : {}),
         ...(value.audio === true ? { audio: true } : {}),

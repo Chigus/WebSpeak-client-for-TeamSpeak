@@ -35,6 +35,15 @@
         class="screen-share-settings-fields"
         data-ws-part="voice.screen-share-settings.fields"
       >
+        <label class="screen-share-route-field">
+          <span>{{ t("screenShareRoute") }}</span>
+          <select v-model="route" :aria-label="t('screenShareRoute')" aria-describedby="screen-share-route-hint">
+            <option v-for="option in routeOptions" :key="option.value" :value="option.value" :disabled="!option.available">
+              {{ t(option.label) }}{{ option.available ? "" : ` · ${t("screenShareRouteUnconfigured")}` }}
+            </option>
+          </select>
+          <small id="screen-share-route-hint">{{ t(route === "p2p" ? "screenShareRouteP2PHint" : "screenShareRouteRelayHint") }}</small>
+        </label>
         <label
           ><span>{{ t("screenShareResolution") }}</span
           ><select
@@ -78,6 +87,7 @@
         ><button
           type="button"
           class="primary-button screen-share-settings-start"
+          :disabled="!routeAvailable"
           @click="startScreenShareWithSettings"
           ><Icon
             name="monitor"
@@ -95,9 +105,15 @@ import { ref } from "vue";
 import Icon from "../Icon.vue";
 import { useDialogFocus } from "../../composables/useDialogFocus.js";
 import type { useWebClientScreenShare } from "../../composables/useWebClientScreenShare.js";
-const props = defineProps<{ model: Pick<ReturnType<typeof useWebClientScreenShare>, "resolutionOptions" | "frameRateOptions" | "resolutionPreset" | "frameRate" | "startWithSettings">; t: (key: string) => string }>();
+const props = defineProps<{ model: Pick<ReturnType<typeof useWebClientScreenShare>, "resolutionOptions" | "frameRateOptions" | "resolutionPreset" | "frameRate" | "startWithSettings" | "route" | "routeOptions" | "routeAvailable">; t: (key: string) => string }>();
+const { route, routeOptions, routeAvailable } = props.model;
 const { resolutionOptions: screenShareResolutionOptions, frameRateOptions: screenShareFrameRateOptions, resolutionPreset: screenShareResolutionPreset, frameRate: screenShareFrameRate, startWithSettings: startScreenShareWithSettings } = props.model;
 const emit = defineEmits<{ close: [] }>();
 const dialog = ref<HTMLElement | null>(null);
 const { onDialogKeydown } = useDialogFocus(dialog, () => emit("close"));
 </script>
+
+<style scoped>
+.screen-share-route-field { grid-column: 1 / -1; }
+.screen-share-route-field small { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+</style>

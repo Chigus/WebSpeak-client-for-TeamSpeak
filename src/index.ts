@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { createAccelerationRelayServer } from "./server/acceleration-relay.js";
 import { normalizeScreenShareIceServers, type ScreenShareIceServer } from "./server/screen-share.js";
 import { SkinRegistry } from "./admin/skin-registry.js";
+import { readScreenShareRelays } from "./server/screen-share-relays.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, "..");
@@ -60,6 +61,7 @@ async function main() {
       joinTickets,
       webRtc: () => adminService.getWebRtcAudioOptions(),
       screenShareIceServers: () => SCREEN_SHARE_ICE_SERVERS,
+      screenShareRelays: readScreenShareRelays(),
       // The public gateway only uses the relay configuration explicitly
       // saved in the admin console. Environment variables belong to the
       // standalone relay process and must never make the relay option appear
