@@ -32,3 +32,9 @@ releases
 **/.npmrc
 **/.env
 **/.env.*
+**/.ssh
+private
+work
+outputs
+LOCAL-RELEASE-RUNBOOK.md
+DEPLOYMENT-*.md
