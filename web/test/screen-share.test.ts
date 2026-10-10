@@ -13,6 +13,11 @@ function deferred<T>() {
 class Track extends EventTarget {
   kind = "video";
   readyState = "live";
+  contentHint = "";
+  enabled = true;
+  clone() { return new Track(); }
+  getConstraints() { return {}; }
+  applyConstraints() { return Promise.resolve(); }
   stop() { this.readyState = "ended"; }
   getSettings() { return { width: 1920, height: 1080, frameRate: 60 }; }
 }
@@ -31,14 +36,16 @@ class Peer {
   parameters: RTCRtpSendParameters | null = null;
   closed = false;
   constructor(public configuration: RTCConfiguration) { Peer.instances.push(this); }
-  createOffer() { return Peer.offer(); }
+  offers: RTCOfferOptions[] = [];
+  createOffer(options: RTCOfferOptions = {}) { this.offers.push(options); return Peer.offer(); }
   createAnswer() { return Promise.resolve({ type: "answer", sdp: "answer" }); }
   setLocalDescription(description: unknown) { this.localDescription = description; return Promise.resolve(); }
   setConfiguration(configuration: RTCConfiguration) { this.configuration = configuration; }
   setRemoteDescription() { return Promise.resolve(); }
   addIceCandidate() { return Promise.resolve(); }
   addTransceiver() {}
-  addTrack() { return { getParameters: () => ({ encodings: [] }), setParameters: async (parameters: RTCRtpSendParameters) => { this.parameters = parameters; } }; }
+  tracks: Track[] = [];
+  addTrack(track: Track) { this.tracks.push(track); return { getParameters: () => this.parameters ?? ({ encodings: [] }), setParameters: async (parameters: RTCRtpSendParameters) => { this.parameters = parameters; } }; }
   getTransceivers() { return []; }
   getStats() { return Peer.stats(); }
   close() { this.closed = true; this.connectionState = "closed"; }
@@ -77,6 +84,37 @@ function confirmStart(streamId: string, requestId = sent.findLast(message => mes
 function relay(route: ScreenShareRelayId) {
   return { route, expiresAt: Date.now() + 60_000, iceServers: [{ urls: [`turn:${route}.example:3478`], username: "temporary", credential: "signed" }] };
 }
+
+test("established P2P restarts once, retains capture and retires only the failed viewer", async () => {
+  const capture = stream();
+  Object.assign(navigator.mediaDevices, { getDisplayMedia: async () => capture });
+  await controller.api.startScreenShare(false, { route: "p2p" });
+  confirmStart(remote.streamId);
+  controller.handleMessage({ type: "screenShareSignal", streamId: remote.streamId, fromPeerId: "viewer", signal: { kind: "offer", sdp: "offer" } });
+  await nextTurn();
+  const peer = Peer.instances.at(-1)!;
+  assert.notEqual(peer.tracks[0], capture.track);
+  peer.connectionState = "connected"; (peer as any).onconnectionstatechange();
+  peer.connectionState = "failed"; (peer as any).onconnectionstatechange(); await nextTurn();
+  assert.equal(peer.closed, false);
+  assert.equal(peer.offers.at(-1)?.iceRestart, true);
+  assert.equal(capture.track.readyState, "live");
+  (peer as any).onconnectionstatechange(); await nextTurn();
+  assert.equal(peer.closed, true);
+  assert.equal(peer.tracks[0]?.readyState, "ended");
+  assert.equal(capture.track.readyState, "live");
+});
+
+test("pending P2P recovery cannot signal after exit", async () => {
+  await controller.api.startScreenShare(false, { route: "p2p" }); confirmStart(remote.streamId);
+  controller.handleMessage({ type: "screenShareSignal", streamId: remote.streamId, fromPeerId: "viewer", signal: { kind: "offer", sdp: "offer" } });
+  await nextTurn(); const peer = Peer.instances.at(-1)!;
+  peer.connectionState = "connected"; (peer as any).onconnectionstatechange();
+  const pending = deferred<{ type: string; sdp: string }>(); Peer.offer = () => pending.promise;
+  peer.connectionState = "failed"; (peer as any).onconnectionstatechange();
+  controller.stopTransport(false); pending.resolve({ type: "offer", sdp: "retired-p2p" }); await nextTurn();
+  assert.equal(sent.some((m: any) => m.signal?.sdp === "retired-p2p"), false);
+});
 test("publisher forces the chosen TURN node while viewers keep ordinary ICE", async () => {
   controller.setRelays(["macau", "shenzhen", "cloudflare"]);
   for (const route of ["macau", "shenzhen", "cloudflare"] as const) {

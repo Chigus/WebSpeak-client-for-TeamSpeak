@@ -1,5 +1,8 @@
 import { reactive, ref } from "vue";
-import { createScreenShareEncoder, normalizeScreenShareBitrate, type ScreenShareBitrateSettings, type ScreenShareBitrateMode, type ScreenShareBitratePolicy, type ScreenShareBitrateReason } from "./screen-share-bitrate.js";
+import { createScreenShareEncoder, normalizeScreenShareBitrate, screenShareEncodingPlan, type ScreenShareBitrateSettings, type ScreenShareBitrateMode, type ScreenShareBitratePolicy, type ScreenShareBitrateReason } from "./screen-share-bitrate.js";
+import { cloneSenderVideoTrack, stopSenderVideoTrack } from "./screen-share-track.js";
+import { applyVideoCodecPreference, automaticVideoCodecPreference, normalizeVideoOfferSdp, type BrowserVideoCodec } from "./screen-share-codec.js";
+import { preferredVideoCodecForTrack } from "./screen-share-codec-probe.js";
 import { isScreenShareRelayId, MAX_SCREEN_SHARE_ICE_SERVERS, parseScreenShareRelayCredentials, type ScreenShareRelayCredentials, type ScreenShareRelayId, type ScreenShareRoute } from "../../../src/shared/screen-share.js";
 import { parseScreenShareStream, parseScreenShareViewers, type ServerMessage } from "../../../src/shared/server-messages.js";
 import { normalizeScreenShareIceServers, type ScreenShareIceServer, type ScreenShareClientMessage, type ScreenShareStreamDescription as ScreenShareStream, type ScreenSharePeerSignal as ScreenShareSignal } from "../../../src/shared/screen-share.js";
@@ -61,6 +64,11 @@ interface ScreenShareTransport {
 
 /** Owns one session's capture tracks, peers, signaling and diagnostics. */
 export function createScreenShareController(transport: ScreenShareTransport) {
+  let screenShareCodec: BrowserVideoCodec = "vp8";
+  let screenShareCodecAbort: AbortController | null = null;
+  const senderTracks = new Map<string, MediaStreamTrack[]>();
+  const connectedPeers = new WeakSet<RTCPeerConnection>();
+  const directRestarted = new WeakSet<RTCPeerConnection>();
   let screenShareIceServers: RTCIceServer[] = normalizeScreenShareIceServers();
   const screenShareRelays = ref<ScreenShareRelayId[]>([]);
   let screenShareOwnerRelay: ScreenShareRelayCredentials | null = null;
@@ -291,6 +299,13 @@ export function createScreenShareController(transport: ScreenShareTransport) {
     screenSharePeerRoles.delete(peerId);
     screenShareEncoders.get(peerId)?.dispose();
     screenShareEncoders.delete(peerId);
+    for (const track of senderTracks.get(peerId) ?? []) {
+      try {
+        if (track.kind === "video") stopSenderVideoTrack(track);
+        else track.stop();
+      } catch { /* Release every remaining sender even if one stop fails. */ }
+    }
+    senderTracks.delete(peerId);
     screenShareStatsPrevious.delete(peerId);
     screenSharePendingIce.delete(peerId);
     screenSharePeerStreams.get(peerId)?.getTracks().forEach(track => track.stop());
@@ -328,7 +343,35 @@ export function createScreenShareController(transport: ScreenShareTransport) {
     const role = screenSharePeerRoles.get(peerId);
     const streamId = role === "owner" ? screenShareActiveStreamId.value : screenShareViewingStreamId.value;
     const stream = screenShareStreams.find(item => item.streamId === streamId);
-    if (!peer || stream?.route !== "auto") return false;
+    if (!peer || !stream) return false;
+    // Piik's first recovery step: the established browser publisher alone
+    // restarts ICE. Keep its source and viewer alive, with one bounded attempt.
+    if ((stream.route ?? "p2p") === "p2p" && connectedPeers.has(peer) && stream.source === "browser") {
+      if (autoRetrying.has(peer)) return true;
+      if (role !== "owner") {
+        if (directRestarted.has(peer)) return false;
+        directRestarted.add(peer); armScreenSharePeerTimer(peerId); return true;
+      }
+      if (directRestarted.has(peer)) return false;
+      directRestarted.add(peer);
+      autoRetrying.add(peer);
+      void (async () => {
+        try {
+          const offer = await peer.createOffer({ iceRestart: true });
+          if (!isCurrentPeer(peerId, peer)) return;
+          await peer.setLocalDescription(offer);
+          if (!isCurrentPeer(peerId, peer)) return;
+          armScreenSharePeerTimer(peerId);
+          sendScreenShareMessage({ type: "screenShareSignal", streamId: stream.streamId, targetPeerId: peerId,
+            signal: { kind: "offer", sdp: normalizeVideoOfferSdp(peer.localDescription?.sdp ?? offer.sdp ?? "") } });
+        } catch {
+          autoRetrying.delete(peer);
+          if (isCurrentPeer(peerId, peer)) failScreenSharePeer(peerId);
+        } finally { autoRetrying.delete(peer); }
+      })();
+      return true;
+    }
+    if (stream.route !== "auto") return false;
     if (autoRetrying.has(peer)) return true;
     const lease = role === "owner" ? screenShareOwnerRelay : screenShareViewerRelay;
     const servers = lease?.iceServers.slice(0, MAX_SCREEN_SHARE_ICE_SERVERS) ?? [];
@@ -350,7 +393,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
         if (!isCurrentPeer(peerId, peer)) return;
         armScreenSharePeerTimer(peerId);
         sendScreenShareMessage({ type: "screenShareSignal", streamId: stream.streamId, targetPeerId: peerId,
-          signal: { kind: "offer", sdp: peer.localDescription?.sdp ?? offer.sdp ?? "" } });
+          signal: { kind: "offer", sdp: normalizeVideoOfferSdp(peer.localDescription?.sdp ?? offer.sdp ?? "") } });
       } catch { if (isCurrentPeer(peerId, peer)) armScreenSharePeerTimer(peerId); }
       finally { autoRetrying.delete(peer); }
     })();
@@ -394,20 +437,31 @@ export function createScreenShareController(transport: ScreenShareTransport) {
     screenSharePeerRoles.set(peerId, role);
     startScreenShareStatsPolling();
     if (role === "owner") {
+      try {
       for (const track of screenShareLocalStream?.getTracks() ?? []) {
-        const sender = peer.addTrack(track, screenShareLocalStream!);
+        const owned = track.kind === "video" ? cloneSenderVideoTrack(track, () => {
+          if (isCurrentPeer(peerId, peer)) failScreenSharePeer(peerId, "屏幕共享发送轨道已停止，请重新连接观看端");
+        }) : track.clone();
+        senderTracks.set(peerId, [...(senderTracks.get(peerId) ?? []), owned]);
+        const sender = peer.addTrack(owned, screenShareLocalStream!);
         if (track.kind === "video") {
           const encoder = createScreenShareEncoder(sender, track, () => isCurrentPeer(peerId, peer));
           screenShareEncoders.set(peerId, encoder);
           void encoder.configure(screenShareOutputSettings ?? {});
         }
       }
+      } catch {
+        closeScreenSharePeer(peerId);
+        setScreenShareP2PError("无法准备屏幕共享发送轨道，请重新连接观看端");
+        return null;
+      }
     } else {
       peer.addTransceiver("video", { direction: "recvonly" });
       const stream = screenShareStreams.find((candidate) => candidate.streamId === streamId);
       if (stream?.audio) peer.addTransceiver("audio", { direction: "recvonly" });
     }
-    preferScreenShareCodecs(peer);
+    preferScreenShareCodecs(peer, role === "owner" ? screenShareCodec
+      : screenShareStreams.find(item => item.streamId === streamId)?.source === "teamspeak" ? "vp8" : "h264");
     peer.onicecandidate = (event) => {
       if (!isCurrentPeer(peerId, peer) || !event.candidate) return;
       const candidate = event.candidate;
@@ -439,7 +493,10 @@ export function createScreenShareController(transport: ScreenShareTransport) {
       // both trips the type checker and can hide the actual failed/closed
       // transitions we need to handle here.
       if (peer.connectionState === "connected") {
+        connectedPeers.add(peer);
         clearScreenSharePeerTimer(peerId);
+      } else if (peer.connectionState === "disconnected") {
+        if (!screenSharePeerTimers.has(peerId)) armScreenSharePeerTimer(peerId);
       } else if (peer.connectionState === "failed") {
         failScreenSharePeer(peerId);
       }
@@ -461,18 +518,16 @@ export function createScreenShareController(transport: ScreenShareTransport) {
     const generation = screenShareStartGeneration;
     screenShareOutputSettings = { ...screenShareOutputSettings, ...normalizeScreenShareBitrate(settings) };
     applyScreenShareContentHint();
+    for (const tracks of senderTracks.values()) for (const track of tracks) {
+      if (track.kind === "video") track.contentHint = screenShareLocalStream?.getVideoTracks()[0]?.contentHint ?? "motion";
+    }
     const results = await Promise.all([...screenShareEncoders.values()].map(encoder => encoder.configure(screenShareOutputSettings!)));
     return generation === screenShareStartGeneration && screenShareActive.value && results.every(Boolean);
   }
 
-  function preferScreenShareCodecs(peer: RTCPeerConnection): void {
+  function preferScreenShareCodecs(peer: RTCPeerConnection, codec: BrowserVideoCodec): void {
     const transceiver = peer.getTransceivers().find((candidate) => candidate.sender.track?.kind === "video" || candidate.receiver.track?.kind === "video");
-    const capabilities = typeof RTCRtpReceiver !== "undefined" ? RTCRtpReceiver.getCapabilities?.("video") : null;
-    if (!transceiver?.setCodecPreferences || !capabilities?.codecs?.length) return;
-    const vp8 = capabilities.codecs.filter((codec) => codec.mimeType.toLowerCase() === "video/vp8");
-    if (!vp8.length) return;
-    const remaining = capabilities.codecs.filter((codec) => codec.mimeType.toLowerCase() !== "video/vp8");
-    try { transceiver.setCodecPreferences([...vp8, ...remaining]); } catch { /* older browsers may reject codec preference changes */ }
+    if (transceiver) applyVideoCodecPreference(transceiver, automaticVideoCodecPreference(codec));
   }
 
   async function flushScreenShareCandidates(peerId: string, peer: RTCPeerConnection): Promise<void> {
@@ -507,7 +562,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
         type: "screenShareSignal",
         streamId: stream.streamId,
         targetPeerId: stream.ownerPeerId,
-        signal: { kind: "offer", sdp: peer.localDescription?.sdp ?? offer.sdp ?? "" },
+        signal: { kind: "offer", sdp: normalizeVideoOfferSdp(peer.localDescription?.sdp ?? offer.sdp ?? "") },
       });
     } catch {
       if (isCurrentPeer(stream.ownerPeerId, peer)) failScreenSharePeer(stream.ownerPeerId, "无法创建屏幕共享直连请求，请重试");
@@ -520,6 +575,9 @@ export function createScreenShareController(transport: ScreenShareTransport) {
     closeScreenSharePeer(peerId);
     const peer = createScreenSharePeer(streamId, peerId, "owner");
     if (!peer) return;
+    // Native TeamSpeak screen-sharing codec support is not proved by the
+    // browser preflight. Retain the existing VP8 interoperability path.
+    preferScreenShareCodecs(peer, "vp8");
     try {
       const offer = await peer.createOffer();
       if (!isCurrentPeer(peerId, peer)) return;
@@ -531,7 +589,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
         type: "screenShareSignal",
         streamId,
         targetPeerId: peerId,
-        signal: { kind: "offer", sdp: peer.localDescription?.sdp ?? offer.sdp ?? "" },
+        signal: { kind: "offer", sdp: normalizeVideoOfferSdp(peer.localDescription?.sdp ?? offer.sdp ?? "") },
       });
     } catch {
       if (isCurrentPeer(peerId, peer)) failScreenSharePeer(peerId, "无法为 TeamSpeak 观看端创建屏幕共享直连");
@@ -596,6 +654,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
         if (!isCurrentPeer(fromPeerId, peer)) return;
         await flushScreenShareCandidates(fromPeerId, peer);
         if (!isCurrentPeer(fromPeerId, peer)) return;
+        void screenShareEncoders.get(fromPeerId)?.retry();
       } catch {
         if (isCurrentPeer(fromPeerId, peer)) failScreenSharePeer(fromPeerId, "TeamSpeak 观看端无法完成屏幕共享直连协商");
       }
@@ -692,6 +751,15 @@ export function createScreenShareController(transport: ScreenShareTransport) {
       for (const track of stream.getTracks()) track.addEventListener("ended", () => {
         if (screenShareLocalStream === stream) stopScreenShare();
       }, { once: true });
+      const plan = screenShareEncodingPlan(screenShareOutputSettings ?? {}, videoTrack.getSettings());
+      screenShareCodecAbort?.abort();
+      const codecAbort = screenShareCodecAbort = new AbortController();
+      screenShareCodec = await preferredVideoCodecForTrack(videoTrack, {
+        width: settings?.maxWidth ?? videoTrack.getSettings().width ?? 1920,
+        height: settings?.maxHeight ?? videoTrack.getSettings().height ?? 1080,
+        maxFramerate: plan.fps, maxBitrate: plan.initial,
+      }, codecAbort.signal);
+      if (startGeneration !== screenShareStartGeneration || codecAbort.signal.aborted || videoTrack.readyState === "ended") return;
       sendScreenShareMessage({ type: "screenShareStart", requestId: screenSharePendingStartId, audio: stream.getAudioTracks().length > 0, name: "我的屏幕", ...(settings?.route ? { route: settings.route } : {}) });
     } catch (error: unknown) {
       acquiredStream?.getTracks().forEach(track => track.stop());
@@ -707,6 +775,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
   }
 
   function stopScreenShare(): void {
+    screenShareCodecAbort?.abort(); screenShareCodecAbort = null;
     screenShareOwnerRelay = null;
     screenShareStartGeneration += 1;
     if (screenShareStarting.value) screenShareStartCancelled = true;
@@ -740,6 +809,7 @@ export function createScreenShareController(transport: ScreenShareTransport) {
   }
 
   function stopScreenShareTransport(sendStop: boolean): void {
+    screenShareCodecAbort?.abort(); screenShareCodecAbort = null;
     screenShareViewerRelay = null;
     screenShareOwnerRelay = null;
     screenShareStartGeneration += 1;
